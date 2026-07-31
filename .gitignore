@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+.mjj/
+dist/
+.pixi/
+build/
+*.so
+.pytest_cache/

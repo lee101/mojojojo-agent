@@ -1,0 +1,35 @@
+[project]
+name = "mojojojo-agent"
+version = "0.1.0"
+description = "A token-efficient coding agent harness with native search and native code execution"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+authors = [{ name = "Lee Penkman" }]
+keywords = ["agent", "coding-agent", "mojo", "llm", "openai"]
+dependencies = []
+
+[project.optional-dependencies]
+server = ["uvicorn>=0.30", "starlette>=0.37"]
+accel = ["mojosub"]
+
+[project.scripts]
+mjj = "mjj.cli:main"
+
+[project.urls]
+Homepage = "https://mojojojo.app.nz"
+Source = "https://github.com/lee101/mojojojo-agent"
+
+[dependency-groups]
+dev = ["pytest>=8", "pytest-asyncio>=0.23"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["mjj"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

@@ -21,18 +21,30 @@ def estimate_tokens(text: str) -> int:
     return (len(text) + CHARS_PER_TOKEN - 1) // CHARS_PER_TOKEN
 
 
+def _env_budget(name: str) -> int | None:
+    raw = os.environ.get(f"MJJ_{name.upper()}_BUDGET")
+    return int(raw) if raw and raw.isdigit() else None
+
+
 @dataclass
 class Budget:
-    """Per-tool output budgets, in tokens."""
+    """Per-tool output budgets, in tokens.
+
+    ``None`` means "whatever ``default`` is", so lowering ``default`` lowers
+    everything — that is what an operator means by a tighter budget.
+    """
 
     default: int = int(os.environ.get("MJJ_TOOL_BUDGET", "1600"))
-    shell: int = int(os.environ.get("MJJ_SHELL_BUDGET", "1600"))
-    read: int = int(os.environ.get("MJJ_READ_BUDGET", "2400"))
-    search: int = int(os.environ.get("MJJ_SEARCH_BUDGET", "1200"))
-    py: int = int(os.environ.get("MJJ_PY_BUDGET", "1200"))
+    shell: int | None = None
+    read: int | None = None
+    search: int | None = None
+    py: int | None = None
 
     def for_tool(self, name: str) -> int:
-        return int(getattr(self, name, self.default))
+        explicit = getattr(self, name, None) if name != "default" else None
+        if explicit is None:
+            explicit = _env_budget(name)
+        return int(explicit if explicit is not None else self.default)
 
 
 @dataclass
@@ -65,8 +77,11 @@ class Ledger:
             self.tool_tokens += estimate_tokens(text)
             return text
         lines = text.splitlines()
-        head_chars = int(limit * 0.55)
-        tail_chars = limit - head_chars - 120
+        # Reserve room for the marker, but never let that reservation eat the
+        # tail: a failure's diagnosis is the last thing printed.
+        marker_room = min(120, limit // 6)
+        head_chars = int((limit - marker_room) * 0.55)
+        tail_chars = limit - marker_room - head_chars
         head, size = [], 0
         for line in lines:
             if size + len(line) + 1 > head_chars:
@@ -81,13 +96,15 @@ class Ledger:
             size += len(line) + 1
         tail.reverse()
         dropped = len(lines) - len(head) - len(tail)
-        if dropped <= 0:  # pathological single-line blob
-            keep = limit // 2
+        if dropped <= 0 or not (head or tail):
+            # Nothing line-shaped to keep: one enormous line, minified JSON, a
+            # base64 blob. Clip through the middle instead.
+            keep = max(1, (limit - 20) // 2)
             clipped = text[:keep] + "\n… [clipped] …\n" + text[-keep:]
             self.drops.append(Drop(tool, 0, len(text) - len(clipped), hint))
             self.tool_tokens += estimate_tokens(clipped)
             return clipped
-        marker = f"… {dropped} lines omitted"
+        marker = f"… {dropped} line{'' if dropped == 1 else 's'} omitted"
         if hint:
             marker += f" — {hint}"
         marker += " …"

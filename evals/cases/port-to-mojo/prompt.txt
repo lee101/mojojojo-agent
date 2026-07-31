@@ -1,0 +1,3 @@
+Port hot.py's `haversine_batch` to Mojo using mojosub (see /nvme0n1-disk/code/mojosub),
+keeping the Python entry point and its exact numeric results. Prove the speedup
+with bench.py, which must print both timings. Do not fabricate numbers.

@@ -1,0 +1,3 @@
+Write wc.py: a CLI that takes file paths and prints lines, words and bytes per
+file plus a total row, matching `wc` output order. Add tests/test_wc.py covering
+empty files, multiple files, and stdin. Everything must pass with pytest.

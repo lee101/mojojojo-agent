@@ -1,0 +1,99 @@
+import os
+import sys
+from pathlib import Path
+
+from mjj.ledger import Budget, Ledger
+from mjj.tools.base import ToolContext
+from mjj.tools.shell import ShellTool
+
+
+def context(tmp_path: Path, approve=None, *, budget: int = 1600) -> ToolContext:
+    return ToolContext(
+        tmp_path,
+        Ledger(Budget(shell=budget)),
+        approve=approve,
+    )
+
+
+def test_safe_command_does_not_request_approval(tmp_path):
+    def reject_call(_name, _args):
+        raise AssertionError("approval should not be requested")
+
+    result = ShellTool().run(
+        {"command": ["echo", "hello"]}, context(tmp_path, reject_call)
+    )
+
+    assert result.ok
+    assert result.output == "hello\nexit code: 0"
+
+
+def test_unsafe_command_uses_approval_and_can_be_denied(tmp_path):
+    requests = []
+
+    def deny(name, args):
+        requests.append((name, args))
+        return False
+
+    result = ShellTool().run(
+        {"command": [sys.executable, "-c", "print('no')"]},
+        context(tmp_path, deny),
+    )
+
+    assert not result.ok
+    assert result.meta["denied"]
+    assert requests[0][0] == "shell"
+    assert requests[0][1]["shell"] is False
+
+
+def test_string_command_is_not_interpolated_without_shell_true(tmp_path, monkeypatch):
+    monkeypatch.setenv("MJJ_SHELL_SENTINEL", "expanded")
+
+    direct = ShellTool().run(
+        {"command": "echo '$MJJ_SHELL_SENTINEL'"}, context(tmp_path)
+    )
+    expanded = ShellTool().run(
+        {"command": "echo \"$MJJ_SHELL_SENTINEL\"", "shell": True},
+        context(tmp_path),
+    )
+
+    assert "$MJJ_SHELL_SENTINEL" in direct.output
+    assert "expanded" in expanded.output
+
+
+def test_shell_merges_stderr_reports_exit_and_honours_cwd(tmp_path):
+    child = tmp_path / "child"
+    child.mkdir()
+    code = "import os,sys; print(os.path.basename(os.getcwd())); print('bad', file=sys.stderr); raise SystemExit(3)"
+
+    result = ShellTool().run(
+        {"command": [sys.executable, "-c", code], "cwd": "child"},
+        context(tmp_path),
+    )
+
+    assert not result.ok
+    assert "child" in result.output
+    assert "bad" in result.output
+    assert result.output.endswith("exit code: 3")
+    assert result.meta["exit_code"] == 3
+
+
+def test_shell_timeout_and_output_clipping(tmp_path):
+    timeout = ShellTool().run(
+        {
+            "command": [sys.executable, "-c", "import time; time.sleep(1)"],
+            "timeout": 0.02,
+        },
+        context(tmp_path),
+    )
+    clipped_ctx = context(tmp_path, budget=20)
+    clipped = ShellTool().run(
+        {"command": [sys.executable, "-c", "print('x' * 1000)"]},
+        clipped_ctx,
+    )
+
+    assert not timeout.ok
+    assert timeout.meta["timed_out"]
+    assert timeout.meta["exit_code"] == 124
+    assert "timed out" in timeout.output
+    assert clipped.ok
+    assert clipped_ctx.ledger.drops

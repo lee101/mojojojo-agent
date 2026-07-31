@@ -9,7 +9,7 @@ proxy and provide the agent panel beside the editor.
 | variable | default | purpose |
 | --- | --- | --- |
 | `MJJ_SERVER_HOST` | `127.0.0.1` | listen address |
-| `PORT` / `MJJ_SERVER_PORT` | `4350` | listen port; `PORT` wins |
+| `PORT` / `MJJ_SERVER_PORT` | `4343` | listen port; `PORT` wins. The mojojojo Go tier proxies here by default (`MJJ_AGENT_URL`). |
 | `DB_PATH` | `/nvme0n1-disk/data/mojojojo/mojojojo.db` | mojojojo-owned fractional token accrual |
 | `APPNZ_DATABASE_PATH` | `/nvme0n1-disk/data/appnz-sso.db` | shared app.nz identity and credit ledger |
 | `MJJ_WORKSPACE_ROOT` / `MJJ_SANDBOX_ROOT` | `/nvme0n1-disk/data/mojojojo/agent-workspaces` | parent of per-user workspaces; the first wins |

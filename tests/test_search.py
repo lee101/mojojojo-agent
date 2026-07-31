@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from mjj.ledger import Budget, Ledger
+from mjj.ledger import Budget, Ledger, estimate_tokens
 from mjj.search import index as index_module
 from mjj.search.index import MAGIC, RepositoryIndex, build_index
 from mjj.search.lexical import LexicalIndex, term_frequencies, tokenize
@@ -134,6 +134,7 @@ def test_literal_regex_and_semantic_are_one_ranked_list(
         index.search("(", regex=True)
 
     semantic = index.search("refreshAccessToken", mode="semantic", limit=2)
+    assert len(semantic) == 2
     assert semantic[0].chunk.path == "app.py"
     assert "refresh_access_token" in semantic[0].chunk.signature
 
@@ -141,6 +142,45 @@ def test_literal_regex_and_semantic_are_one_ranked_list(
     monkeypatch.setattr(index_module.shutil, "which", lambda _name: None)
     fallback = index.search("fetch_user", mode="literal", limit=2)
     assert fallback[0].line == literal[0].line
+
+
+def test_exact_search_stops_at_score_cliff_and_uses_no_context(
+    tmp_path: Path,
+) -> None:
+    _write_fixture(tmp_path)
+    index = build_index(tmp_path)
+
+    hits = index.search("refresh_access_token", limit=8)
+    assert len(hits) == 1
+    output = index.format_hits(hits)
+    assert output == "app.py:7: def refresh_access_token(value):"
+    assert "return value.strip()" not in output
+    rg_output = "./app.py:7:def refresh_access_token(value):\n"
+    assert estimate_tokens(output) <= estimate_tokens(rg_output)
+
+
+def test_format_groups_repeated_file_hits(tmp_path: Path) -> None:
+    _write_fixture(tmp_path)
+    (tmp_path / "repeat.py").write_text(
+        "def first():\n"
+        "    return shared_value\n\n"
+        "def second():\n"
+        "    return shared_value\n",
+        encoding="utf-8",
+    )
+    index = build_index(tmp_path)
+
+    hits = index.search("shared_value", limit=8)
+    assert len(hits) == 2
+    output = index.format_hits(hits)
+    assert output.count("repeat.py:") == 1
+    assert "  2: return shared_value" in output
+    assert "  5: return shared_value" in output
+    rg_output = (
+        "./repeat.py:2:    return shared_value\n"
+        "./repeat.py:5:    return shared_value\n"
+    )
+    assert estimate_tokens(output) <= estimate_tokens(rg_output)
 
 
 def test_search_tool_clips_once_and_returns_addresses(tmp_path: Path) -> None:

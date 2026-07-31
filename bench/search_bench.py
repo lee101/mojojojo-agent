@@ -27,6 +27,7 @@ QUERIES = (
     "mojojail",
     "billed_ms",
 )
+VARIANT_QUERIES = ("worker_bootstrap",)
 
 
 def _median_ms(function, repeats: int) -> tuple[float, str]:
@@ -117,6 +118,44 @@ def main(argv: list[str] | None = None) -> int:
             print(
                 f"| `{query}` | {search_ms:.2f} ms | {rg_time} | "
                 f"{estimate_tokens(search_output)} | {rg_tokens} |"
+            )
+
+        print()
+        print(
+            "| Naming-variant case | MJJ time | MJJ tokens | rg tokens | "
+            "Top result | Top-file read tokens |"
+        )
+        print("|---|---:|---:|---:|---|---:|")
+        for query in VARIANT_QUERIES:
+            hits = index.search(query, limit=8)
+            index.format_hits(hits)
+            search_ms, search_output = _median_ms(
+                lambda query=query: index.format_hits(
+                    index.search(query, limit=8)
+                ),
+                repeats,
+            )
+            hits = index.search(query, limit=8)
+            top_path = hits[0].chunk.path if hits else "—"
+            if hits:
+                try:
+                    read_output = (corpus / top_path).read_text(
+                        encoding="utf-8", errors="replace"
+                    )
+                except OSError:
+                    read_output = ""
+                read_tokens = str(estimate_tokens(read_output))
+            else:
+                read_tokens = "—"
+            rg_tokens = (
+                str(estimate_tokens(_rg(corpus, query)))
+                if shutil.which("rg")
+                else "—"
+            )
+            print(
+                f"| `{query}` | {search_ms:.2f} ms | "
+                f"{estimate_tokens(search_output)} | {rg_tokens} | "
+                f"`{top_path}` | {read_tokens} |"
             )
     return 0
 

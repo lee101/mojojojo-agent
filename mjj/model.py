@@ -94,6 +94,10 @@ class ModelClient:
     resolver: CredentialResolver = field(default_factory=CredentialResolver)
     usage: Usage = field(default_factory=Usage)
     max_retries: int = 4
+    # Routes every request in one session to the same cache shard. Without it
+    # a long session keeps missing a cache it just populated, and the input
+    # side of the bill is the largest number in this file.
+    cache_key: str = ""
 
     def request_body(
         self,
@@ -113,6 +117,8 @@ class ModelClient:
             "store": False,
             "reasoning": {"effort": self.effort, "summary": self.summary},
         }
+        if self.cache_key:
+            body["prompt_cache_key"] = self.cache_key
         if credential.kind == "chatgpt":
             # Without this the backend drops the reasoning items between turns,
             # and the model re-derives everything it already worked out — the

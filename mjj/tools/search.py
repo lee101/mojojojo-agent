@@ -35,6 +35,9 @@ class SearchTool:
                 "type": "integer",
                 "minimum": 1,
                 "maximum": 20,
+                "description": (
+                    "Maximum results; a strong score cliff may return fewer."
+                ),
             },
         },
         "required": ["query"],

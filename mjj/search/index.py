@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Iterator, Mapping, Sequence
 
-from .lexical import LexicalIndex, term_frequencies
+from .lexical import LexicalIndex, term_frequencies, tokenize
 from .vectors import DIMENSION, Int8Vectors, encode
 
 
@@ -37,6 +37,19 @@ HEADER = struct.Struct("<8sIIIIQ")
 MAX_FILE_BYTES = 2 * 1024 * 1024
 MAX_CHUNK_LINES = 120
 LITERAL_CANDIDATES = 240
+CONFIDENT_SCORE = 0.20
+GENERIC_TERMS = frozenset(
+    """
+    def class func fn function struct enum trait impl interface type var let
+    const return if else for while do switch case break continue import from
+    package use pub public private static async await new self this null nil
+    none true false int str string bool float double void error err test
+    the a an of to in on at is are was were be been it its and or not with
+    that this these those what how does do why when where which who
+    """.split()
+)
+SCORE_CLIFF_RATIO = 0.60
+SCORE_CLIFF_WINDOW = 3
 _HARD_SKIP_DIRS = {
     ".git",
     ".hg",
@@ -137,6 +150,12 @@ class RepositoryIndex:
     _lexical: LexicalIndex | None = field(default=None, init=False, repr=False)
     _regions: dict[str, tuple[list[int], list[int]]] | None = field(
         default=None, init=False, repr=False
+    )
+    _query_term_cache: dict[str, set[str]] = field(
+        default_factory=dict, init=False, repr=False
+    )
+    _chunk_term_cache: dict[int, set[str]] = field(
+        default_factory=dict, init=False, repr=False
     )
 
     @classmethod
@@ -281,12 +300,14 @@ class RepositoryIndex:
             lexical = [
                 item for item in self.lexical().search(query, candidate_count)
                 if _in_scope(self.chunks[item[0]].path, scope)
+                and self._grounded(item[0], query)
             ]
         if mode in {"auto", "semantic"}:
             semantic = [
                 item
                 for item in self.vectors.search_text(query, candidate_count)
                 if _in_scope(self.chunks[item[0]].path, scope)
+                and self._grounded(item[0], query)
             ]
 
         fused: dict[int, float] = {}
@@ -339,7 +360,58 @@ class RepositoryIndex:
             )
             if len(hits) >= wanted:
                 break
-        return hits
+        return hits[:_adaptive_count(hits)]
+
+    def _grounded(self, row: int, query: str) -> bool:
+        """Does this chunk share any word with the query?
+
+        Our vectors are hashed static embeddings, not a trained model: on a
+        large corpus a nonsense query still scores ~0.31 while a genuine
+        conceptual query scores ~0.27, so no similarity threshold can separate
+        them. Word overlap can. ``worker_bootstrap`` and ``workerBootstrap``
+        tokenise to the same two words, which is the naming-variant recall we
+        actually want; ``zzzqqq_nonexistent`` shares nothing with anything and
+        must return no matches rather than the nearest arbitrary chunk.
+        """
+        terms = self._query_terms(query)
+        if not terms:
+            return True
+        return bool(terms & self._chunk_terms(row))
+
+    # Words that carry no location information: language keywords the whole
+    # tree shares, and English glue. Overlap on these is not evidence.
+
+    def _query_terms(self, query: str) -> set[str]:
+        """The query's *distinctive* words.
+
+        ``def rolling_sharpe`` is grounded by ``rolling`` and ``sharpe``, never
+        by ``def`` — otherwise one keyword in the query makes every function in
+        the tree a match.
+        """
+        cached = self._query_term_cache.get(query)
+        if cached is None:
+            terms = {term for term in tokenize(query) if len(term) > 1}
+            distinctive = terms - GENERIC_TERMS
+            # A query made entirely of generic words has nothing to ground on;
+            # let the ranking decide rather than refusing to answer.
+            cached = distinctive or set()
+            self._query_term_cache[query] = cached
+        return cached
+
+    def _chunk_terms(self, row: int) -> set[str]:
+        cached = self._chunk_term_cache.get(row)
+        if cached is None:
+            chunk = self.chunks[row]
+            # `terms` is already the tokenised body; only the path and the
+            # signature still need splitting.
+            cached = {term for term in chunk.terms if len(term) > 1}
+            cached.update(
+                term
+                for term in tokenize(f"{chunk.path} {chunk.signature}")
+                if len(term) > 1
+            )
+            self._chunk_term_cache[row] = cached
+        return cached
 
     def _literal(
         self,
@@ -465,31 +537,40 @@ class RepositoryIndex:
         if not hits:
             return "no matches"
         file_cache: dict[str, list[str]] = {}
-        output: list[str] = []
+        grouped: dict[str, list[SearchHit]] = {}
         for hit in hits:
-            chunk = hit.chunk
-            signature = _short(hit.context or chunk.signature)
-            output.append(f"{chunk.path}:{hit.line}: {signature}")
-            lines = file_cache.get(chunk.path)
-            if lines is None:
-                try:
-                    lines = (self.root / chunk.path).read_text(
-                        encoding="utf-8", errors="replace"
-                    ).splitlines()
-                except OSError:
-                    lines = []
-                file_cache[chunk.path] = lines
-            candidates = [hit.line - 1, hit.line, hit.line + 1]
-            shown = 0
-            for line_number in candidates:
-                if line_number < 1 or line_number > len(lines):
+            grouped.setdefault(hit.chunk.path, []).append(hit)
+
+        output: list[str] = []
+        for path, file_hits in grouped.items():
+            grouped_file = len(file_hits) > 1
+            if grouped_file:
+                output.append(f"{path}:")
+            for hit in file_hits:
+                chunk = hit.chunk
+                signature = _short(hit.context or chunk.signature)
+                if grouped_file:
+                    output.append(f"  {hit.line}: {signature}")
+                else:
+                    output.append(f"{path}:{hit.line}: {signature}")
+                if hit.context:
                     continue
-                code = lines[line_number - 1].rstrip()
-                if not code.strip() or code.strip() == signature.strip():
-                    continue
-                output.append(f"  {line_number} | {_short(code, 240)}")
-                shown += 1
-                if shown == 2:
+                lines = file_cache.get(path)
+                if lines is None:
+                    try:
+                        lines = (self.root / path).read_text(
+                            encoding="utf-8", errors="replace"
+                        ).splitlines()
+                    except OSError:
+                        lines = []
+                    file_cache[path] = lines
+                for line_number in (hit.line + 1, hit.line - 1):
+                    if line_number < 1 or line_number > len(lines):
+                        continue
+                    code = lines[line_number - 1].rstrip()
+                    if not code.strip() or code.strip() == signature.strip():
+                        continue
+                    output.append(f"    {line_number} | {_short(code, 240)}")
                     break
         return "\n".join(output)
 
@@ -877,6 +958,22 @@ def _normalise_scope(scope: str) -> str:
 
 def _in_scope(path: str, scope: str) -> bool:
     return not scope or path == scope or path.startswith(scope + "/")
+
+
+def _adaptive_count(hits: Sequence[SearchHit]) -> int:
+    """Stop at an early confidence cliff, otherwise spend the caller's limit."""
+    if len(hits) < 2:
+        return len(hits)
+    inspected = min(SCORE_CLIFF_WINDOW, len(hits) - 1)
+    for position in range(inspected):
+        score = hits[position].score
+        following = hits[position + 1].score
+        if (
+            score >= CONFIDENT_SCORE
+            and following <= score * SCORE_CLIFF_RATIO
+        ):
+            return position + 1
+    return len(hits)
 
 
 def _short(value: str, limit: int = 200) -> str:

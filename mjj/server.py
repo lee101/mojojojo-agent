@@ -51,7 +51,7 @@ def _env_bool(name: str, default: bool = False) -> bool:
 @dataclass(frozen=True)
 class ServerConfig:
     host: str = "127.0.0.1"
-    port: int = 4350
+    port: int = 4343
     database_path: Path = Path("/nvme0n1-disk/data/mojojojo/mojojojo.db")
     appnz_database_path: Path = Path("/nvme0n1-disk/data/appnz-sso.db")
     workspace_root: Path = Path("/nvme0n1-disk/data/mojojojo/agent-workspaces")
@@ -66,7 +66,7 @@ class ServerConfig:
     def from_env(cls) -> "ServerConfig":
         return cls(
             host=os.environ.get("MJJ_SERVER_HOST", "127.0.0.1"),
-            port=int(os.environ.get("PORT", os.environ.get("MJJ_SERVER_PORT", "4350"))),
+            port=int(os.environ.get("PORT", os.environ.get("MJJ_SERVER_PORT", "4343"))),
             database_path=Path(
                 os.environ.get(
                     "DB_PATH", "/nvme0n1-disk/data/mojojojo/mojojojo.db"

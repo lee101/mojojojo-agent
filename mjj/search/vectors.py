@@ -12,6 +12,8 @@ from array import array
 from pathlib import Path
 from typing import Sequence
 
+from mjj.kernels import quantize_i8
+
 from .lexical import tokenize
 
 
@@ -61,18 +63,17 @@ def static_embedding(text: str, dim: int = DIMENSION) -> list[float]:
 
 def quantize(values: Sequence[float]) -> tuple[bytes, float]:
     """Symmetrically quantise a vector; return bytes and scale/norm factor."""
-    norm = math.sqrt(sum(float(value) * float(value) for value in values))
-    peak = max((abs(float(value)) for value in values), default=0.0)
-    scale = peak / 127.0 if peak else 1.0
-    inverse = 1.0 / scale
-    output = array(
-        "b",
-        (
-            max(-127, min(127, int(value * inverse + (0.5 if value >= 0 else -0.5))))
-            for value in values
-        ),
+    numeric = array("d", (float(value) for value in values))
+    # Keep CPython's float summation here.  Python 3.12+ uses compensated
+    # summation, whose final bit cannot be reproduced by Mojo's scalar/SIMD
+    # reductions; the persistent factor must remain exactly compatible.
+    norm = math.sqrt(sum(float(value) * float(value) for value in numeric))
+    output = array("q", [0]) * len(numeric)
+    scale = quantize_i8(numeric, output)
+    return (
+        array("b", output).tobytes(),
+        scale / norm if norm else 1.0,
     )
-    return output.tobytes(), scale / norm if norm else 1.0
 
 
 def encode(text: str, dim: int = DIMENSION) -> tuple[bytes, float]:

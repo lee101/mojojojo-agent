@@ -46,6 +46,8 @@ class Agent:
 
     def __post_init__(self) -> None:
         self.ctx = ToolContext(cwd=self.cwd, ledger=self.ledger, approve=self.approve)
+        if self.session and not self.client.cache_key:
+            self.client.cache_key = f"mjj-{self.session.id}"
 
     # -- conversation -------------------------------------------------------
 

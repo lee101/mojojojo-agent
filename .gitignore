@@ -7,3 +7,5 @@ dist/
 build/
 *.so
 .pytest_cache/
+.pytest_cache/
+*.egg-info/

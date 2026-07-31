@@ -14,21 +14,57 @@ mjj auth --probe                     # reuses your existing ChatGPT max-plan sig
 mjj exec "make the failing test in tests/test_router.py pass"
 ```
 
-Status: **early**. The loop, the credential path and the model client work
-end to end; tools, search and the sandboxed executor are landing now.
+Status: **early but working end to end** — credential, model client, loop,
+tools, search, sandboxed execution, and a served mode with app.nz sign-in.
 
 ## Why it is cheaper
 
 | what a harness does | usual approach | here |
 | --- | --- | --- |
 | find code | dump files into context | ranked `path:line` hits from a native int8 index |
-| run code | shell out to CPython | subset-compiled to Mojo, cached by content hash, ~1.2 us/call |
+| run code | shell out to CPython | subset-compiled to Mojo, cached by content hash |
 | edit code | rewrite the file | `apply_patch` envelope, per-file `+n/-n` summary |
 | tool output | truncate at N bytes | one ledger, head+tail kept, exactly what was dropped is stated |
 | reasoning | re-derived each turn | reasoning items echoed back verbatim so the cache hits |
 
-Every number this project publishes is reproducible from `bench/`. Losses get
-published next to wins.
+### Search, against ripgrep
+
+Corpus is a real 99-file repository. `bench/search_bench.py` reproduces it.
+
+| query | mjj tokens | `rg -n` tokens |
+| --- | ---: | ---: |
+| `errInsufficientCredits` | 19 | 20 |
+| `workerBootstrap` | 39 | 42 |
+| `mojojail` | 141 | 850 |
+| `billed_ms` | 131 | 545 |
+| `worker_bootstrap` → finds `workerBootstrap` | 235 | 0 (rg finds nothing; reading the file costs 1339) |
+
+Search that always answers is worse than search that says *no matches*, so a
+hit must share a distinctive word with the query. [docs/search.md](docs/search.md)
+shows the measurements that forced that design.
+
+### Execution
+
+`docs/exec.md` reproduces this. A hot accelerated kernel is **2.7 ms** where
+CPython in-process is 27 ms; the sandbox costs ~215 ms for code that has to be
+isolated, and the harness picks the cheapest path that is still safe.
+
+### A real session
+
+`evals/run.py` runs the agent against real repositories and scores what it
+*cost*, not just whether it passed:
+
+```
+pass build-cli          92.7s   in    25681 (   3840 cached)  out  4424  tools  8
+pass fix-failing-test   30.6s   in    14533 (   1792 cached)  out   709  tools  8
+pass port-to-mojo      529.8s   in  1439937 ( 1198848 cached)  out 17648  tools 50
+```
+
+83% of the long session's input was served from cache — that is what echoing
+reasoning verbatim and pinning a session cache key buys.
+
+Every number this project publishes is reproducible from `bench/` or
+`evals/`. Losses get published next to wins.
 
 ## Credentials
 
@@ -43,10 +79,19 @@ mjj auth            # what credential is in play, what plan, when it expires
 mjj auth --probe    # one real round trip
 ```
 
+## Served, with app.nz sign-in
+
+`python -m mjj.server` puts the same loop behind an SSE endpoint that
+authenticates with the shared app.nz session cookie or an `mj_live_` key, bills
+the same credit ledger the rest of the platform uses, and gives every account
+its own workspace. mojojojo.app.nz proxies it into the editor's agent panel.
+See [docs/server.md](docs/server.md).
+
 ## Layout
 
 See [AGENTS.md](AGENTS.md) — it is the working contract for this repo, and the
-map of which module owns what.
+map of which module owns what. [docs/](docs/) covers the tools, search,
+execution, the server, and the accelerated kernels.
 
 ## Licence
 

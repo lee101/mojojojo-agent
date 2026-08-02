@@ -27,6 +27,7 @@ class Config:
     effort: str = "high"
     verbosity: str = "low"
     tool_budget: int = 1600
+    project_doc_max_bytes: int = 32 * 1024
     disabled_tools: tuple[str, ...] = ()
     skill_paths: tuple[Path, ...] = ()
     files: tuple[Path, ...] = field(default=(), repr=False)
@@ -76,6 +77,7 @@ def load(
         "MJJ_EFFORT": "effort",
         "MJJ_VERBOSITY": "verbosity",
         "MJJ_TOOL_BUDGET": "tool_budget",
+        "MJJ_PROJECT_DOC_MAX_BYTES": "project_doc_max_bytes",
     }
     for variable, key in env_keys.items():
         if env.get(variable, "").strip():
@@ -113,7 +115,7 @@ def _merge_document(values: dict[str, Any], document: dict, path: Path) -> None:
     for section, name in ((agent, "agent"), (tools, "tools"), (skills, "skills")):
         if not isinstance(section, dict):
             raise ConfigError(f"[{name}] in {path} must be a table")
-    for key in ("model", "effort", "verbosity"):
+    for key in ("model", "effort", "verbosity", "project_doc_max_bytes"):
         if key in agent:
             values[key] = agent[key]
     if "budget" in tools:
@@ -138,6 +140,9 @@ def _validated(values: Mapping[str, Any]) -> Config:
     effort = values.get("effort", Config.effort)
     verbosity = values.get("verbosity", Config.verbosity)
     budget = values.get("tool_budget", Config.tool_budget)
+    project_doc_max_bytes = values.get(
+        "project_doc_max_bytes", Config.project_doc_max_bytes
+    )
     disabled = values.get("disabled_tools", ())
     skill_paths = values.get("skill_paths", ())
     if not isinstance(model, str) or not model.strip():
@@ -156,6 +161,16 @@ def _validated(values: Mapping[str, Any]) -> Config:
         raise ConfigError("tools.budget must be a positive integer") from exc
     if budget <= 0:
         raise ConfigError("tools.budget must be a positive integer")
+    if isinstance(project_doc_max_bytes, bool):
+        raise ConfigError("agent.project_doc_max_bytes must be a non-negative integer")
+    try:
+        project_doc_max_bytes = int(project_doc_max_bytes)
+    except (TypeError, ValueError) as exc:
+        raise ConfigError(
+            "agent.project_doc_max_bytes must be a non-negative integer"
+        ) from exc
+    if project_doc_max_bytes < 0:
+        raise ConfigError("agent.project_doc_max_bytes must be a non-negative integer")
     if not isinstance(disabled, (list, tuple)) or any(
         not isinstance(item, str) or not item.strip() for item in disabled
     ):
@@ -167,6 +182,7 @@ def _validated(values: Mapping[str, Any]) -> Config:
         effort=effort,
         verbosity=verbosity,
         tool_budget=budget,
+        project_doc_max_bytes=project_doc_max_bytes,
         disabled_tools=tuple(dict.fromkeys(item.strip() for item in disabled)),
         skill_paths=tuple(Path(item).expanduser().resolve() for item in skill_paths),
         files=tuple(values.get("files", ())),

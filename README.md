@@ -119,6 +119,12 @@ mjj auth            # what credential is in play, what plan, when it expires
 mjj auth --probe    # one real round trip
 ```
 
+Headless runs keep the final answer alone on stdout and send tool progress to
+stderr, so shell capture stays clean. `--json` emits JSONL events,
+`--ephemeral` skips session persistence, and `-o result.txt` also writes the
+last assistant message. A positional prompt and piped stdin are combined with
+a bounded `<stdin>` block.
+
 ## Configuration and skills
 
 `~/.mjj/config.toml` supplies user defaults; the nearest repository
@@ -130,6 +136,11 @@ flags win. `mjj config` prints the resolved non-secret values. See
 bounded `skill` tool loads a workflow only when needed, so full domain manuals
 do not tax every turn. Hosted sessions only see workspace skills. See
 [docs/skills.md](docs/skills.md).
+
+Like Codex, every run loads at most 32 KiB total from `AGENTS.md` files between
+the Git root and working directory. Deeper files apply later, and
+`AGENTS.override.md` replaces `AGENTS.md` in the same directory. Configure or
+disable the cap with `agent.project_doc_max_bytes`.
 
 ## Served, with app.nz sign-in
 

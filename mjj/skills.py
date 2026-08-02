@@ -10,7 +10,7 @@ from typing import Iterable
 
 
 PROJECT_DIRS = (".mjj/skills", ".agents/skills", ".codex/skills", ".claude/skills")
-USER_DIRS = ("skills", "~/.codex/skills", "~/.claude/skills")
+USER_DIRS = ("skills", "~/.agents/skills", "~/.codex/skills", "~/.claude/skills")
 MAX_SKILLS = 128
 MAX_DEPTH = 4
 _NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")

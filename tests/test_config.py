@@ -19,6 +19,7 @@ def test_project_config_and_environment_precedence(tmp_path: Path):
 model = "gpt-project"
 effort = "medium"
 verbosity = "high"
+project_doc_max_bytes = 4096
 [tools]
 budget = 321
 disabled = ["shell"]
@@ -37,6 +38,7 @@ paths = ["../skills"]
     assert config.effort == "max"
     assert config.verbosity == "high"
     assert config.tool_budget == 321
+    assert config.project_doc_max_bytes == 4096
     assert config.disabled_tools == ("shell",)
     assert config.skill_paths == ((project / "skills").resolve(),)
     assert config.files == ((project / ".mjj" / "config.toml").resolve(),)
@@ -54,6 +56,7 @@ def test_explicit_config_is_last_file_layer(tmp_path: Path):
         ("[agent]\neffort='enormous'\n", "agent.effort"),
         ("[tools]\nbudget=0\n", "tools.budget"),
         ("[skills]\npaths='nope'\n", "skills.paths"),
+        ("[agent]\nproject_doc_max_bytes=-1\n", "agent.project_doc_max_bytes"),
     ],
 )
 def test_invalid_config_is_actionable(tmp_path: Path, content: str, message: str):

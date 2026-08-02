@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 
-from mjj.agent import Agent, Step
+from io import StringIO
+
+from mjj.agent import Agent, Step, render_exec
 from mjj.ledger import Ledger
 from mjj.model import Event, ModelClient
 from mjj.tools.base import Registry, ToolResult
@@ -169,3 +171,42 @@ def test_stream_error_is_surfaced_and_stops(monkeypatch):
     agent = Agent(registry=Registry())
     steps = list(agent.run("go"))
     assert steps[-1].kind == "error" and "connection reset" in steps[-1].text
+
+
+def test_exec_renderer_keeps_progress_off_stdout() -> None:
+    out, err = StringIO(), StringIO()
+    steps = iter(
+        [
+            Step("text", text="working"),
+            Step("tool_call", name="echo", text='{"text":"hi"}'),
+            Step("usage", text="first usage"),
+            Step("tool_result", name="echo", text="hi"),
+            Step("text", text="done"),
+            Step("usage", text="final usage"),
+        ]
+    )
+
+    code, final = render_exec(steps, out, err)
+
+    assert code == 0
+    assert final == "done"
+    assert out.getvalue() == "done\n"
+    assert "· echo" in err.getvalue()
+    assert "working" not in out.getvalue()
+
+
+def test_exec_jsonl_is_parseable_and_returns_final_text() -> None:
+    out, err = StringIO(), StringIO()
+    code, final = render_exec(
+        iter([Step("text", text="ok"), Step("usage", text="used")]),
+        out,
+        err,
+        jsonl=True,
+    )
+
+    assert code == 0 and final == "ok"
+    assert [json.loads(line)["type"] for line in out.getvalue().splitlines()] == [
+        "text",
+        "usage",
+    ]
+    assert err.getvalue() == ""

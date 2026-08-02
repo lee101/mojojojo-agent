@@ -21,9 +21,9 @@ root:
 - `.codex/skills/`
 - `.claude/skills/`
 
-Local CLI sessions also check `$MJJ_HOME/skills`, `~/.codex/skills`, and
-`~/.claude/skills`. Hosted sessions intentionally skip all user directories.
-Symlinked skill roots and bundled files are not followed.
+Local CLI sessions also check `$MJJ_HOME/skills`, `~/.agents/skills`,
+`~/.codex/skills`, and `~/.claude/skills`. Hosted sessions intentionally skip
+all user directories. Symlinked skill roots and bundled files are not followed.
 
 ```bash
 mjj skills

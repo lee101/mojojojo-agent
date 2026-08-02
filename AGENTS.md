@@ -30,6 +30,7 @@ instead of being paid for in context.
 | `mjj/session.py` | rollout JSONL, resume, fork |
 | `mjj/ledger.py` | token accounting + output truncation policy |
 | `mjj/config.py` | config resolution (env, `~/.mjj/config.toml`, flags) |
+| `mjj/project_docs.py` | bounded root-to-cwd `AGENTS.md` discovery |
 | `mjj/tools/` | shell, apply_patch, read/ls, py, search, skill loading |
 | `mjj/skills.py` | scoped `SKILL.md` discovery and metadata |
 | `mjj/search/` | mojo-embed backed index: literal + lexical + semantic |

@@ -17,6 +17,7 @@ user and project files.
 model = "gpt-5.6-sol"
 effort = "high"
 verbosity = "low"
+project_doc_max_bytes = 32768
 
 [tools]
 budget = 1600
@@ -27,7 +28,8 @@ paths = ["../shared-agent-skills"]
 ```
 
 Supported environment equivalents are `MJJ_MODEL`, `MJJ_EFFORT`,
-`MJJ_VERBOSITY`, `MJJ_TOOL_BUDGET`, comma-separated `MJJ_DISABLE_TOOLS`, and
-path-separator-delimited `MJJ_SKILL_PATHS`. Credentials and executor endpoints
-keep their existing dedicated environment variables and never appear in
-`mjj config` output.
+`MJJ_VERBOSITY`, `MJJ_TOOL_BUDGET`, `MJJ_PROJECT_DOC_MAX_BYTES`,
+comma-separated `MJJ_DISABLE_TOOLS`, and path-separator-delimited
+`MJJ_SKILL_PATHS`. A zero project-doc budget disables `AGENTS.md` discovery.
+Credentials and executor endpoints keep their existing dedicated environment
+variables and never appear in `mjj config` output.

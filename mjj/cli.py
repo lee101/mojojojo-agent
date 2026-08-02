@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 from . import auth
-from .agent import Agent, render
+from .agent import Agent, render, render_exec
 from .config import ConfigError, EFFORTS, VERBOSITIES, load as load_config
 from .ledger import Budget, Ledger
 from .model import ModelClient, probe
@@ -28,6 +28,8 @@ def _agent(args) -> Agent:
     items: list[dict] = []
     if getattr(args, "resume", None) is not None:
         session, items = resume(args.resume or None)
+    elif getattr(args, "ephemeral", False):
+        session = None
     else:
         session = Session()
     client = ModelClient(
@@ -44,6 +46,7 @@ def _agent(args) -> Agent:
         cwd=Path(args.cwd).resolve(),
         ledger=Ledger(Budget(default=args.tool_budget)),
         session=session,
+        project_doc_max_bytes=args.resolved_config.project_doc_max_bytes,
     )
     agent.items = items
     return agent
@@ -51,14 +54,48 @@ def _agent(args) -> Agent:
 
 def cmd_exec(args) -> int:
     agent = _agent(args)
-    prompt = args.prompt or sys.stdin.read()
-    code = render(agent.run(prompt), sys.stdout, verbose=args.verbose)
+    prompt = _exec_prompt(args.prompt)
+    code, final_text = render_exec(
+        agent.run(prompt),
+        sys.stdout,
+        sys.stderr,
+        verbose=args.verbose,
+        jsonl=args.json,
+    )
+    if args.output_last_message:
+        try:
+            Path(args.output_last_message).expanduser().write_text(
+                final_text, encoding="utf-8"
+            )
+        except OSError as exc:
+            print(f"mjj exec: cannot write final message: {exc}", file=sys.stderr)
+            code = 1
     if agent.session:
         agent.session.note(usage=agent.client.usage.summary(), tools=agent.ledger.summary())
         agent.session.close()
     if args.verbose:
         print(f"[{agent.ledger.summary()}]", file=sys.stderr)
     return code
+
+
+def _exec_prompt(positional: str | None, max_stdin_chars: int = 1_048_576) -> str:
+    """Combine the positional prompt and bounded piped stdin like Codex exec."""
+    if positional == "-":
+        positional = None
+    piped = ""
+    try:
+        interactive = sys.stdin.isatty()
+    except (AttributeError, OSError):
+        interactive = False
+    if not interactive:
+        piped = sys.stdin.read(max_stdin_chars + 1)
+        if len(piped) > max_stdin_chars:
+            piped = piped[:max_stdin_chars] + (
+                f"\n[stdin truncated at {max_stdin_chars} characters]"
+            )
+    if positional and piped:
+        return f"{positional}\n\n<stdin>\n{piped}\n</stdin>"
+    return positional or piped
 
 
 def cmd_repl(args) -> int:
@@ -202,7 +239,13 @@ def main(argv: list[str] | None = None) -> int:
 
     run = sub.add_parser("exec", help="one headless run")
     run.add_argument("prompt", nargs="?")
-    run.add_argument("--resume", nargs="?", const="", default=None)
+    persistence = run.add_mutually_exclusive_group()
+    persistence.add_argument("--resume", nargs="?", const="", default=None)
+    persistence.add_argument("--ephemeral", action="store_true")
+    run.add_argument("--json", action="store_true", help="emit JSONL events")
+    run.add_argument(
+        "-o", "--output-last-message", metavar="PATH", help="write final text to PATH"
+    )
     run.set_defaults(func=cmd_exec)
 
     chat = sub.add_parser("chat", help="interactive session")

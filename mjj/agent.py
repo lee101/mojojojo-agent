@@ -18,6 +18,12 @@ from typing import Callable, Iterator
 from .ledger import Ledger
 from .model import Event, ModelClient
 from .prompt import SYSTEM_PROMPT
+from .project_docs import (
+    DEFAULT_MAX_BYTES,
+    ProjectInstructions,
+    compose,
+    load as load_project_docs,
+)
 from .session import Session, prune_to_latest_compaction
 from .tools.base import Registry, ToolContext, ToolResult
 
@@ -39,12 +45,21 @@ class Agent:
     cwd: Path = field(default_factory=Path.cwd)
     ledger: Ledger = field(default_factory=Ledger)
     session: Session | None = None
-    instructions: str = SYSTEM_PROMPT
+    instructions: str | None = None
+    project_doc_max_bytes: int = DEFAULT_MAX_BYTES
+    project_instructions: ProjectInstructions = field(
+        init=False, default_factory=ProjectInstructions
+    )
     max_steps: int = 200
     approve: Callable[[str, dict], bool] | None = None
     items: list[dict] = field(default_factory=list)
 
     def __post_init__(self) -> None:
+        if self.instructions is None:
+            self.project_instructions = load_project_docs(
+                self.cwd, self.project_doc_max_bytes
+            )
+            self.instructions = compose(SYSTEM_PROMPT, self.project_instructions)
         self.ctx = ToolContext(cwd=self.cwd, ledger=self.ledger, approve=self.approve)
         if self.session and not self.client.cache_key:
             self.client.cache_key = f"mjj-{self.session.id}"
@@ -180,6 +195,65 @@ def render(steps: Iterator[Step], out, verbose: bool = False) -> int:
         out.flush()
     out.write("\n")
     return 1 if failed else 0
+
+
+def render_exec(
+    steps: Iterator[Step], out, err, *, verbose: bool = False, jsonl: bool = False
+) -> tuple[int, str]:
+    """Render a headless run with final text isolated from progress output."""
+    failed = False
+    response_text: list[str] = []
+    response_called_tool = False
+    final_text = ""
+    for step in steps:
+        if jsonl:
+            event = {"type": step.kind}
+            if step.name:
+                event["name"] = step.name
+            if step.text:
+                event["text"] = step.text
+            if step.meta:
+                event["meta"] = step.meta
+            out.write(json.dumps(event, ensure_ascii=False, separators=(",", ":")) + "\n")
+            out.flush()
+        if step.kind == "text":
+            response_text.append(step.text)
+        elif step.kind == "reasoning" and verbose and not jsonl:
+            err.write(step.text)
+            err.flush()
+        elif step.kind == "tool_call":
+            response_called_tool = True
+            if not jsonl:
+                args = step.text if verbose else step.text[:160]
+                suffix = "…" if len(step.text) > len(args) else ""
+                err.write(f"· {step.name} {args}{suffix}\n")
+                err.flush()
+        elif step.kind == "tool_result" and verbose and not jsonl:
+            marker = "" if step.meta.get("ok", True) else " (failed)"
+            err.write(f"{step.text}{marker}\n")
+            err.flush()
+        elif step.kind == "usage":
+            if not response_called_tool:
+                final_text = "".join(response_text)
+            if verbose and not jsonl:
+                err.write(f"[{step.text}]\n")
+                err.flush()
+            response_text.clear()
+            response_called_tool = False
+        elif step.kind == "compaction" and verbose and not jsonl:
+            err.write(f"[compacted {step.meta.get('dropped_items', 0)} items]\n")
+            err.flush()
+        elif step.kind == "error":
+            failed = True
+            if not jsonl:
+                err.write(f"error: {step.text}\n")
+                err.flush()
+    if not jsonl and final_text:
+        out.write(final_text)
+        if not final_text.endswith("\n"):
+            out.write("\n")
+        out.flush()
+    return (1 if failed else 0), final_text
 
 
 def _first_lines(text: str, count: int) -> str:

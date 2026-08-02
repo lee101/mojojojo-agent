@@ -99,3 +99,13 @@ uv run mjj search QUERY [PATH]        # hybrid disk search
 uv run mjj index                      # build or refresh a repo index
 bench/run.sh                         # all benchmarks under a lock
 ```
+
+## Git workflow
+
+- Work directly on `main` unless the user explicitly asks for an isolated
+  branch or worktree.
+- Commit tested, coherent increments and push `main` directly. Do not open
+  pull requests for routine work in this repository.
+- Before staging, inspect the complete worktree and preserve unrelated user
+  changes. After pushing, leave the checkout on `main` and report any
+  remaining uncommitted files.

@@ -1,6 +1,6 @@
 [project]
 name = "mojojojo-agent"
-version = "0.1.0"
+dynamic = ["version"]
 description = "A token-efficient coding agent harness with native search and native code execution"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -33,6 +33,9 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["mjj"]
+
+[tool.hatch.version]
+path = "mjj/version.py"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -1,0 +1,140 @@
+name: Release binaries
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: linux-x86_64
+          - os: ubuntu-22.04-arm
+            target: linux-aarch64
+          - os: macos-15-intel
+            target: macos-x86_64
+          - os: macos-15
+            target: macos-aarch64
+          - os: windows-latest
+            target: windows-x86_64
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install freezer and package
+        run: python -m pip install --disable-pip-version-check . pyinstaller
+      - name: Build one-file executable
+        run: >-
+          python -m PyInstaller --noconfirm --clean --onefile --name mjj
+          --collect-submodules mjj.tools --collect-data mjj
+          --copy-metadata mojojojo-agent mjj/__main__.py
+      - name: Smoke test executable
+        shell: bash
+        run: |
+          if [[ "${{ runner.os }}" == "Windows" ]]; then binary=dist/mjj.exe; else binary=dist/mjj; fi
+          "$binary" --version
+          "$binary" tools
+          "$binary" search build_registry mjj --limit 2 --stats
+      - name: Package Unix executable
+        if: runner.os != 'Windows'
+        shell: bash
+        run: tar -C dist -czf "mjj-${{ matrix.target }}.tar.gz" mjj
+      - name: Package Windows executable
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path dist/mjj.exe -DestinationPath "mjj-${{ matrix.target }}.zip"
+      - name: Test Unix installer against built archive
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test_root="$RUNNER_TEMP/mjj-installer-test"
+          mkdir -p "$test_root/assets" "$test_root/bin"
+          asset="mjj-${{ matrix.target }}.tar.gz"
+          cp "$asset" "$test_root/assets/$asset"
+          pushd "$test_root/assets"
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "$asset" > SHA256SUMS
+          else
+            shasum -a 256 "$asset" > SHA256SUMS
+          fi
+          popd
+          MJJ_BASE_URL="file://$test_root/assets" MJJ_INSTALL_DIR="$test_root/bin" install/install.sh
+          "$test_root/bin/mjj" --version
+      - name: Test Windows installer against built archive
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          [scriptblock]::Create((Get-Content install/install.ps1 -Raw)) | Out-Null
+          $testRoot = Join-Path $env:RUNNER_TEMP "mjj-installer-test"
+          $assets = Join-Path $testRoot "assets"
+          New-Item -ItemType Directory -Force -Path $assets | Out-Null
+          $asset = "mjj-${{ matrix.target }}.zip"
+          Copy-Item $asset (Join-Path $assets $asset)
+          $hash = (Get-FileHash -Algorithm SHA256 (Join-Path $assets $asset)).Hash.ToLowerInvariant()
+          "$hash  $asset" | Set-Content -Encoding ascii (Join-Path $assets "SHA256SUMS")
+          $server = Start-Process python -ArgumentList "-m", "http.server", "8765", "--directory", $assets -PassThru -WindowStyle Hidden
+          try {
+            Start-Sleep -Seconds 1
+            $env:MJJ_BASE_URL = "http://127.0.0.1:8765"
+            $env:MJJ_INSTALL_DIR = Join-Path $testRoot "bin"
+            & install/install.ps1
+            & (Join-Path $env:MJJ_INSTALL_DIR "mjj.exe") --version
+          } finally {
+            Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
+          }
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.target }}
+          path: |
+            mjj-*.tar.gz
+            mjj-*.zip
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v8
+        with:
+          path: release-assets
+          merge-multiple: true
+      - name: Verify tag and create checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          package_version=$(python -c 'from mjj.version import __version__; print(__version__)')
+          test "${GITHUB_REF_NAME}" = "v${package_version}"
+          cd release-assets
+          sha256sum mjj-*.tar.gz mjj-*.zip > SHA256SUMS
+          cp ../install/install.sh install.sh
+          cp ../install/install.ps1 install.ps1
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" release-assets/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" release-assets/* --verify-tag --generate-notes --title "mjj $GITHUB_REF_NAME"
+          fi

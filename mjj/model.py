@@ -199,7 +199,7 @@ class ModelClient:
             raise ModelError(f"connection failed: {exc}", retryable=True) from exc
         with resp:
             for event in _decode_sse(resp):
-                if event.type == "response.completed":
+                if event.type in ("response.completed", "response.incomplete"):
                     usage = (event.data.get("response") or {}).get("usage") or {}
                     self.usage.add(usage)
                 if event.type in ("response.failed", "error"):
@@ -212,7 +212,11 @@ class ModelClient:
                 if event.type == "response.incomplete":
                     response = event.data.get("response") or {}
                     details = response.get("incomplete_details") or {}
-                    reason = details.get("reason") or response.get("status") or "unknown"
+                    reason = (
+                        details.get("reason")
+                        or response.get("status")
+                        or "unknown"
+                    )
                     raise ModelError(f"response incomplete: {reason}")
                 yield event
 

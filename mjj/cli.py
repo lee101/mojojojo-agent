@@ -21,6 +21,7 @@ from .search.index import build_index
 from .session import Session, resume
 from .skills import discover
 from .tools import build_registry
+from .version import __version__
 
 
 def _agent(args) -> Agent:
@@ -165,7 +166,14 @@ def cmd_skills(args) -> int:
 
 
 def cmd_config(args) -> int:
-    print(json.dumps(args.resolved_config.public(), indent=2))
+    values = args.resolved_config.public()
+    values.update(
+        model=args.model,
+        effort=args.effort,
+        verbosity=args.verbosity,
+        tool_budget=args.tool_budget,
+    )
+    print(json.dumps(values, indent=2))
     return 0
 
 
@@ -182,6 +190,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     parser = argparse.ArgumentParser(prog="mjj")
+    parser.add_argument("--version", action="version", version=f"mjj {__version__}")
     parser.add_argument("--model", default=config.model)
     parser.add_argument("--effort", default=config.effort, choices=EFFORTS)
     parser.add_argument("--verbosity", default=config.verbosity, choices=VERBOSITIES)

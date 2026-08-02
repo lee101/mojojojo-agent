@@ -87,7 +87,6 @@ wheels = [
 
 [[package]]
 name = "mojojojo-agent"
-version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "tomli", marker = "python_full_version < '3.11'" },
@@ -115,7 +114,7 @@ requires-dist = [
     { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=2" },
     { name = "uvicorn", marker = "extra == 'server'", specifier = ">=0.30" },
 ]
-provides-extras = ["server", "accel"]
+provides-extras = ["accel", "server"]
 
 [package.metadata.requires-dev]
 dev = [

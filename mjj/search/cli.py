@@ -7,7 +7,7 @@ import json
 import sys
 from pathlib import Path
 
-from .index import SearchHit, build_index
+from .index import RepositoryIndex, SearchHit, build_index
 
 
 def search(
@@ -19,11 +19,15 @@ def search(
     regex: bool = False,
     limit: int = 8,
     force: bool = False,
-) -> tuple[object, list[SearchHit]]:
+) -> tuple[RepositoryIndex, list[SearchHit]]:
     root_path = Path(root).expanduser().resolve()
     scope = ""
     if path:
-        target = (root_path / path).resolve() if not Path(path).is_absolute() else Path(path).resolve()
+        target = (
+            (root_path / path).resolve()
+            if not Path(path).is_absolute()
+            else Path(path).resolve()
+        )
         try:
             scope = target.relative_to(root_path).as_posix()
         except ValueError as exc:

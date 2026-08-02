@@ -8,10 +8,32 @@ executing code, and matching diffs are **computation**, not reasoning — so thi
 harness does them natively (Mojo, via [mojosub][] and [mojo-embed][]) and sends
 the model an answer instead of a pile of context to read.
 
+Linux and macOS can install the self-contained release binary without Python:
+
 ```bash
-uv tool install mojojojo-agent
+curl -fsSL https://mojojojo.app.nz/install.sh | sh
 mjj auth --probe                     # reuses your existing ChatGPT max-plan sign-in
 mjj exec "make the failing test in tests/test_router.py pass"
+```
+
+On Windows PowerShell:
+
+```powershell
+irm https://mojojojo.app.nz/install.ps1 | iex
+```
+
+The installers select the operating system and CPU, verify the release's
+SHA-256 checksum, and install into a user-owned directory. Set
+`MJJ_INSTALL_DIR` to choose another location or `MJJ_VERSION=v0.1.0` to pin a
+release. The binaries need no system Python. Mojo acceleration remains a
+guarded optional backend, so the agent and hybrid search still work when a
+compatible Mojo toolchain or `mojo-embed` library is not installed. Linux
+artifacts are built on Ubuntu 22.04 for a stable glibc baseline.
+
+The Python package remains available too:
+
+```bash
+uv tool install mojojojo-agent
 ```
 
 From a checkout, `uv sync && uv run pytest -q` creates the development

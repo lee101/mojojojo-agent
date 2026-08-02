@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import json
+
+import pytest
+
 from mjj.auth import Credential
 from mjj.model import Event, ModelClient, ModelError, Usage, _decode_sse
 
@@ -119,3 +123,31 @@ def test_sse_decoder_handles_multiline_records_and_eof():
         ("response.output_text.delta", "hello"),
         ("response.completed", ""),
     ]
+
+
+def test_incomplete_response_records_usage_before_error(monkeypatch):
+    client = ModelClient()
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            document = {
+                "type": "response.incomplete",
+                "response": {
+                    "status": "incomplete",
+                    "incomplete_details": {"reason": "max_output_tokens"},
+                    "usage": {"input_tokens": 12, "output_tokens": 3},
+                },
+            }
+            yield f"data: {json.dumps(document)}\n".encode()
+            yield b"\n"
+
+    monkeypatch.setattr("mjj.model.urllib.request.urlopen", lambda *_a, **_k: Response())
+    with pytest.raises(ModelError, match="max_output_tokens"):
+        list(client._stream_once(API_CREDENTIAL, {}))
+    assert (client.usage.input_tokens, client.usage.output_tokens) == (12, 3)

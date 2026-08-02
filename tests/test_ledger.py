@@ -62,3 +62,20 @@ def test_estimate_is_monotonic():
     assert estimate_tokens("") == 0
     assert estimate_tokens("a") == 1
     assert estimate_tokens("a" * 4001) > estimate_tokens("a" * 4000)
+
+
+def test_budget_is_a_hard_bound_even_with_hostile_hints():
+    texts = [
+        "x" * 5000,
+        "\n".join(f"line {index}" for index in range(1000)),
+    ]
+    for budget in range(101):
+        for text in texts:
+            out = ledger(default=budget).clip("read", text, hint="hint\n" * 1000)
+            assert len(out) <= budget * CHARS_PER_TOKEN
+
+
+def test_summary_does_not_allocate_the_withheld_output():
+    led = ledger(default=1)
+    led.clip("read", "x" * 10_000_000)
+    assert "~2499999 tokens withheld" in led.summary()

@@ -25,12 +25,18 @@ decides how much to return: a sharp confidence cliff after the first one to
 three hits stops the list there, while a flatter distribution keeps spending
 the allowance on broader or naming-variant queries.
 
-The tool builds `.mjj/index` on its first call. An index can also be prepared
-explicitly:
+The tool builds `.mjj/index` on its first call. The identical path is exposed
+as a disk-search CLI, and an index can be prepared explicitly:
 
 ```bash
-python -m mjj.search.index .
+mjj search refreshAccessToken mjj --limit 8 --stats
+mjj search 'class .*Server' --regex --json
+mjj index
 ```
+
+Like `rg`, `mjj search` exits `0` for matches, `1` for no matches, and `2` for
+invalid input or an indexing error. `mjj-search` is a standalone alias useful
+in scripts that do not need the rest of the agent CLI.
 
 Tool calls accept:
 
@@ -114,7 +120,7 @@ postings when nothing changed. As with any stat-keyed cache, a program that
 changes content while preserving both mtime and size must force a rebuild:
 
 ```bash
-python -m mjj.search.index . --force
+mjj index --force
 ```
 
 ## Persistence and native scan

@@ -102,6 +102,19 @@ def test_tool_call_round_trip(monkeypatch):
     assert types == ["message", "function_call", "function_call_output", "message"]
 
 
+def test_program_issued_tool_call_preserves_caller(monkeypatch):
+    issued = call("echo", {"text": "hello"})
+    issued["caller"] = "program_1"
+    agent = build(
+        monkeypatch,
+        [issued],
+        [message("finished")],
+        tools=[Echo()],
+    )
+    list(agent.run("go"))
+    assert agent.items[2]["caller"] == "program_1"
+
+
 def test_reasoning_items_are_echoed_verbatim(monkeypatch):
     reasoning = {
         "type": "reasoning",
@@ -112,6 +125,16 @@ def test_reasoning_items_are_echoed_verbatim(monkeypatch):
     agent = build(monkeypatch, [reasoning, message("ok")])
     list(agent.run("think"))
     assert agent.items[1] == reasoning  # [0] is the user message
+
+
+def test_compaction_prunes_the_live_window(monkeypatch):
+    compact = {"type": "compaction", "encrypted_content": "OPAQUE"}
+    agent = build(monkeypatch, [compact, message("continued")])
+    agent.items = [message("old answer")]
+    steps = list(agent.run("keep going"))
+    compacted = [step for step in steps if step.kind == "compaction"]
+    assert compacted[0].meta["dropped_items"] == 2
+    assert [item["type"] for item in agent.items] == ["compaction", "message"]
 
 
 def test_tool_crash_becomes_a_failed_result_not_a_traceback(monkeypatch):

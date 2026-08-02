@@ -15,6 +15,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 
+COMPACTION_TYPES = {"compaction"}
+
+
+def prune_to_latest_compaction(items: list[dict]) -> tuple[list[dict], int]:
+    """Return the canonical small window after server-side compaction."""
+    for index in range(len(items) - 1, -1, -1):
+        if items[index].get("type") in COMPACTION_TYPES:
+            return items[index:], index
+    return items, 0
+
+
 def sessions_dir() -> Path:
     root = os.environ.get("MJJ_HOME") or "~/.mjj"
     path = Path(root).expanduser() / "sessions"
@@ -73,7 +84,7 @@ def load_items(path: Path) -> list[dict]:
             continue
         if doc.get("kind") == "item":
             items.append(doc["item"])
-    return items
+    return prune_to_latest_compaction(items)[0]
 
 
 def latest() -> Path | None:

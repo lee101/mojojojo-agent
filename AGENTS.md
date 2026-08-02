@@ -30,7 +30,8 @@ instead of being paid for in context.
 | `mjj/session.py` | rollout JSONL, resume, fork |
 | `mjj/ledger.py` | token accounting + output truncation policy |
 | `mjj/config.py` | config resolution (env, `~/.mjj/config.toml`, flags) |
-| `mjj/tools/` | shell, apply_patch, read/ls, py (sandboxed), search |
+| `mjj/tools/` | shell, apply_patch, read/ls, py, search, skill loading |
+| `mjj/skills.py` | scoped `SKILL.md` discovery and metadata |
 | `mjj/search/` | mojo-embed backed index: literal + lexical + semantic |
 | `mjj/kernels/` | mojosub `@jit` hot paths with CPython fallbacks |
 | `mjj/server.py` | SSE agent backend with app.nz SSO + credit billing |
@@ -94,6 +95,7 @@ same ledger as `exec:` runs do; the app_id for this service is `mojojojo`.
 uv sync                              # dev env
 uv run pytest -q                     # unit tests (offline, no creds needed)
 uv run mjj exec "..."                # headless run
-uv run python -m mjj.search.index .  # build a repo index
+uv run mjj search QUERY [PATH]        # hybrid disk search
+uv run mjj index                      # build or refresh a repo index
 bench/run.sh                         # all benchmarks under a lock
 ```

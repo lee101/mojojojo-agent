@@ -304,7 +304,9 @@ class _WorkspaceTool:
 
 
 def _server_registry(workspace: Path) -> Registry:
-    source = build_registry()
+    # Hosted users may load skills from their own workspace, never from the
+    # service account's ~/.codex or ~/.claude directories.
+    source = build_registry(include_user_skills=False)
     registry = Registry()
     for tool in source.tools.values():
         registry.add(_WorkspaceTool(tool, workspace))
@@ -500,8 +502,11 @@ class AgentService:
         cwd_value = payload.get("cwd") or ""
         if not isinstance(model, str) or not _MODEL.fullmatch(model):
             raise RequestError(400, "invalid model")
-        if effort not in ("low", "medium", "high", "xhigh"):
-            raise RequestError(400, "effort must be low, medium, high, or xhigh")
+        if effort not in ("none", "minimal", "low", "medium", "high", "xhigh", "max"):
+            raise RequestError(
+                400,
+                "effort must be none, minimal, low, medium, high, xhigh, or max",
+            )
         if not isinstance(cwd_value, str):
             raise RequestError(400, "cwd must be a relative path")
         if session_id is not None and (

@@ -11,12 +11,21 @@ import os
 
 from .base import Registry, Tool, ToolContext, ToolResult  # noqa: F401
 
-MODULES = ("fs", "shell", "patch", "search", "py_exec")
+MODULES = ("fs", "shell", "patch", "search", "py_exec", "skills")
 
 
-def build_registry(only: list[str] | None = None) -> Registry:
+def build_registry(
+    only: list[str] | None = None,
+    *,
+    disabled: tuple[str, ...] | list[str] = (),
+    include_user_skills: bool = True,
+    skill_paths=(),
+) -> Registry:
     registry = Registry()
-    disabled = {n for n in (os.environ.get("MJJ_DISABLE_TOOLS") or "").split(",") if n}
+    disabled_names = {
+        n for n in (os.environ.get("MJJ_DISABLE_TOOLS") or "").split(",") if n
+    }
+    disabled_names.update(disabled)
     for module_name in MODULES:
         if only and module_name not in only:
             continue
@@ -24,7 +33,15 @@ def build_registry(only: list[str] | None = None) -> Registry:
             module = __import__(f"mjj.tools.{module_name}", fromlist=["TOOLS"])
         except Exception:
             continue
-        for tool in getattr(module, "TOOLS", []):
-            if tool.name not in disabled:
+        tools = (
+            module.build_tools(
+                include_user=include_user_skills,
+                extra_paths=skill_paths,
+            )
+            if module_name == "skills"
+            else getattr(module, "TOOLS", [])
+        )
+        for tool in tools:
+            if tool.name not in disabled_names:
                 registry.add(tool)
     return registry

@@ -18,7 +18,7 @@ from typing import Callable, Iterator
 from .ledger import Ledger
 from .model import Event, ModelClient
 from .prompt import SYSTEM_PROMPT
-from .session import Session
+from .session import Session, prune_to_latest_compaction
 from .tools.base import Registry, ToolContext, ToolResult
 
 
@@ -26,7 +26,7 @@ from .tools.base import Registry, ToolContext, ToolResult
 class Step:
     """What the caller sees while a turn runs."""
 
-    kind: str  # reasoning | text | tool_call | tool_result | usage | error
+    kind: str  # reasoning | text | tool_call | tool_result | compaction | usage | error
     text: str = ""
     name: str = ""
     meta: dict = field(default_factory=dict)
@@ -105,6 +105,12 @@ class Agent:
             return None
         item = event.item
         item_type = item.get("type")
+        if item_type == "compaction":
+            self.append(item)
+            self.items, dropped = prune_to_latest_compaction(self.items)
+            if self.session:
+                self.session.note(compaction=True, dropped_items=dropped)
+            return Step(kind="compaction", meta={"dropped_items": dropped})
         if item_type == "reasoning":
             # Verbatim, including encrypted_content. Rewriting or dropping this
             # makes the model re-think work it already did.
@@ -131,13 +137,14 @@ class Agent:
         result: ToolResult = self.registry.dispatch(
             name, call.get("arguments", "") or "{}", self.ctx
         )
-        self.append(
-            {
-                "type": "function_call_output",
-                "call_id": call.get("call_id", ""),
-                "output": result.output,
-            }
-        )
+        output = {
+            "type": "function_call_output",
+            "call_id": call.get("call_id", ""),
+            "output": result.output,
+        }
+        if call.get("caller"):
+            output["caller"] = call["caller"]
+        self.append(output)
         yield Step(
             kind="tool_result",
             name=name,
@@ -165,6 +172,8 @@ def render(steps: Iterator[Step], out, verbose: bool = False) -> int:
             out.write(f"{body}{marker}\n")
         elif step.kind == "usage" and verbose:
             out.write(f"\n[{step.text}]\n")
+        elif step.kind == "compaction" and verbose:
+            out.write(f"\n[compacted {step.meta.get('dropped_items', 0)} items]\n")
         elif step.kind == "error":
             failed = True
             out.write(f"\nerror: {step.text}\n")

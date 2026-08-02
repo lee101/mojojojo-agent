@@ -13,9 +13,13 @@ from pathlib import Path
 
 from . import auth
 from .agent import Agent, render
-from .ledger import Ledger
+from .config import ConfigError, EFFORTS, VERBOSITIES, load as load_config
+from .ledger import Budget, Ledger
 from .model import ModelClient, probe
+from .search.cli import main as search_main
+from .search.index import build_index
 from .session import Session, resume
+from .skills import discover
 from .tools import build_registry
 
 
@@ -25,12 +29,19 @@ def _agent(args) -> Agent:
         session, items = resume(args.resume or None)
     else:
         session = Session()
-    client = ModelClient(model=args.model, effort=args.effort)
+    client = ModelClient(
+        model=args.model,
+        effort=args.effort,
+        verbosity=args.verbosity,
+    )
     agent = Agent(
-        registry=build_registry(),
+        registry=build_registry(
+            disabled=args.disabled_tools,
+            skill_paths=args.skill_paths,
+        ),
         client=client,
         cwd=Path(args.cwd).resolve(),
-        ledger=Ledger(),
+        ledger=Ledger(Budget(default=args.tool_budget)),
         session=session,
     )
     agent.items = items
@@ -83,18 +94,100 @@ def cmd_auth(args) -> int:
 
 
 def cmd_tools(args) -> int:
-    registry = build_registry()
+    registry = build_registry(
+        disabled=args.disabled_tools,
+        skill_paths=args.skill_paths,
+    )
     for schema in registry.schemas():
         print(f"{schema['name']:12} {schema['description'].splitlines()[0]}")
     return 0
 
 
+def cmd_search(args) -> int:
+    argv = [
+        args.query,
+        args.path,
+        "--root", args.cwd,
+        "--mode", args.mode,
+        "--limit", str(args.limit),
+    ]
+    if args.regex:
+        argv.append("--regex")
+    if args.force:
+        argv.append("--force")
+    if args.json:
+        argv.append("--json")
+    if args.stats:
+        argv.append("--stats")
+    return search_main(argv)
+
+
+def cmd_index(args) -> int:
+    root = Path(args.root or args.cwd).resolve()
+    try:
+        index = build_index(root, force=args.force)
+    except (OSError, ValueError) as exc:
+        print(f"mjj index: {exc}", file=sys.stderr)
+        return 2
+    action = "wrote" if index.stats.wrote_index else "reused"
+    print(
+        f"{action} {index.index_path}: {index.stats.files} files, "
+        f"{index.stats.chunks} chunks in {index.stats.elapsed_seconds * 1000:.1f} ms "
+        f"({index.backend_name})"
+    )
+    return 0
+
+
+def cmd_skills(args) -> int:
+    skills = discover(Path(args.cwd), extra_paths=args.skill_paths)
+    if args.json:
+        print(
+            json.dumps(
+                [
+                    {
+                        "name": skill.name,
+                        "qualified_name": skill.qualified_name,
+                        "description": skill.description,
+                        "path": str(skill.path),
+                    }
+                    for skill in skills
+                ],
+                indent=2,
+            )
+        )
+        return 0
+    if not skills:
+        print("no skills found")
+        return 0
+    for skill in skills:
+        print(f"{skill.qualified_name:28} {skill.description}")
+    return 0
+
+
+def cmd_config(args) -> int:
+    print(json.dumps(args.resolved_config.public(), indent=2))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    bootstrap = argparse.ArgumentParser(add_help=False)
+    bootstrap.add_argument("--cwd", default=".")
+    bootstrap.add_argument("--config")
+    known, _ = bootstrap.parse_known_args(argv)
+    try:
+        config = load_config(known.cwd, explicit=known.config)
+    except ConfigError as exc:
+        print(f"mjj: {exc}", file=sys.stderr)
+        return 2
+
     parser = argparse.ArgumentParser(prog="mjj")
-    parser.add_argument("--model", default=ModelClient.model)
-    parser.add_argument("--effort", default=ModelClient.effort,
-                        choices=["low", "medium", "high", "xhigh"])
-    parser.add_argument("--cwd", default=".")
+    parser.add_argument("--model", default=config.model)
+    parser.add_argument("--effort", default=config.effort, choices=EFFORTS)
+    parser.add_argument("--verbosity", default=config.verbosity, choices=VERBOSITIES)
+    parser.add_argument("--tool-budget", type=int, default=config.tool_budget)
+    parser.add_argument("--cwd", default=known.cwd)
+    parser.add_argument("--config")
     parser.add_argument("-v", "--verbose", action="store_true")
     sub = parser.add_subparsers(dest="command")
 
@@ -114,7 +207,33 @@ def main(argv: list[str] | None = None) -> int:
     listing = sub.add_parser("tools", help="what the model can call")
     listing.set_defaults(func=cmd_tools)
 
+    searching = sub.add_parser("search", help="hybrid disk search")
+    searching.add_argument("query")
+    searching.add_argument("path", nargs="?", default="")
+    searching.add_argument("--mode", choices=["auto", "literal", "semantic"], default="auto")
+    searching.add_argument("--regex", action="store_true")
+    searching.add_argument("--limit", type=int, choices=range(1, 21), default=8)
+    searching.add_argument("--force", action="store_true")
+    searching.add_argument("--json", action="store_true")
+    searching.add_argument("--stats", action="store_true")
+    searching.set_defaults(func=cmd_search)
+
+    indexing = sub.add_parser("index", help="build or refresh the disk search index")
+    indexing.add_argument("root", nargs="?")
+    indexing.add_argument("--force", action="store_true")
+    indexing.set_defaults(func=cmd_index)
+
+    skills = sub.add_parser("skills", help="list discovered SKILL.md workflows")
+    skills.add_argument("--json", action="store_true")
+    skills.set_defaults(func=cmd_skills)
+
+    config_command = sub.add_parser("config", help="show resolved non-secret config")
+    config_command.set_defaults(func=cmd_config)
+
     args = parser.parse_args(argv)
+    args.disabled_tools = config.disabled_tools
+    args.skill_paths = config.skill_paths
+    args.resolved_config = config
     if not getattr(args, "func", None):
         args.command = "chat"
         args.resume = None

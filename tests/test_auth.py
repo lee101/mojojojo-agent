@@ -40,7 +40,7 @@ def _write_auth(home, *, expired=True, refresh="rt.old"):
     )
 
 
-def test_reads_and_refreshes(tmp_path, monkeypatch):
+def test_reads_and_refreshes_without_overwriting_owner(tmp_path, monkeypatch):
     _write_auth(tmp_path)
     calls = []
 
@@ -59,8 +59,8 @@ def test_reads_and_refreshes(tmp_path, monkeypatch):
     assert cred.kind == "chatgpt"
     assert cred.base_url.endswith("/codex")
     assert cred.headers["chatgpt-account-id"] == "acct-1"
-    # Rotated token reached disk, or the next codex process is locked out.
-    assert json.loads((tmp_path / "auth.json").read_text())["tokens"]["refresh_token"] == "rt.new"
+    # codex-infinity owns this file; refreshes stay in memory by default.
+    assert json.loads((tmp_path / "auth.json").read_text())["tokens"]["refresh_token"] == "rt.old"
 
 
 def test_fresh_token_is_not_refreshed(tmp_path, monkeypatch):
@@ -72,9 +72,9 @@ def test_fresh_token_is_not_refreshed(tmp_path, monkeypatch):
     assert cred.token
 
 
-def test_write_back_can_be_disabled(tmp_path, monkeypatch):
+def test_write_back_can_be_enabled(tmp_path, monkeypatch):
     _write_auth(tmp_path)
-    monkeypatch.setenv("MJJ_WRITE_BACK_AUTH", "0")
+    monkeypatch.setenv("MJJ_WRITE_BACK_AUTH", "1")
     monkeypatch.setattr(
         auth,
         "refresh_tokens",
@@ -86,7 +86,7 @@ def test_write_back_can_be_disabled(tmp_path, monkeypatch):
     )
     auth.MaxPlanCredentials(home=tmp_path).credential()
     on_disk = json.loads((tmp_path / "auth.json").read_text())
-    assert on_disk["tokens"]["refresh_token"] == "rt.old"
+    assert on_disk["tokens"]["refresh_token"] == "rt.new"
 
 
 def test_explicit_env_key_wins(tmp_path, monkeypatch):
@@ -110,6 +110,16 @@ def test_falls_back_to_env_key_when_no_credential(tmp_path, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-metered")
     empty = auth.MaxPlanCredentials(home=tmp_path)  # no auth.json here
     cred = auth.CredentialResolver(max_plan=empty).resolve()
+    assert (cred.kind, cred.token) == ("api_key", "sk-metered")
+
+
+def test_can_prefer_env_key_after_max_plan_auth_failure(tmp_path, monkeypatch):
+    _write_auth(tmp_path, expired=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-metered")
+    resolver = auth.CredentialResolver(
+        max_plan=auth.MaxPlanCredentials(home=tmp_path)
+    )
+    cred = resolver.resolve(fallback=True)
     assert (cred.kind, cred.token) == ("api_key", "sk-metered")
 
 

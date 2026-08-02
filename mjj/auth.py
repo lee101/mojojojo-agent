@@ -2,14 +2,12 @@
 
 The primary path is the ChatGPT max-plan sign-in that already exists on the
 machine (codex / codex-infinity put it in ``$CODEX_HOME/auth.json``). We do not
-run our own device-login flow for it: we read that file, refresh the OAuth
-tokens against ``auth.openai.com``, and exchange the fresh ``id_token`` for a
-plain OpenAI API key. That key works with the normal ``/v1/responses``
-endpoint, which keeps the model client boring.
+run our own device-login flow for it: we read that file, refresh its OAuth
+tokens in memory, and use the same Responses backend as Codex.
 
 Ownership matters here. codex-infinity owns ``~/.codexinfinity/auth.json`` and
-rotates it on its own schedule. We only ever read it, unless the operator opts
-in with ``MJJ_WRITE_BACK_AUTH=1``.
+rotates it on its own schedule. We only write it when the operator explicitly
+opts in with ``MJJ_WRITE_BACK_AUTH=1``.
 """
 
 from __future__ import annotations
@@ -207,15 +205,13 @@ class MaxPlanCredentials:
         if mtime != self._loaded_mtime:
             self._tokens = MaxPlanTokens.from_auth_json(doc)
             self._loaded_mtime = mtime
+            self._key_obtained = mtime
         return doc
 
     def _write_back(self, doc: dict) -> None:
-        # Rotation is destructive: the issuer retires a refresh_token once it
-        # has been used. If we refreshed and did NOT write the new token back,
-        # the next codex / codex-infinity refresh against the stale copy would
-        # fail. One file, one rotation chain — so writing back is the default
-        # and `MJJ_WRITE_BACK_AUTH=0` is the opt-out for read-only setups.
-        if os.environ.get("MJJ_WRITE_BACK_AUTH") == "0":
+        # codex-infinity owns this file. Operators that know the credential is
+        # shared as one rotation chain can opt into coordinated write-back.
+        if os.environ.get("MJJ_WRITE_BACK_AUTH") != "1":
             return
         path = self.auth_path
         if not path:
@@ -350,20 +346,24 @@ class CredentialResolver:
 
     max_plan: MaxPlanCredentials = field(default_factory=MaxPlanCredentials)
 
-    def resolve(self, force: bool = False) -> Credential:
+    def resolve(self, force: bool = False, fallback: bool = False) -> Credential:
         explicit = (os.environ.get("MJJ_OPENAI_API_KEY") or "").strip()
         if explicit:
             return Credential(
                 kind="api_key", token=explicit, base_url=API_BASE_URL, source="env"
             )
+        metered = (os.environ.get("OPENAI_API_KEY") or "").strip()
+        if fallback and metered:
+            return Credential(
+                kind="api_key", token=metered, base_url=API_BASE_URL, source="env"
+            )
         try:
             return self.max_plan.credential(force=force)
         except AuthError:
-            fallback = (os.environ.get("OPENAI_API_KEY") or "").strip()
-            if fallback:
+            if metered:
                 return Credential(
                     kind="api_key",
-                    token=fallback,
+                    token=metered,
                     base_url=API_BASE_URL,
                     source="env",
                 )

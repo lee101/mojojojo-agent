@@ -14,6 +14,10 @@ mjj auth --probe                     # reuses your existing ChatGPT max-plan sig
 mjj exec "make the failing test in tests/test_router.py pass"
 ```
 
+From a checkout, `uv sync && uv run pytest -q` creates the development
+environment and verifies it. The base package is stdlib-only on Python 3.11+;
+`mojosub` and `mojo-embed` are guarded accelerators, not startup requirements.
+
 Status: **early but working end to end** — credential, model client, loop,
 tools, search, sandboxed execution, and a served mode with app.nz sign-in.
 
@@ -26,6 +30,7 @@ tools, search, sandboxed execution, and a served mode with app.nz sign-in.
 | edit code | rewrite the file | `apply_patch` envelope, per-file `+n/-n` summary |
 | tool output | truncate at N bytes | one ledger, head+tail kept, exactly what was dropped is stated |
 | reasoning | re-derived each turn | reasoning items echoed back verbatim so the cache hits |
+| long sessions | resend an ever-growing transcript | server compaction replaces old items with opaque carried state |
 
 ### Search, against ripgrep
 
@@ -42,6 +47,14 @@ Corpus is a real 99-file repository. `bench/search_bench.py` reproduces it.
 Search that always answers is worse than search that says *no matches*, so a
 hit must share a distinctive word with the query. [docs/search.md](docs/search.md)
 shows the measurements that forced that design.
+
+The same fused `rg` + lexical + mojo-embed path is usable directly from disk:
+
+```bash
+mjj search workerBootstrap src --stats
+mjj search 'def .*handler' --regex --json
+mjj index                              # prepare or incrementally refresh .mjj/index
+```
 
 ### Execution
 
@@ -69,15 +82,32 @@ Every number this project publishes is reproducible from `bench/` or
 ## Credentials
 
 The primary path is the ChatGPT max-plan sign-in you already have — the one
-`codex` wrote to `~/.codexinfinity/auth.json`. `mjj` reads it, refreshes the
-OAuth tokens against `auth.openai.com`, and writes the rotated tokens back so
-every other tool on the machine keeps working. Set `MJJ_OPENAI_API_KEY` to use
-a plain API key instead.
+Codex Infinity wrote to `~/.codexinfinity/auth.json` (or Codex wrote to
+`~/.codex/auth.json`). `mjj` reads it and refreshes OAuth tokens in memory.
+It never overwrites the owning tool's file unless `MJJ_WRITE_BACK_AUTH=1`.
+Set `MJJ_OPENAI_API_KEY` to force a plain API key; after repeated Max-plan
+authentication failures, `OPENAI_API_KEY` is the automatic fallback.
+
+Long sessions enable Responses API server-side compaction at 200,000 rendered
+tokens. Set `MJJ_COMPACT_THRESHOLD=0` to disable it or choose another threshold.
+If a backend does not support compaction, the request is retried without it.
 
 ```bash
 mjj auth            # what credential is in play, what plan, when it expires
 mjj auth --probe    # one real round trip
 ```
+
+## Configuration and skills
+
+`~/.mjj/config.toml` supplies user defaults; the nearest repository
+`.mjj/config.toml` overrides it, then `MJJ_*` environment values and command
+flags win. `mjj config` prints the resolved non-secret values. See
+[docs/config.md](docs/config.md).
+
+`mjj skills` discovers project and user `SKILL.md` workflows. The model's
+bounded `skill` tool loads a workflow only when needed, so full domain manuals
+do not tax every turn. Hosted sessions only see workspace skills. See
+[docs/skills.md](docs/skills.md).
 
 ## Served, with app.nz sign-in
 

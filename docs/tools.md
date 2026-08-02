@@ -76,3 +76,26 @@ The entire patch is parsed and applied in memory before writes begin. New
 contents are staged to temporary files and replaced only after every file and
 hunk validates. On success the result contains only per-file `+n/-n` counts,
 never file contents.
+
+## `search`
+
+`search` fuses bounded `rg --json` literal candidates, identifier-aware BM25,
+and the optional mojo-embed int8 scan. It returns ranked `path:line` evidence,
+not file dumps. See [search.md](search.md) for modes, grounding, persistence,
+and measured token comparisons.
+
+## `py`
+
+`py` routes safe pure computation through current-interpreter execution and
+mojosub's non-blocking tiered JIT. Code requiring isolation uses the local jail
+or worker. Missing acceleration and sandbox backends degrade visibly according
+to the selected policy. See [exec.md](exec.md).
+
+## `skill`
+
+Calling `skill` with no name returns a compact catalog. Calling it with a short
+or qualified name loads that workflow's `SKILL.md`, base directory, and a
+bounded bundled-file listing. Project skills are searched before user skills;
+ambiguous short names require `scope:name`. Hosted sessions disable user-scope
+discovery so the service account's private skills cannot cross into a tenant
+workspace. See [skills.md](skills.md).

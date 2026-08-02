@@ -20,6 +20,8 @@ Tools:
 - `py` to compute. It runs natively (Python compiled to Mojo), so measuring is
   cheaper than reasoning about performance in your head. Use it for real work:
   parsing, counting, simulating, checking a hypothesis against data.
+- `skill` lists and loads specialized workflows. Load a matching skill before
+  doing domain-specific work; its bundled paths can then be read normally.
 
 Style:
 - Match the surrounding code. Its conventions beat your preferences.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hmac
 import os
 import queue
 import re
@@ -40,6 +41,7 @@ _INTERRUPT_PATH = re.compile(
 )
 _SESSION_ID = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
 _MODEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+_USER_ID = re.compile(r"^[A-Za-z0-9_-]{8,96}$")
 _END = object()
 
 
@@ -61,6 +63,8 @@ class ServerConfig:
     max_body_bytes: int = 1 << 20
     max_prompt_chars: int = 256_000
     tokens_per_credit: float = 1000.0
+    service_token: str = ""
+    control_plane_url: str = "http://127.0.0.1:4341/internal/agent/settle"
 
     @classmethod
     def from_env(cls) -> "ServerConfig":
@@ -105,6 +109,13 @@ class ServerConfig:
                     os.environ.get("MJJ_TOKENS_PER_CREDIT", "1000"),
                 )
             ),
+            service_token=os.environ.get(
+                "MJJ_SERVICE_TOKEN", os.environ.get("MJJ_AGENT_TOKEN", "")
+            ).strip(),
+            control_plane_url=os.environ.get(
+                "MJJ_CONTROL_PLANE_URL",
+                "http://127.0.0.1:4341/internal/agent/settle",
+            ).strip(),
         )
 
 
@@ -112,6 +123,50 @@ class RequestError(RuntimeError):
     def __init__(self, status: int, message: str):
         super().__init__(message)
         self.status = status
+
+
+@dataclass(frozen=True)
+class RemoteCharge:
+    values: dict
+
+    def as_dict(self) -> dict:
+        return self.values
+
+
+class ControlPlaneBilling:
+    """Settle hosted usage in mojojojo's PostgreSQL ledger.
+
+    The browser session and API key terminate at the Go proxy. The backend
+    receives only an opaque user id and the shared service credential.
+    """
+
+    def __init__(self, url: str, token: str, timeout: float = 15.0):
+        self.url = url
+        self.token = token
+        self.timeout = timeout
+
+    def charge(self, user: User, model: str, tokens: int, run_id: str) -> RemoteCharge:
+        body = json.dumps(
+            {"user_id": user.id, "run_id": run_id, "model": model, "tokens": tokens},
+            separators=(",", ":"),
+        ).encode()
+        request = urllib.request.Request(self.url, data=body, method="POST")
+        request.add_header("Authorization", "Bearer " + self.token)
+        request.add_header("Content-Type", "application/json")
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                document = json.loads(response.read(1 << 20))
+        except urllib.error.HTTPError as exc:
+            detail = exc.read(4096).decode("utf-8", "replace").strip()
+            raise RuntimeError(
+                f"control-plane settlement returned HTTP {exc.code}: {detail}"
+            ) from exc
+        except (urllib.error.URLError, TimeoutError, ValueError) as exc:
+            raise RuntimeError(f"control-plane settlement failed: {exc}") from exc
+        charge = document.get("charge")
+        if not document.get("ok") or not isinstance(charge, dict):
+            raise RuntimeError("control-plane settlement returned an invalid response")
+        return RemoteCharge(charge)
 
 
 class InterruptibleModelClient(ModelClient):
@@ -466,13 +521,30 @@ class AgentService:
     ):
         self.config = config
         self.config.workspace_root.mkdir(parents=True, exist_ok=True)
-        self.auth = auth or AuthStore(config.appnz_database_path)
-        self.billing = billing or Billing(
-            config.database_path, self.auth, config.tokens_per_credit
-        )
+        if config.service_token:
+            self.auth = auth
+            self.billing = billing or ControlPlaneBilling(
+                config.control_plane_url, config.service_token
+            )
+        else:
+            self.auth = auth or AuthStore(config.appnz_database_path)
+            self.billing = billing or Billing(
+                config.database_path, self.auth, config.tokens_per_credit
+            )
         self.runs = RunManager(self)
 
     def authenticate(self, handler: BaseHTTPRequestHandler) -> tuple[str, User | None]:
+        if self.config.service_token:
+            expected = "Bearer " + self.config.service_token
+            presented = (handler.headers.get("Authorization") or "").strip()
+            user_id = (handler.headers.get("X-Mojojojo-User") or "").strip()
+            if not hmac.compare_digest(presented, expected) or not _USER_ID.fullmatch(user_id):
+                raise RequestError(401, "invalid mojojojo service identity")
+            # The Go control plane checks the live balance before the run and
+            # owns final settlement. A positive sentinel keeps that policy in
+            # one place without copying account balances into this process.
+            return user_id, User(id=user_id, email="", free_credits=1, via="service")
+        assert self.auth is not None
         user = self.auth.user_from_headers(handler.headers)
         if user is not None:
             return user.id, user
@@ -708,7 +780,7 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         if not self._check_origin():
             return
-        if self.path == "/healthz":
+        if self.path in ("/health", "/healthz"):
             self._json(200, {"ok": True, "service": "mojojojo-agent"})
             return
         if self.path == "/v1/agent/sessions":

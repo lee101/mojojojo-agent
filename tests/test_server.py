@@ -12,7 +12,7 @@ import pytest
 from mjj.appnz import AuthStore, Billing, hash_token
 from mjj.ledger import Ledger
 from mjj.model import Event, ModelClient
-from mjj.server import AgentHTTPServer, AgentService, ServerConfig, _server_registry
+from mjj.server import AgentHTTPServer, AgentService, RemoteCharge, ServerConfig, _server_registry
 from mjj.tools.base import ToolContext
 
 
@@ -385,3 +385,56 @@ def test_disconnecting_client_cancels_instead_of_orphaning(
     response.close()
     conn.close()
     assert closed.wait(3)
+
+
+def test_trusted_proxy_identity_runs_and_settles_without_shared_database(
+    tmp_path, monkeypatch
+):
+    charges = []
+
+    class Billing:
+        def charge(self, user, model, tokens, run_id):
+            charges.append((user.id, model, tokens, run_id))
+            return RemoteCharge({"tokens": tokens, "charged_credits": 1, "balance": 9})
+
+    monkeypatch.setattr(ModelClient, "stream", fake_stream)
+    config = ServerConfig(
+        host="127.0.0.1",
+        port=0,
+        workspace_root=tmp_path / "workspaces",
+        service_token="internal-secret",
+    )
+    service = AgentService(config, billing=Billing())
+    server = AgentHTTPServer(("127.0.0.1", 0), service)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    env = {"port": server.server_address[1]}
+    try:
+        status, _, body = request(env, "POST", "/v1/agent/runs", {"prompt": "hello"})
+        assert status == 401
+        assert b"service identity" in body
+
+        headers = {
+            "Authorization": "Bearer internal-secret",
+            "X-Mojojojo-User": "user_abcdefgh",
+        }
+        status, response_headers, body = request(
+            env, "POST", "/v1/agent/runs", {"prompt": "hello"}, headers
+        )
+        assert status == 200
+        assert response_headers["X-Run-ID"]
+        events = sse_events(body)
+        usage = [data for event, data in events if event == "usage"][-1]
+        assert usage["meta"]["cost"]["charged_credits"] == 1
+        assert charges and charges[0][:3] == ("user_abcdefgh", "gpt-5.6-sol", 100)
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_health_is_available_on_both_conventional_paths(server_env):
+    for path in ("/health", "/healthz"):
+        status, _, body = request(server_env, "GET", path)
+        assert status == 200
+        assert json.loads(body)["service"] == "mojojojo-agent"

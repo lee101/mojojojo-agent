@@ -173,6 +173,29 @@ def test_stream_error_is_surfaced_and_stops(monkeypatch):
     assert steps[-1].kind == "error" and "connection reset" in steps[-1].text
 
 
+def test_done_message_without_delta_is_still_rendered(monkeypatch):
+    def done_only(self, items, instructions, tools=None):
+        yield Event("response.output_item.done", {"item": message("fallback")})
+
+    monkeypatch.setattr(ModelClient, "stream", done_only)
+    agent = Agent(registry=Registry())
+    out, err = StringIO(), StringIO()
+    code, final = render_exec(agent.run("go"), out, err)
+    assert code == 0 and final == "fallback"
+    assert out.getvalue() == "fallback\n"
+
+
+def test_empty_model_completion_is_an_error(monkeypatch):
+    def empty(self, items, instructions, tools=None):
+        return iter(())
+
+    monkeypatch.setattr(ModelClient, "stream", empty)
+    agent = Agent(registry=Registry())
+    steps = list(agent.run("go"))
+    assert steps[-1].kind == "error"
+    assert "without an assistant message" in steps[-1].text
+
+
 def test_exec_renderer_keeps_progress_off_stdout() -> None:
     out, err = StringIO(), StringIO()
     steps = iter(

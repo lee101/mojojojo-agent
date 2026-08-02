@@ -217,7 +217,7 @@ def cmd_config(args) -> int:
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     bootstrap = argparse.ArgumentParser(add_help=False)
-    bootstrap.add_argument("--cwd", default=".")
+    bootstrap.add_argument("-C", "--cd", "--cwd", dest="cwd", default=".")
     bootstrap.add_argument("--config")
     known, _ = bootstrap.parse_known_args(argv)
     try:
@@ -232,13 +232,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--effort", default=config.effort, choices=EFFORTS)
     parser.add_argument("--verbosity", default=config.verbosity, choices=VERBOSITIES)
     parser.add_argument("--tool-budget", type=int, default=config.tool_budget)
-    parser.add_argument("--cwd", default=known.cwd)
+    parser.add_argument("-C", "--cd", "--cwd", dest="cwd", default=known.cwd)
     parser.add_argument("--config")
     parser.add_argument("-v", "--verbose", action="store_true")
     sub = parser.add_subparsers(dest="command")
 
     run = sub.add_parser("exec", help="one headless run")
     run.add_argument("prompt", nargs="?")
+    run.add_argument(
+        "-C", "--cd", "--cwd", dest="cwd", default=argparse.SUPPRESS
+    )
     persistence = run.add_mutually_exclusive_group()
     persistence.add_argument("--resume", nargs="?", const="", default=None)
     persistence.add_argument("--ephemeral", action="store_true")

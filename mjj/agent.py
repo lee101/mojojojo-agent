@@ -87,6 +87,8 @@ class Agent:
             self.user(prompt)
         for _ in range(self.max_steps):
             calls: list[dict] = []
+            response_start = len(self.items)
+            emitted_text = False
             started = time.monotonic()
             try:
                 for event in self.client.stream(
@@ -96,6 +98,7 @@ class Agent:
                 ):
                     step = self._consume(event, calls)
                     if step is not None:
+                        emitted_text = emitted_text or step.kind == "text"
                         yield step
             except Exception as exc:
                 yield Step(kind="error", text=f"{type(exc).__name__}: {exc}")
@@ -106,6 +109,15 @@ class Agent:
                 meta={"seconds": round(time.monotonic() - started, 2)},
             )
             if not calls:
+                if not emitted_text:
+                    final_text = _latest_assistant_text(self.items[response_start:])
+                    if final_text:
+                        yield Step(kind="text", text=final_text)
+                    else:
+                        yield Step(
+                            kind="error",
+                            text="model completed without an assistant message",
+                        )
                 return
             for call in calls:
                 yield from self._invoke(call)
@@ -248,6 +260,8 @@ def render_exec(
             if not jsonl:
                 err.write(f"error: {step.text}\n")
                 err.flush()
+    if response_text and not response_called_tool:
+        final_text = "".join(response_text)
     if not jsonl and final_text:
         out.write(final_text)
         if not final_text.endswith("\n"):
@@ -261,3 +275,15 @@ def _first_lines(text: str, count: int) -> str:
     if len(lines) <= count:
         return text
     return "\n".join(lines[:count]) + f"\n  … {len(lines) - count} more lines"
+
+
+def _latest_assistant_text(items: list[dict]) -> str:
+    for item in reversed(items):
+        if item.get("type") != "message" or item.get("role") != "assistant":
+            continue
+        return "".join(
+            part.get("text", "")
+            for part in item.get("content", [])
+            if part.get("type") in ("output_text", "text")
+        )
+    return ""

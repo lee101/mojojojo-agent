@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#06131b" />
+    <meta name="description" content="Pelagic — an interactive procedural ocean rendered with Three.js." />
+    <title>Pelagic — Procedural Ocean</title>
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+    <link rel="stylesheet" href="styles.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <main class="experience">
+      <div id="scene" class="scene" role="img" aria-label="Animated moonlit ocean. Drag to orbit and scroll to zoom." tabindex="0"></div>
+
+      <header class="topbar">
+        <a class="wordmark" href="." aria-label="Pelagic home">
+          <span class="wordmark-mark" aria-hidden="true">≋</span>
+          <span>PELAGIC</span>
+        </a>
+        <p class="edition">PROCEDURAL STUDY / 01</p>
+        <button class="icon-button" id="soundToggle" type="button" aria-pressed="false" aria-label="Enable ambient ocean sound">
+          <span aria-hidden="true">◌</span><span class="button-label">SOUND OFF</span>
+        </button>
+      </header>
+
+      <section class="hero-copy" aria-labelledby="title">
+        <p class="eyebrow"><span></span> A REAL-TIME WATER STUDY</p>
+        <h1 id="title">Breathe with<br />the <em>tide.</em></h1>
+        <p class="intro">Six harmonics, one horizon. A procedural seascape shaped by wind, light, and time.</p>
+      </section>
+
+      <aside class="control-deck" aria-label="Ocean controls">
+        <div class="deck-heading">
+          <div>
+            <p class="kicker">CONDITIONS</p>
+            <h2 id="presetName">Open water</h2>
+          </div>
+          <button id="pauseButton" class="pause" type="button" aria-pressed="false"><span aria-hidden="true">Ⅱ</span> Pause</button>
+        </div>
+
+        <div class="preset-row" role="group" aria-label="Weather preset">
+          <button type="button" data-preset="calm">Still</button>
+          <button type="button" data-preset="open" class="active">Open</button>
+          <button type="button" data-preset="storm">Squall</button>
+        </div>
+
+        <label class="range-row" for="swell">
+          <span>Swell</span><output id="swellValue" for="swell">1.00</output>
+          <input id="swell" type="range" min="0.25" max="1.8" step="0.01" value="1" />
+        </label>
+        <label class="range-row" for="chop">
+          <span>Surface tension</span><output id="chopValue" for="chop">0.65</output>
+          <input id="chop" type="range" min="0" max="1.4" step="0.01" value="0.65" />
+        </label>
+        <label class="range-row" for="light">
+          <span>Sun altitude</span><output id="lightValue" for="light">18°</output>
+          <input id="light" type="range" min="2" max="48" step="1" value="18" />
+        </label>
+
+        <div class="deck-footer">
+          <span><i class="drag-icon" aria-hidden="true"></i> Drag to look</span>
+          <button type="button" id="resetButton">Reset view ↗</button>
+        </div>
+      </aside>
+
+      <div class="coordinates" aria-hidden="true">
+        <span>34° 18′ S</span><span>172° 42′ E</span>
+      </div>
+
+      <div id="loading" class="loading" role="status" aria-live="polite">
+        <span></span> Reading the weather
+      </div>
+      <div id="fallback" class="fallback" hidden>
+        <p class="kicker">THE SEA IS RESTING</p>
+        <h2>WebGL could not start.</h2>
+        <p>Try a browser with hardware acceleration enabled. The controls remain available as a preview of the experience.</p>
+      </div>
+      <noscript><div class="noscript">This procedural ocean needs JavaScript and WebGL to run.</div></noscript>
+    </main>
+    <script>
+      window.setTimeout(() => {
+        if (window.__VISUALBENCH_READY__) return;
+        document.querySelector("#loading")?.classList.add("done");
+        const fallback = document.querySelector("#fallback");
+        if (fallback) fallback.hidden = false;
+      }, 8000);
+    </script>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#e9ff45" />
+    <meta name="description" content="Image Rift — an interactive image-to-image WebGL shader laboratory." />
+    <title>Image Rift — Shader Laboratory</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="lab">
+      <header class="topbar">
+        <a class="brand" href="." aria-label="Image Rift home"><span aria-hidden="true">IR/</span> IMAGE RIFT</a>
+        <p class="status-line"><i></i> WEBGL PROCESSOR <span>v1.0</span></p>
+        <div class="header-actions">
+          <button id="pauseButton" type="button" aria-pressed="false" title="Pause animation (Space)"><span aria-hidden="true">Ⅱ</span><b>PAUSE</b></button>
+          <button id="exportButton" type="button"><span aria-hidden="true">↓</span><b>EXPORT PNG</b></button>
+        </div>
+      </header>
+
+      <section class="viewport" aria-label="Shader preview">
+        <canvas id="canvas" tabindex="0" aria-label="Live transformed image. Move your pointer across the image to influence the effect."></canvas>
+        <img id="fallbackImage" src="assets/mascot.webp" alt="Purple grinning mascot with bright green eyes" hidden />
+        <div class="grid" aria-hidden="true"></div>
+        <p class="coordinate top-left" aria-hidden="true">INPUT / RGBA</p>
+        <p class="coordinate top-right" id="resolution" aria-hidden="true">0000 × 0000</p>
+        <p class="coordinate bottom-left" aria-hidden="true">MOVE POINTER TO BEND FIELD</p>
+        <p class="coordinate bottom-right" aria-hidden="true">60 FPS / GPU</p>
+        <div class="drop-target" id="dropTarget" aria-hidden="true"><span>DROP IMAGE TO RIFT</span></div>
+        <div class="webgl-fallback" id="fallback" hidden role="alert">
+          <p>RENDERER OFFLINE</p>
+          <h1>WebGL is unavailable.</h1>
+          <span>Your source image is still shown. Try enabling hardware acceleration to use the transforms.</span>
+        </div>
+      </section>
+
+      <aside class="sidebar" aria-label="Shader controls">
+        <div class="sidebar-head">
+          <div>
+            <p class="overline">SOURCE MATERIAL</p>
+            <h1>Transform<br />the familiar.</h1>
+          </div>
+          <span class="index">01—04</span>
+        </div>
+
+        <div class="source-card">
+          <img id="thumbnail" src="assets/mascot.webp" alt="Current source thumbnail" />
+          <div>
+            <strong id="fileName">mascot.webp</strong>
+            <span id="fileMeta">512 × 512 / WEBP</span>
+          </div>
+          <label class="upload-button" for="fileInput" title="Load another image">
+            <span aria-hidden="true">＋</span><span class="sr-only">Upload another image</span>
+          </label>
+          <input id="fileInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif" />
+        </div>
+
+        <fieldset class="modes">
+          <legend>TRANSFORM</legend>
+          <button type="button" data-mode="prism" class="active"><span>01</span><b>Prism fault</b><i>RGB refraction</i></button>
+          <button type="button" data-mode="relief"><span>02</span><b>Signal relief</b><i>Edge topography</i></button>
+          <button type="button" data-mode="mercury"><span>03</span><b>Liquid mercury</b><i>Chrome flow</i></button>
+          <button type="button" data-mode="halftone"><span>04</span><b>Pulse print</b><i>Graphic halftone</i></button>
+        </fieldset>
+
+        <div class="parameters">
+          <label for="intensity"><span>INTENSITY</span><output id="intensityValue">72</output><input id="intensity" type="range" min="0" max="100" value="72" /></label>
+          <label for="detail"><span>FREQUENCY</span><output id="detailValue">56</output><input id="detail" type="range" min="0" max="100" value="56" /></label>
+          <label for="hue"><span>CHROMA SHIFT</span><output id="hueValue">18°</output><input id="hue" type="range" min="-180" max="180" value="18" /></label>
+        </div>
+
+        <div class="sidebar-foot">
+          <p><kbd>1—4</kbd> select effect<br /><kbd>SPACE</kbd> freeze time</p>
+          <button id="resetButton" type="button">RESET PARAMETERS ↺</button>
+        </div>
+      </aside>
+
+      <div id="toast" class="toast" role="status" aria-live="polite"></div>
+      <noscript><div class="no-script">Image Rift requires JavaScript. The original image remains available at <a href="assets/mascot.webp">this link</a>.</div></noscript>
+    </main>
+    <script src="app.js"></script>
+  </body>
+</html>

@@ -26,7 +26,11 @@ def split_command(command: str, *, windows: bool | None = None) -> list[str]:
 def display_command(argv: Sequence[str], *, windows: bool | None = None) -> str:
     """Render argv for approval/UI without changing what will be executed."""
     values = list(argv)
-    return subprocess.list2cmdline(values) if is_windows(windows) else shlex.join(values)
+    return (
+        subprocess.list2cmdline(values)
+        if is_windows(windows)
+        else shlex.join(values)
+    )
 
 
 def command_name(value: str) -> str:

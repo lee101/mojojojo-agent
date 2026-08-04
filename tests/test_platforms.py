@@ -1,4 +1,25 @@
 from mjj.platforms import command_name, display_command, split_command
+from mjj.tools import build_registry
+
+
+def test_every_core_tool_imports_on_the_current_platform() -> None:
+    registry = build_registry(include_user_skills=False)
+
+    assert set(registry.tools) == {
+        "apply_patch",
+        "check",
+        "checkpoint",
+        "delegate",
+        "display_image",
+        "list",
+        "navigate",
+        "py",
+        "read",
+        "search",
+        "shell",
+        "skill",
+        "update_plan",
+    }
 
 
 def test_windows_command_split_preserves_drive_paths_and_escaped_quotes() -> None:

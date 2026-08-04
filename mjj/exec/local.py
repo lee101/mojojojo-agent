@@ -326,11 +326,17 @@ def _configure_mojo_environment() -> Path | None:
 
 def _modular_home(binary: Path) -> Path:
     parent = binary.parent
-    if parent.name.casefold() == "bin" and parent.parent.name.casefold() == "library":
+    if (
+        parent.name.casefold() == "bin"
+        and parent.parent.name.casefold() == "library"
+    ):
         prefix = parent.parent.parent
     else:
         prefix = parent.parent
-    candidates = (prefix / "share" / "max", prefix / "Library" / "share" / "max")
+    candidates = (
+        prefix / "share" / "max",
+        prefix / "Library" / "share" / "max",
+    )
     existing = next((path for path in candidates if path.is_dir()), None)
     if existing is not None:
         return existing

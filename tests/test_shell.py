@@ -6,7 +6,7 @@ from pathlib import Path
 
 from mjj.ledger import Budget, Ledger
 from mjj.tools.base import ToolContext
-from mjj.tools.shell import ShellTool
+from mjj.tools.shell import ShellTool, _safe
 
 
 def test_background_shell_returns_immediately_and_can_be_polled(tmp_path) -> None:
@@ -76,6 +76,11 @@ def test_safe_command_does_not_request_approval(tmp_path):
 
     assert result.ok
     assert result.output == "exit code: 0"
+
+
+def test_safe_policy_normalizes_windows_executable_suffixes() -> None:
+    assert _safe([r"C:\Tools\rg.exe", "needle", "."], False)
+    assert _safe([r"C:\Program Files\Git\bin\git.exe", "status"], False)
 
 
 def test_unsafe_command_uses_approval_and_can_be_denied(tmp_path):

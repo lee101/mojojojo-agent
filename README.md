@@ -19,10 +19,10 @@ Codex or Claude Code. Its search, output filtering, patching, and optional Mojo
 hot paths are designed to send the model useful evidence instead of whole-file
 dumps.
 
-![A real Mojojojo Agent Signal Forge browser capture: a high-contrast ultraviolet field rendered by the deterministic Visualbench workflow.](docs/assets/visualbench-signal-forge.webp)
+![Mojojojo Agent working in a terminal: searching a project, explaining a retry bug, applying a patch, and passing focused tests beside syntax-highlighted Python.](docs/assets/mjj-terminal-workflow.svg)
 
-*Actual deterministic WebGL output from `mjj visualize`, captured and scored by
-[Visualbench](visualbench/README.md). No mockup or generated marketing frame.*
+*A typical MJJ turn: focused repository evidence, a checked patch, readable
+source, and verification without leaving the terminal.*
 
 ## Install
 
@@ -166,6 +166,23 @@ The project is open source and tested on Windows, Linux, Python 3.10/3.13, and
 the pinned Mojo compiler. Start with [DEV.md](DEV.md) for architecture, native
 builds, tests, benchmarks, and release work, or [CONTRIBUTING.md](CONTRIBUTING.md)
 for the contribution workflow.
+
+## What people make with MJJ
+
+![A real Mojojojo Agent Signal Forge browser capture: a high-contrast ultraviolet field rendered by the deterministic Visualbench workflow.](docs/assets/visualbench-signal-forge.webp)
+
+*Signal Forge is actual deterministic WebGL output from `mjj visualize`,
+captured and scored by [Visualbench](visualbench/README.md).*
+
+Please show us what you make. Publish from
+[Studio](https://mojojojo.cc/studio?kind=app) and submit it to the reviewed
+[app showcase](https://mojojojo.cc/apps), or [open a contribution](CONTRIBUTING.md)
+that adds your screenshot and project link here. Browse more live work in
+[Apps](https://mojojojo.cc/apps), [Tools](https://mojojojo.cc/tools), and
+[Examples](https://mojojojo.cc/examples), or try
+[Streaming Snake](https://mojojojo.cc/studio?template=snake&kind=app), the
+[Fractal explorer](https://mojojojo.cc/examples/source/mojojojo-fractal/index.html),
+and [Tiny style transfer](https://mojojojo.cc/examples/source/mojojojo-style-transfer/index.html).
 
 [mojosub]: https://github.com/lee101/mojosub
 [mojo-embed]: https://github.com/lee101/mojo-embed

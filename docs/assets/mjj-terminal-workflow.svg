@@ -1,0 +1,127 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="840" viewBox="0 0 1440 840" role="img" aria-labelledby="title desc">
+  <title id="title">Mojojojo Agent repairing retry logic in a terminal</title>
+  <desc id="desc">A dark terminal window shows MJJ searching a project, patching Python retry logic, and passing twelve focused tests beside syntax-highlighted source code.</desc>
+  <defs>
+    <linearGradient id="frame" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#15172a"/>
+      <stop offset="1" stop-color="#090b16"/>
+    </linearGradient>
+    <linearGradient id="header" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#252844"/>
+      <stop offset="1" stop-color="#1a1c31"/>
+    </linearGradient>
+    <filter id="shadow" x="-15%" y="-20%" width="130%" height="145%">
+      <feDropShadow dx="0" dy="22" stdDeviation="24" flood-color="#02030a" flood-opacity="0.72"/>
+    </filter>
+  </defs>
+
+  <rect width="1440" height="840" fill="#070912"/>
+  <circle cx="118" cy="105" r="180" fill="#5b44ff" opacity="0.11"/>
+  <circle cx="1315" cy="735" r="245" fill="#20d9c5" opacity="0.08"/>
+
+  <g filter="url(#shadow)">
+    <rect x="34" y="34" width="1372" height="772" rx="22" fill="url(#frame)" stroke="#414563" stroke-width="2"/>
+    <path d="M56 34h1328a22 22 0 0 1 22 22v56H34V56a22 22 0 0 1 22-22z" fill="url(#header)"/>
+  </g>
+
+  <circle cx="74" cy="73" r="8" fill="#ff6477"/>
+  <circle cx="102" cy="73" r="8" fill="#ffc857"/>
+  <circle cx="130" cy="73" r="8" fill="#35d07f"/>
+  <text x="720" y="81" text-anchor="middle" fill="#aeb3cf" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18">mjj  ·  ~/projects/acme-api</text>
+
+  <line x1="822" y1="112" x2="822" y2="806" stroke="#353951" stroke-width="2"/>
+  <rect x="62" y="138" width="732" height="92" rx="12" fill="#111426" stroke="#303651"/>
+
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="21">
+    <text x="70" y="151" fill="#2de2cf" font-weight="700">╭─ mjj</text>
+    <text x="166" y="151" fill="#edf0ff">coding agent</text>
+    <text x="70" y="181" fill="#2de2cf">│</text>
+    <text x="98" y="181" fill="#c0c5dd">auto/gpt-5.6-terra</text>
+    <text x="342" y="181" fill="#6f7698">· reasoning high · permissions auto</text>
+    <text x="70" y="211" fill="#2de2cf">╰─</text>
+    <text x="108" y="211" fill="#6f7698">/ commands · F2 model · F3 reasoning</text>
+
+    <text x="70" y="269" fill="#a78bfa" font-weight="700">❯</text>
+    <text x="105" y="269" fill="#f4f6ff">Fix retry handling and verify the focused tests.</text>
+
+    <text x="70" y="315" fill="#777e9e">◆ working · ctrl-c interrupts</text>
+    <text x="83" y="358" fill="#777e9e">↳ search</text>
+    <text x="201" y="358" fill="#d7daea">request_with_retry</text>
+    <text x="436" y="358" fill="#777e9e">in src tests</text>
+
+    <text x="83" y="397" fill="#777e9e">↳ read</text>
+    <text x="177" y="397" fill="#7dd3fc">src/client.py:40-96</text>
+
+    <text x="70" y="452" fill="#2de2cf" font-weight="700">●</text>
+    <text x="105" y="452" fill="#f4f6ff">The retry loop ignores</text>
+    <text x="355" y="452" fill="#86efac">Retry-After</text>
+    <text x="502" y="452" fill="#f4f6ff">and can hammer</text>
+    <text x="105" y="483" fill="#f4f6ff">a throttled endpoint. I’ll cap the server hint and keep</text>
+    <text x="105" y="514" fill="#f4f6ff">exponential backoff as the fallback.</text>
+
+    <text x="83" y="563" fill="#777e9e">↳ apply_patch</text>
+    <text x="257" y="563" fill="#7dd3fc">src/client.py</text>
+    <text x="103" y="596" fill="#86efac">✓ patch applied · Python syntax valid</text>
+
+    <text x="83" y="645" fill="#777e9e">↳ shell</text>
+    <text x="189" y="645" fill="#d7daea">pytest -q tests/test_client.py</text>
+    <text x="103" y="678" fill="#86efac">✓ 12 passed in 0.42s</text>
+
+    <text x="70" y="733" fill="#2de2cf" font-weight="700">●</text>
+    <text x="105" y="733" fill="#f4f6ff">Fixed the retry path and verified the focused suite.</text>
+
+    <text x="70" y="778" fill="#555c7d" font-size="17">tools 4 · bounded output 8.2k · cache reused</text>
+  </g>
+
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">
+    <rect x="850" y="140" width="524" height="42" rx="9" fill="#181b2e"/>
+    <circle cx="874" cy="161" r="5" fill="#f5c451"/>
+    <text x="894" y="168" fill="#dfe3f5" font-size="18">src/client.py</text>
+    <text x="1346" y="168" text-anchor="end" fill="#626988" font-size="16">Python</text>
+
+    <g font-size="17" xml:space="preserve">
+      <text x="864" y="225" fill="#555d7d">40</text>
+      <text x="905" y="225"><tspan fill="#c084fc">def</tspan><tspan fill="#67e8f9"> retry_delay</tspan><tspan fill="#dfe3f5">(response, attempt):</tspan></text>
+
+      <text x="864" y="261" fill="#555d7d">41</text>
+      <text x="929" y="261"><tspan fill="#dfe3f5">header = response.headers.get(</tspan><tspan fill="#86efac">"Retry-After"</tspan><tspan fill="#dfe3f5">)</tspan></text>
+
+      <rect x="894" y="279" width="468" height="35" rx="5" fill="#14332d" opacity="0.9"/>
+      <text x="864" y="303" fill="#555d7d">42</text>
+      <text x="905" y="303" fill="#86efac">+</text>
+      <text x="929" y="303"><tspan fill="#c084fc">if</tspan><tspan fill="#dfe3f5"> header:</tspan></text>
+
+      <rect x="894" y="321" width="468" height="35" rx="5" fill="#14332d" opacity="0.9"/>
+      <text x="864" y="345" fill="#555d7d">43</text>
+      <text x="905" y="345" fill="#86efac">+</text>
+      <text x="953" y="345"><tspan fill="#c084fc">return</tspan><tspan fill="#f4f6ff"> min(float(header), </tspan><tspan fill="#fbbf24">MAX_DELAY</tspan><tspan fill="#f4f6ff">)</tspan></text>
+
+      <text x="864" y="397" fill="#555d7d">44</text>
+      <text x="929" y="397"><tspan fill="#c084fc">return</tspan><tspan fill="#f4f6ff"> min(</tspan><tspan fill="#fbbf24">0.25</tspan><tspan fill="#f4f6ff"> * </tspan><tspan fill="#fbbf24">2</tspan><tspan fill="#f4f6ff"> ** attempt, </tspan><tspan fill="#fbbf24">MAX_DELAY</tspan><tspan fill="#f4f6ff">)</tspan></text>
+
+      <text x="864" y="465" fill="#555d7d">45</text>
+      <text x="905" y="465"><tspan fill="#c084fc">def</tspan><tspan fill="#67e8f9"> request_with_retry</tspan><tspan fill="#dfe3f5">(request):</tspan></text>
+
+      <text x="864" y="501" fill="#555d7d">46</text>
+      <text x="929" y="501"><tspan fill="#c084fc">for</tspan><tspan fill="#dfe3f5"> attempt </tspan><tspan fill="#c084fc">in</tspan><tspan fill="#67e8f9"> range</tspan><tspan fill="#dfe3f5">(MAX_RETRIES):</tspan></text>
+
+      <text x="864" y="537" fill="#555d7d">47</text>
+      <text x="953" y="537" fill="#dfe3f5">response = send(request)</text>
+
+      <text x="864" y="573" fill="#555d7d">48</text>
+      <text x="953" y="573"><tspan fill="#c084fc">if</tspan><tspan fill="#dfe3f5"> response.ok:</tspan></text>
+
+      <text x="864" y="609" fill="#555d7d">49</text>
+      <text x="977" y="609"><tspan fill="#c084fc">return</tspan><tspan fill="#dfe3f5"> response</tspan></text>
+
+      <text x="864" y="645" fill="#555d7d">50</text>
+      <text x="953" y="645" fill="#67e8f9">sleep</text>
+      <text x="1012" y="645" fill="#dfe3f5">(retry_delay(response, attempt))</text>
+    </g>
+
+    <rect x="850" y="697" width="524" height="65" rx="10" fill="#101d1c" stroke="#235a4e"/>
+    <circle cx="878" cy="729" r="9" fill="#35d07f"/>
+    <path d="m874 729 3 3 6-7" fill="none" stroke="#07120e" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="901" y="736" fill="#9ff2c2" font-size="18">focused verification passed</text>
+  </g>
+</svg>

@@ -29,9 +29,13 @@ if ($Version -ne "latest" -and $Version -notmatch '^v\d') {
     else { throw "mjj: invalid release version: $Version" }
 }
 
-$architecture = [Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLowerInvariant()
+$architectureValue = [System.Runtime.InteropServices.RuntimeInformation,mscorlib]::OSArchitecture
+if ($null -eq $architectureValue) { $architectureValue = $env:PROCESSOR_ARCHITEW6432 }
+if (-not $architectureValue) { $architectureValue = $env:PROCESSOR_ARCHITECTURE }
+if (-not $architectureValue) { throw "mjj: unable to detect Windows architecture" }
+$architecture = ([string]$architectureValue).ToLowerInvariant()
 switch ($architecture) {
-    "x64" { $arch = "x86_64" }
+    { $_ -in "x64", "amd64", "x86_64" } { $arch = "x86_64"; break }
     default { throw "mjj: unsupported Windows architecture: $architecture" }
 }
 $asset = "mjj-windows-$arch.zip"

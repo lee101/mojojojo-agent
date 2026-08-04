@@ -110,6 +110,8 @@ def test_installer_sources_expose_matching_configuration() -> None:
     for setting in ("MJJ_VERSION", "MJJ_INSTALL_DIR", "MJJ_REPO", "MJJ_BASE_URL"):
         assert setting in unix
         assert setting in windows
+    assert "RuntimeInformation,mscorlib" in windows
+    assert "PROCESSOR_ARCHITECTURE" in windows
     assert "Get-FileHash -Algorithm SHA256" in windows
     assert "failed its smoke test" in unix
     assert "failed its smoke test" in windows

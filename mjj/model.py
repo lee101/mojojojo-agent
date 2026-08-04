@@ -95,7 +95,8 @@ class Event:
 
 @dataclass
 class ModelClient:
-    model: str = DEFAULT_MODEL
+    model: str = "auto"
+    provider: str = "auto"
     effort: str = DEFAULT_EFFORT
     summary: str = "auto"
     verbosity: str = DEFAULT_VERBOSITY
@@ -117,7 +118,7 @@ class ModelClient:
         credential: Credential,
     ) -> dict:
         body: dict[str, Any] = {
-            "model": self.model,
+            "model": self.effective_model(credential),
             "instructions": instructions,
             "input": input_items,
             "tools": tools,
@@ -143,6 +144,29 @@ class ModelClient:
         body["include"] = ["reasoning.encrypted_content"]
         return body
 
+    def effective_model(self, credential: Credential) -> str:
+        return credential.default_model if self.model == "auto" else self.model
+
+    def chat_request_body(
+        self,
+        input_items: list[dict],
+        instructions: str,
+        tools: list[dict],
+        credential: Credential,
+    ) -> dict:
+        body: dict[str, Any] = {
+            "model": self.effective_model(credential),
+            "messages": _chat_messages(input_items, instructions),
+            "tools": [_chat_tool(tool) for tool in tools],
+            "tool_choice": "auto" if tools else None,
+            "stream": True,
+        }
+        if credential.provider == "openrouter":
+            body["reasoning"] = {"effort": self.effort}
+        else:
+            body["reasoning_effort"] = self.effort
+        return {key: value for key, value in body.items() if value is not None}
+
     def stream(
         self,
         input_items: list[dict],
@@ -157,7 +181,11 @@ class ModelClient:
                 force=auth_failures == 1,
                 fallback=auth_failures > 1,
             )
-            body = self.request_body(input_items, instructions, tools, credential)
+            body = (
+                self.chat_request_body(input_items, instructions, tools, credential)
+                if credential.api_style == "chat_completions"
+                else self.request_body(input_items, instructions, tools, credential)
+            )
             try:
                 yield from self._stream_once(credential, body)
                 return
@@ -178,6 +206,9 @@ class ModelClient:
                 time.sleep(0.5 * (2 ** (attempt - 1)))
 
     def _stream_once(self, credential: Credential, body: dict) -> Iterator[Event]:
+        if credential.api_style == "chat_completions":
+            yield from self._stream_chat_once(credential, body)
+            return
         url = credential.base_url.rstrip("/") + "/responses"
         req = urllib.request.Request(
             url, data=json.dumps(body).encode(), method="POST"
@@ -220,6 +251,106 @@ class ModelClient:
                     raise ModelError(f"response incomplete: {reason}")
                 yield event
 
+    def _stream_chat_once(
+        self, credential: Credential, body: dict
+    ) -> Iterator[Event]:
+        """Translate OpenAI-compatible chat streaming into Responses events.
+
+        Keeping the translation here means the agent loop, transcript and all
+        tools remain provider-independent. OpenPaths, OpenRouter and local
+        compatible gateways therefore get the same coding-agent behaviour.
+        """
+        url = credential.base_url.rstrip("/") + "/chat/completions"
+        req = urllib.request.Request(
+            url, data=json.dumps(body).encode(), method="POST"
+        )
+        for key, value in credential.headers.items():
+            req.add_header(key, value)
+        req.add_header("Content-Type", "application/json")
+        req.add_header("Accept", "text/event-stream")
+        try:
+            resp = urllib.request.urlopen(req, timeout=READ_TIMEOUT)
+        except urllib.error.HTTPError as exc:
+            detail = exc.read(4096).decode("utf-8", "replace").strip()
+            raise ModelError(
+                f"HTTP {exc.code}: {detail[:600]}",
+                status=exc.code,
+                retryable=exc.code in (401, 408, 409, 429, 500, 502, 503, 504),
+            ) from exc
+        except (urllib.error.URLError, TimeoutError) as exc:
+            raise ModelError(f"connection failed: {exc}", retryable=True) from exc
+
+        text_parts: list[str] = []
+        calls: dict[int, dict] = {}
+        usage: dict = {}
+        with resp:
+            for chunk in _decode_sse_documents(resp):
+                if chunk.get("error"):
+                    error = chunk["error"]
+                    message = error.get("message") if isinstance(error, dict) else error
+                    raise ModelError(
+                        f"stream failed: {message}",
+                        retryable=_retryable_message(str(message)),
+                    )
+                usage = chunk.get("usage") or usage
+                choices = chunk.get("choices") or []
+                if not choices:
+                    continue
+                delta = choices[0].get("delta") or {}
+                reasoning = delta.get("reasoning_content") or delta.get("reasoning")
+                if isinstance(reasoning, str) and reasoning:
+                    yield Event(
+                        "response.reasoning_summary_text.delta",
+                        {"delta": reasoning},
+                    )
+                content = delta.get("content")
+                if isinstance(content, str) and content:
+                    text_parts.append(content)
+                    yield Event("response.output_text.delta", {"delta": content})
+                for piece in delta.get("tool_calls") or []:
+                    index = int(piece.get("index") or 0)
+                    call = calls.setdefault(
+                        index,
+                        {"id": "", "name": "", "arguments": []},
+                    )
+                    call["id"] = piece.get("id") or call["id"]
+                    function = piece.get("function") or {}
+                    call["name"] = function.get("name") or call["name"]
+                    if function.get("arguments"):
+                        call["arguments"].append(function["arguments"])
+
+        if calls:
+            for index in sorted(calls):
+                call = calls[index]
+                call_id = call["id"] or f"call_{index}"
+                yield Event(
+                    "response.output_item.done",
+                    {
+                        "item": {
+                            "type": "function_call",
+                            "call_id": call_id,
+                            "name": call["name"],
+                            "arguments": "".join(call["arguments"]),
+                        }
+                    },
+                )
+        elif text_parts:
+            yield Event(
+                "response.output_item.done",
+                {
+                    "item": {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [
+                            {"type": "output_text", "text": "".join(text_parts)}
+                        ],
+                    }
+                },
+            )
+        normalized_usage = _chat_usage(usage)
+        self.usage.add(normalized_usage)
+        yield Event("response.completed", {"response": {"usage": normalized_usage}})
+
 
 def _retryable_message(message: str) -> bool:
     lowered = message.lower()
@@ -227,6 +358,24 @@ def _retryable_message(message: str) -> bool:
         token in lowered
         for token in ("rate limit", "overloaded", "timeout", "temporarily")
     )
+
+
+def _chat_usage(usage: dict) -> dict:
+    """Normalize Chat Completions token names to Responses names."""
+    prompt_details = usage.get("prompt_tokens_details") or {}
+    completion_details = usage.get("completion_tokens_details") or {}
+    return {
+        "input_tokens": usage.get("input_tokens", usage.get("prompt_tokens", 0)),
+        "output_tokens": usage.get(
+            "output_tokens", usage.get("completion_tokens", 0)
+        ),
+        "input_tokens_details": {
+            "cached_tokens": prompt_details.get("cached_tokens", 0),
+        },
+        "output_tokens_details": {
+            "reasoning_tokens": completion_details.get("reasoning_tokens", 0),
+        },
+    }
 
 
 def _compaction_unsupported(exc: ModelError, body: dict) -> bool:
@@ -238,23 +387,34 @@ def _compaction_unsupported(exc: ModelError, body: dict) -> bool:
 
 def _decode_sse(stream) -> Iterator[Event]:
     """Decode SSE records, including payloads split across ``data:`` lines."""
+    for doc in _decode_sse_documents(stream):
+        yield Event(type=doc.get("type", ""), data=doc)
+
+
+def _decode_sse_documents(stream) -> Iterator[dict]:
+    """Decode SSE payloads without assuming Responses or Chat shape."""
     data_lines: list[str] = []
     for raw in stream:
         line = raw.decode("utf-8", "replace").rstrip("\r\n")
         if not line:
-            event = _event_from_data(data_lines)
+            event = _document_from_data(data_lines)
             data_lines = []
             if event is not None:
                 yield event
             continue
         if line.startswith("data:"):
             data_lines.append(line[5:].lstrip())
-    event = _event_from_data(data_lines)
+    event = _document_from_data(data_lines)
     if event is not None:
         yield event
 
 
 def _event_from_data(lines: list[str]) -> Event | None:
+    doc = _document_from_data(lines)
+    return Event(type=doc.get("type", ""), data=doc) if doc is not None else None
+
+
+def _document_from_data(lines: list[str]) -> dict | None:
     payload = "\n".join(lines).strip()
     if not payload or payload == "[DONE]":
         return None
@@ -262,13 +422,95 @@ def _event_from_data(lines: list[str]) -> Event | None:
         doc = json.loads(payload)
     except ValueError:
         return None
-    return Event(type=doc.get("type", ""), data=doc)
+    return doc if isinstance(doc, dict) else None
 
 
-def probe(model: str = DEFAULT_MODEL) -> dict:
+def _chat_tool(tool: dict) -> dict:
+    return {
+        "type": "function",
+        "function": {
+            "name": tool.get("name", ""),
+            "description": tool.get("description", ""),
+            "parameters": tool.get("parameters") or {"type": "object"},
+        },
+    }
+
+
+def _chat_messages(items: list[dict], instructions: str) -> list[dict]:
+    messages: list[dict] = [{"role": "system", "content": instructions}]
+    index = 0
+    while index < len(items):
+        item = items[index]
+        item_type = item.get("type")
+        if item_type == "message":
+            role = item.get("role", "user")
+            parts = []
+            for part in item.get("content") or []:
+                kind = part.get("type")
+                if kind in ("input_text", "output_text", "text"):
+                    parts.append({"type": "text", "text": part.get("text", "")})
+                elif kind in ("input_image", "image_url"):
+                    url = part.get("image_url") or part.get("url") or ""
+                    image_url: dict[str, str] = {"url": url}
+                    if part.get("detail"):
+                        image_url["detail"] = part["detail"]
+                    parts.append({"type": "image_url", "image_url": image_url})
+            if role == "assistant":
+                messages.append(
+                    {
+                        "role": "assistant",
+                        "content": "".join(part.get("text", "") for part in parts),
+                    }
+                )
+            elif len(parts) == 1 and parts[0].get("type") == "text":
+                messages.append({"role": role, "content": parts[0]["text"]})
+            else:
+                messages.append({"role": role, "content": parts})
+        elif item_type == "function_call":
+            tool_calls = []
+            while index < len(items) and items[index].get("type") == "function_call":
+                call = items[index]
+                tool_calls.append(
+                    {
+                        "id": call.get("call_id", ""),
+                        "type": "function",
+                        "function": {
+                            "name": call.get("name", ""),
+                            "arguments": call.get("arguments", "{}"),
+                        },
+                    }
+                )
+                index += 1
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": tool_calls,
+                }
+            )
+            continue
+        elif item_type == "function_call_output":
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": item.get("call_id", ""),
+                    "content": item.get("output", ""),
+                }
+            )
+        index += 1
+    return messages
+
+
+def probe(model: str = "auto", provider: str = "auto") -> dict:
     """One tiny round trip. Used by ``mjj auth status --probe`` and by the
     smoke test, so a broken credential fails loudly instead of at turn 40."""
-    client = ModelClient(model=model, effort="low", summary="auto")
+    client = ModelClient(
+        model=model,
+        provider=provider,
+        effort="low",
+        summary="auto",
+        resolver=CredentialResolver(provider=provider),
+    )
     text = []
     try:
         for event in client.stream(
@@ -285,5 +527,6 @@ def probe(model: str = DEFAULT_MODEL) -> dict:
                 text.append(event.delta)
     except (ModelError, AuthError) as exc:
         return {"ok": False, "error": str(exc)}
-    return {"ok": True, "model": model, "text": "".join(text).strip()[:40],
+    return {"ok": True, "model": model, "provider": provider,
+            "text": "".join(text).strip()[:40],
             "usage": client.usage.summary()}

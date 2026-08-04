@@ -16,6 +16,7 @@ def test_project_config_and_environment_precedence(tmp_path: Path):
     (project / ".mjj" / "config.toml").write_text(
         """
 [agent]
+provider = "openpaths"
 model = "gpt-project"
 effort = "medium"
 verbosity = "high"
@@ -35,6 +36,7 @@ paths = ["../skills"]
     )
 
     assert config.model == "gpt-project"
+    assert config.provider == "openpaths"
     assert config.effort == "max"
     assert config.verbosity == "high"
     assert config.tool_budget == 321
@@ -54,6 +56,7 @@ def test_explicit_config_is_last_file_layer(tmp_path: Path):
     "content, message",
     [
         ("[agent]\neffort='enormous'\n", "agent.effort"),
+        ("[agent]\nprovider='mystery'\n", "agent.provider"),
         ("[tools]\nbudget=0\n", "tools.budget"),
         ("[skills]\npaths='nope'\n", "skills.paths"),
         ("[agent]\nproject_doc_max_bytes=-1\n", "agent.project_doc_max_bytes"),

@@ -1,0 +1,38 @@
+[
+  {
+    "id": "pelagic-open-water",
+    "path": "/gallery/resultwatershader/?motion=0&time=12&preset=open",
+    "viewport": { "width": 1440, "height": 900 },
+    "prompt": "Create an art-directed procedural ocean in Three.js with deterministic capture controls."
+  },
+  {
+    "id": "rift-prism",
+    "path": "/gallery/image-rift/?motion=0&toast=0&time=7&mode=prism&intensity=76&detail=58&hue=18",
+    "viewport": { "width": 1440, "height": 900 },
+    "prompt": "Transform the supplied image into a chromatic refractive prism field."
+  },
+  {
+    "id": "rift-relief",
+    "path": "/gallery/image-rift/?motion=0&toast=0&time=7&mode=relief&intensity=76&detail=58&hue=18",
+    "viewport": { "width": 1440, "height": 900 },
+    "prompt": "Transform the supplied image into graphic signal topography with luminous contours."
+  },
+  {
+    "id": "rift-mercury",
+    "path": "/gallery/image-rift/?motion=0&toast=0&time=7&mode=mercury&intensity=76&detail=58&hue=18",
+    "viewport": { "width": 1440, "height": 900 },
+    "prompt": "Transform the supplied image into flowing sculptural chrome."
+  },
+  {
+    "id": "rift-halftone",
+    "path": "/gallery/image-rift/?motion=0&toast=0&time=7&mode=halftone&intensity=76&detail=58&hue=18",
+    "viewport": { "width": 1440, "height": 900 },
+    "prompt": "Transform the supplied image into a bold editorial halftone print."
+  },
+  {
+    "id": "rift-mobile",
+    "path": "/gallery/image-rift/?motion=0&toast=0&time=7&mode=prism",
+    "viewport": { "width": 390, "height": 844 },
+    "prompt": "Keep the image shader usable and composed on a phone viewport."
+  }
+]

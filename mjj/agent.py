@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Callable, Iterator
 
 from .ledger import Ledger
+from .media import ImageAttachment
 from .model import Event, ModelClient
 from .prompt import SYSTEM_PROMPT
 from .project_docs import (
@@ -66,12 +67,27 @@ class Agent:
 
     # -- conversation -------------------------------------------------------
 
-    def user(self, text: str) -> None:
+    def user(self, text: str, images: tuple[ImageAttachment, ...] = ()) -> None:
+        if images:
+            manifest = "\n".join(
+                f'- path="{image.path}" width={image.width} height={image.height} '
+                f'webp_bytes={image.encoded_bytes}'
+                for image in images
+            )
+            text += (
+                "\n\n<attached_images>\n"
+                + manifest
+                + "\n</attached_images>\n"
+                "The images above are also available to vision. Their source paths "
+                "may be read or copied with tools when the task needs the bytes."
+            )
+        content = [{"type": "input_text", "text": text}]
+        content.extend(image.response_part() for image in images)
         self.append(
             {
                 "type": "message",
                 "role": "user",
-                "content": [{"type": "input_text", "text": text}],
+                "content": content,
             }
         )
 
@@ -82,9 +98,13 @@ class Agent:
 
     # -- the loop -----------------------------------------------------------
 
-    def run(self, prompt: str | None = None) -> Iterator[Step]:
-        if prompt:
-            self.user(prompt)
+    def run(
+        self,
+        prompt: str | None = None,
+        images: tuple[ImageAttachment, ...] = (),
+    ) -> Iterator[Step]:
+        if prompt or images:
+            self.user(prompt or "Describe and inspect the attached image.", images)
         for _ in range(self.max_steps):
             calls: list[dict] = []
             response_start = len(self.items)
@@ -189,10 +209,8 @@ def render(steps: Iterator[Step], out, verbose: bool = False) -> int:
         elif step.kind == "reasoning" and verbose:
             out.write(step.text)
         elif step.kind == "tool_call":
-            args = step.text
-            if len(args) > 160 and not verbose:
-                args = args[:160] + "…"
-            out.write(f"\n· {step.name} {args}\n")
+            label = tool_progress(step, verbose=verbose)
+            out.write(f"\n· {label}\n")
         elif step.kind == "tool_result":
             body = step.text if verbose else _first_lines(step.text, 3)
             marker = "" if step.meta.get("ok", True) else " (failed)"
@@ -236,9 +254,7 @@ def render_exec(
         elif step.kind == "tool_call":
             response_called_tool = True
             if not jsonl:
-                args = step.text if verbose else step.text[:160]
-                suffix = "…" if len(step.text) > len(args) else ""
-                err.write(f"· {step.name} {args}{suffix}\n")
+                err.write(f"· {tool_progress(step, verbose=verbose)}\n")
                 err.flush()
         elif step.kind == "tool_result" and verbose and not jsonl:
             marker = "" if step.meta.get("ok", True) else " (failed)"
@@ -275,6 +291,36 @@ def _first_lines(text: str, count: int) -> str:
     if len(lines) <= count:
         return text
     return "\n".join(lines[:count]) + f"\n  … {len(lines) - count} more lines"
+
+
+def tool_progress(step: Step, *, verbose: bool = False) -> str:
+    """Turn wire-level tool JSON into progress a human can scan."""
+    try:
+        args = json.loads(step.text or "{}")
+    except ValueError:
+        args = {}
+    if step.name == "skill":
+        return (
+            f"loading workflow {args['name']}"
+            if args.get("name")
+            else "checking available workflows"
+        )
+    if step.name == "apply_patch":
+        return "editing files"
+    if step.name == "shell":
+        command = args.get("command", "")
+        if isinstance(command, list):
+            command = " ".join(str(part) for part in command)
+        return f"running {str(command)[:180]}"
+    if step.name == "read":
+        return f"reading {args.get('path', '')}".rstrip()
+    if step.name == "list":
+        return f"listing {args.get('path', '.')}"
+    if step.name == "search":
+        return f"searching for {args.get('query', '')}".rstrip()
+    rendered = step.text if verbose else step.text[:120]
+    suffix = "…" if len(step.text) > len(rendered) else ""
+    return f"{step.name} {rendered}{suffix}".rstrip()
 
 
 def _latest_assistant_text(items: list[dict]) -> str:

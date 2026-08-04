@@ -143,3 +143,65 @@ def test_describe_never_leaks_secrets(tmp_path, monkeypatch):
     blob = json.dumps(auth.describe())
     assert "rt.old" not in blob
     assert json.loads(blob)["has_refresh_token"] is True
+
+
+def test_auto_prefers_openpaths_but_does_not_adopt_ambient_openrouter(tmp_path, monkeypatch):
+    _write_auth(tmp_path, expired=False)
+    monkeypatch.setenv("OPENPATHS_API_KEY", "op-test")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+    resolver = auth.CredentialResolver(max_plan=auth.MaxPlanCredentials(home=tmp_path))
+    credential = resolver.resolve()
+    assert (credential.provider, credential.api_style, credential.token) == (
+        "openpaths",
+        "chat_completions",
+        "op-test",
+    )
+
+    monkeypatch.delenv("OPENPATHS_API_KEY")
+    assert resolver.resolve().kind == "chatgpt"
+
+
+def test_saved_provider_key_is_private_and_resolvable(tmp_path, monkeypatch):
+    monkeypatch.setenv("MJJ_HOME", str(tmp_path))
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("MJJ_OPENROUTER_API_KEY", raising=False)
+    path = auth.save_provider_key("openrouter", "sk-secret")
+    assert path == tmp_path / "auth.json"
+    assert path.stat().st_mode & 0o077 == 0
+    credential = auth.CredentialResolver(provider="openrouter").resolve()
+    assert credential.token == "sk-secret"
+    assert "sk-secret" not in json.dumps(auth.describe())
+    assert auth.remove_provider_key("openrouter") is True
+    assert auth.remove_provider_key("openrouter") is False
+
+
+@pytest.mark.parametrize("malformed", ["[]", '{"providers": []}'])
+def test_saving_provider_key_repairs_malformed_auth_document(
+    tmp_path, monkeypatch, malformed
+):
+    monkeypatch.setenv("MJJ_HOME", str(tmp_path))
+    (tmp_path / "auth.json").write_text(malformed, encoding="utf-8")
+
+    auth.save_provider_key("openpaths", "op-secret")
+
+    assert auth.provider_key("openpaths")[0] == "op-secret"
+
+
+def test_chatgpt_login_delegates_to_codex_device_flow(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setenv("MJJ_CODEX_HOME", str(tmp_path / "codex-home"))
+    monkeypatch.setattr(auth.shutil, "which", lambda name: "/bin/codex" if name == "codex" else None)
+
+    class Completed:
+        returncode = 0
+
+    def run(command, **kwargs):
+        calls.append((command, kwargs))
+        return Completed()
+
+    monkeypatch.setattr(auth.subprocess, "run", run)
+    assert auth.login_chatgpt(device=True) == 0
+    command, kwargs = calls[0]
+    assert command == ["/bin/codex", "login", "--device-auth"]
+    assert kwargs["env"]["CODEX_HOME"] == str(tmp_path / "codex-home")
+    assert (tmp_path / "codex-home").is_dir()

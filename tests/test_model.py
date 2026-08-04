@@ -8,6 +8,7 @@ import pytest
 
 from mjj.auth import Credential
 from mjj.model import Event, ModelClient, ModelError, Usage, _decode_sse
+from mjj.model import _chat_messages
 
 
 API_CREDENTIAL = Credential("api_key", "sk-test", "https://example.test/v1")
@@ -151,3 +152,80 @@ def test_incomplete_response_records_usage_before_error(monkeypatch):
     with pytest.raises(ModelError, match="max_output_tokens"):
         list(client._stream_once(API_CREDENTIAL, {}))
     assert (client.usage.input_tokens, client.usage.output_tokens) == (12, 3)
+
+
+def test_chat_request_translates_responses_tools_and_images():
+    credential = Credential(
+        "api_key",
+        "op-test",
+        "https://example.test/v1",
+        provider="openpaths",
+        api_style="chat_completions",
+        default_model="openpaths/auto-code",
+    )
+    client = ModelClient(model="auto", effort="high")
+    items = [
+        {
+            "type": "message",
+            "role": "user",
+            "content": [
+                {"type": "input_text", "text": "inspect"},
+                {"type": "input_image", "image_url": "data:image/webp;base64,eA=="},
+            ],
+        }
+    ]
+    body = client.chat_request_body(
+        items,
+        "system",
+        [{"type": "function", "name": "read", "description": "Read", "parameters": {}}],
+        credential,
+    )
+    assert body["model"] == "openpaths/auto-code"
+    assert body["reasoning_effort"] == "high"
+    assert body["messages"][1]["content"][1]["type"] == "image_url"
+    assert body["tools"][0]["function"]["name"] == "read"
+
+
+def test_chat_stream_is_normalized_to_agent_events(monkeypatch):
+    credential = Credential(
+        "api_key", "op-test", "https://example.test/v1",
+        provider="openpaths", api_style="chat_completions",
+    )
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            chunks = [
+                {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "c1", "function": {"name": "read", "arguments": '{"path":'}}]}}]},
+                {"choices": [{"delta": {"tool_calls": [{"index": 0, "function": {"arguments": '"README.md"}'}}]}}]},
+                {"choices": [], "usage": {"prompt_tokens": 10, "completion_tokens": 3}},
+            ]
+            for chunk in chunks:
+                yield f"data: {json.dumps(chunk)}\n".encode()
+                yield b"\n"
+            yield b"data: [DONE]\n"
+            yield b"\n"
+
+    monkeypatch.setattr("mjj.model.urllib.request.urlopen", lambda *_a, **_k: Response())
+    events = list(ModelClient()._stream_chat_once(credential, {"model": "x"}))
+    calls = [event.item for event in events if event.type == "response.output_item.done"]
+    assert calls == [{"type": "function_call", "call_id": "c1", "name": "read", "arguments": '{"path":"README.md"}'}]
+
+
+def test_chat_history_groups_parallel_calls_before_tool_outputs():
+    messages = _chat_messages(
+        [
+            {"type": "function_call", "call_id": "a", "name": "read", "arguments": "{}"},
+            {"type": "function_call", "call_id": "b", "name": "list", "arguments": "{}"},
+            {"type": "function_call_output", "call_id": "a", "output": "one"},
+            {"type": "function_call_output", "call_id": "b", "output": "two"},
+        ],
+        "system",
+    )
+    assert [message["role"] for message in messages] == ["system", "assistant", "tool", "tool"]
+    assert [call["id"] for call in messages[1]["tool_calls"]] == ["a", "b"]

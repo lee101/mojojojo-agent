@@ -12,7 +12,8 @@ Linux and macOS can install the self-contained release binary without Python:
 
 ```bash
 curl -fsSL https://mojojojo.app.nz/install.sh | sh
-mjj auth --probe                     # reuses your existing ChatGPT max-plan sign-in
+mjj                                  # opens the interactive coding agent
+mjj auth --probe                     # reuses your existing ChatGPT sign-in
 mjj exec "make the failing test in tests/test_router.py pass"
 ```
 
@@ -24,7 +25,7 @@ irm https://mojojojo.app.nz/install.ps1 | iex
 
 The installers select the operating system and CPU, verify the release's
 SHA-256 checksum, and install into a user-owned directory. Set
-`MJJ_INSTALL_DIR` to choose another location or `MJJ_VERSION=v0.1.0` to pin a
+`MJJ_INSTALL_DIR` to choose another location or `MJJ_VERSION=v0.2.0` to pin a
 release. The binaries need no system Python. Mojo acceleration remains a
 guarded optional backend, so the agent and hybrid search still work when a
 compatible Mojo toolchain or `mojo-embed` library is not installed. Linux
@@ -37,11 +38,47 @@ uv tool install mojojojo-agent
 ```
 
 From a checkout, `uv sync && uv run pytest -q` creates the development
-environment and verifies it. The base package is stdlib-only on Python 3.11+;
-`mojosub` and `mojo-embed` are guarded accelerators, not startup requirements.
+environment and verifies it. The base package uses Pillow for bounded vision
+inputs and prompt-toolkit for the cross-platform composer; `mojosub` and
+`mojo-embed` are guarded accelerators, not startup requirements.
 
 Status: **early but working end to end** — credential, model client, loop,
 tools, search, sandboxed execution, and a served mode with app.nz sign-in.
+
+## Interactive agent
+
+Running `mjj` with no arguments opens the cross-platform terminal app. Type `/`
+for the command palette, use left/right on an empty composer to change reasoning
+effort, Shift+Up/Down to change model, and Alt+Enter for a newline. `/model`,
+`/provider`, `/effort`, `/image`, `/login`, `/auth`, `/usage`, and `/new` all
+work without leaving the session. Long headless turns emit a heartbeat on stderr
+while preserving the final answer alone on stdout.
+
+`/login chatgpt` launches the supported Codex browser sign-in and reuses its
+credential cache; `/login device` uses device-code sign-in. `/login openpaths`,
+`/login openrouter`, and `/login openai` securely prompt for an API key and save
+it under `~/.mjj/auth.json`.
+
+## Providers and images
+
+OpenAI Responses, OpenPaths, OpenRouter, and custom OpenAI-compatible gateways
+share one agent loop and tool transcript. `auto` uses an explicitly scoped mjj
+OpenAI key first, then prefers `OPENPATHS_API_KEY` when present, then an existing
+ChatGPT/Codex sign-in or `OPENAI_API_KEY`. OpenRouter is selected explicitly so
+an unrelated exported key cannot silently change providers.
+
+```bash
+mjj exec --provider openpaths --model openpaths/auto-code "fix the tests"
+mjj exec --provider openrouter --model openrouter/auto "review this repo"
+mjj exec --image screenshot.png "match this design in the current app"
+```
+
+Images are orientation-corrected, bounded to a 2048-pixel edge, precompressed
+in memory as WebP quality 85, and sent to model vision. Their source paths and
+dimensions are also exposed to the coding tools, so the agent can copy or read
+the actual asset when building a project. See [`visualbench/`](visualbench/) for
+the shader gallery, deterministic browser captures, and screenshot health
+scores used to test this workflow.
 
 ## Why it is cheaper
 
@@ -103,7 +140,7 @@ Every number this project publishes is reproducible from `bench/` or
 
 ## Credentials
 
-The primary path is the ChatGPT max-plan sign-in you already have — the one
+The default OpenAI path is the ChatGPT sign-in you already have — the one
 Codex Infinity wrote to `~/.codexinfinity/auth.json` (or Codex wrote to
 `~/.codex/auth.json`). `mjj` reads it and refreshes OAuth tokens in memory.
 It never overwrites the owning tool's file unless `MJJ_WRITE_BACK_AUTH=1`.
@@ -115,8 +152,11 @@ tokens. Set `MJJ_COMPACT_THRESHOLD=0` to disable it or choose another threshold.
 If a backend does not support compaction, the request is retried without it.
 
 ```bash
-mjj auth            # what credential is in play, what plan, when it expires
-mjj auth --probe    # one real round trip
+mjj login chatgpt            # supported browser sign-in via Codex
+mjj login chatgpt --device   # device-code flow for a headless machine
+mjj login openpaths          # securely save an OpenPaths API key
+mjj auth                     # providers, plan, and expiry; never secrets
+mjj auth --probe             # one real round trip
 ```
 
 Headless runs keep the final answer alone on stdout and send tool progress to

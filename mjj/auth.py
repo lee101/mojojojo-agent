@@ -1,9 +1,9 @@
-"""Credentials.
+"""Credentials for ChatGPT, OpenAI, OpenPaths and OpenRouter.
 
-The primary path is the ChatGPT max-plan sign-in that already exists on the
-machine (codex / codex-infinity put it in ``$CODEX_HOME/auth.json``). We do not
-run our own device-login flow for it: we read that file, refresh its OAuth
-tokens in memory, and use the same Responses backend as Codex.
+The ChatGPT path reuses the sign-in that Codex / Codex Infinity put in
+``$CODEX_HOME/auth.json``. Browser and device login delegate to ``codex login``;
+we read that cache, refresh its OAuth tokens in memory, and use the same
+Responses backend as Codex. Provider API keys live separately under ``~/.mjj``.
 
 Ownership matters here. codex-infinity owns ``~/.codexinfinity/auth.json`` and
 rotates it on its own schedule. We only write it when the operator explicitly
@@ -15,6 +15,8 @@ from __future__ import annotations
 import base64
 import json
 import os
+import shutil
+import subprocess
 import threading
 import time
 import urllib.error
@@ -110,6 +112,18 @@ CHATGPT_BASE_URL = os.environ.get(
     "MJJ_CHATGPT_BASE_URL", "https://chatgpt.com/backend-api/codex"
 )
 API_BASE_URL = os.environ.get("MJJ_OPENAI_BASE_URL", "https://api.openai.com/v1")
+OPENPATHS_BASE_URL = os.environ.get(
+    "MJJ_OPENPATHS_BASE_URL", "https://openpaths.io/v1"
+)
+OPENROUTER_BASE_URL = os.environ.get(
+    "MJJ_OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"
+)
+
+PROVIDER_DEFAULTS = {
+    "openai": (API_BASE_URL, "responses", "gpt-5.6-sol"),
+    "openpaths": (OPENPATHS_BASE_URL, "chat_completions", "openpaths/auto-code"),
+    "openrouter": (OPENROUTER_BASE_URL, "chat_completions", "openrouter/auto"),
+}
 
 
 @dataclass
@@ -125,6 +139,9 @@ class Credential:
     base_url: str
     account_id: str = ""
     source: str = ""
+    provider: str = "openai"
+    api_style: str = "responses"
+    default_model: str = "gpt-5.6-sol"
 
     @property
     def headers(self) -> dict:
@@ -337,16 +354,39 @@ class MaxPlanCredentials:
 
 @dataclass
 class CredentialResolver:
-    """Order: an explicit ``MJJ_OPENAI_API_KEY``, then the max-plan
-    credential, then a stray ``OPENAI_API_KEY`` from the environment.
+    """Resolve a requested provider without leaking or silently mixing keys.
 
-    The max plan outranks ``OPENAI_API_KEY`` on purpose — this box exports one
-    for unrelated services, and silently billing a metered key when a paid
-    plan is sitting right there is the wrong default."""
+    In ``auto`` mode, explicit Mojojojo credentials win, followed by
+    OpenPaths, an existing ChatGPT/Codex session, and finally an OpenAI key.
+    Explicit provider selection only considers that provider's credentials.
+    """
 
     max_plan: MaxPlanCredentials = field(default_factory=MaxPlanCredentials)
+    provider: str = "auto"
 
     def resolve(self, force: bool = False, fallback: bool = False) -> Credential:
+        requested = self.provider.strip().lower()
+        if requested not in ("auto", "openai"):
+            return provider_credential(requested)
+        if requested == "auto":
+            # MJJ_OPENAI_API_KEY is explicitly scoped to this harness and wins.
+            # Otherwise an OpenPaths key selects the project's native multi-LLM
+            # path. OpenRouter is supported with --provider openrouter but is
+            # not auto-selected from a key exported for an unrelated process.
+            if (os.environ.get("MJJ_OPENAI_API_KEY") or "").strip():
+                return Credential(
+                    kind="api_key",
+                    token=os.environ["MJJ_OPENAI_API_KEY"].strip(),
+                    base_url=API_BASE_URL,
+                    source="env",
+                )
+            if provider_key("openpaths")[0]:
+                return provider_credential("openpaths")
+        if requested == "openai" and (
+            (os.environ.get("MJJ_OPENAI_API_KEY") or "").strip()
+            or _stored_provider_keys().get("openai")
+        ):
+            return provider_credential("openai")
         explicit = (os.environ.get("MJJ_OPENAI_API_KEY") or "").strip()
         if explicit:
             return Credential(
@@ -370,10 +410,184 @@ class CredentialResolver:
             raise
 
 
+def mjj_home() -> Path:
+    return Path(os.environ.get("MJJ_HOME") or "~/.mjj").expanduser()
+
+
+def provider_auth_path() -> Path:
+    return mjj_home() / "auth.json"
+
+
+def _stored_provider_keys() -> dict[str, str]:
+    path = provider_auth_path()
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(doc, dict):
+        return {}
+    providers = doc.get("providers") or {}
+    if not isinstance(providers, dict):
+        return {}
+    return {
+        str(name): str(value.get("api_key") or "")
+        for name, value in providers.items()
+        if isinstance(value, dict) and value.get("api_key")
+    }
+
+
+def provider_key(provider: str) -> tuple[str, str]:
+    names = {
+        "openpaths": ("MJJ_OPENPATHS_API_KEY", "OPENPATHS_API_KEY"),
+        "openrouter": ("MJJ_OPENROUTER_API_KEY", "OPENROUTER_API_KEY"),
+        "openai": ("MJJ_OPENAI_API_KEY", "OPENAI_API_KEY"),
+        "custom": ("MJJ_API_KEY",),
+    }.get(provider, ())
+    for name in names:
+        value = (os.environ.get(name) or "").strip()
+        if value:
+            return value, f"env:{name}"
+    stored = _stored_provider_keys().get(provider, "").strip()
+    return (stored, str(provider_auth_path())) if stored else ("", "")
+
+
+def provider_credential(provider: str) -> Credential:
+    provider = provider.strip().lower()
+    if provider == "custom":
+        key, source = provider_key(provider)
+        base_url = (os.environ.get("MJJ_BASE_URL") or "").strip()
+        api_style = (os.environ.get("MJJ_API_STYLE") or "chat_completions").strip()
+        default_model = (os.environ.get("MJJ_DEFAULT_MODEL") or "auto").strip()
+        if not base_url:
+            raise AuthError("custom provider requires MJJ_BASE_URL")
+        if api_style not in ("responses", "chat_completions"):
+            raise AuthError("MJJ_API_STYLE must be responses or chat_completions")
+    else:
+        try:
+            base_url, api_style, default_model = PROVIDER_DEFAULTS[provider]
+        except KeyError as exc:
+            raise AuthError(f"unknown provider {provider!r}") from exc
+        key, source = provider_key(provider)
+    if not key:
+        variable = {
+            "openpaths": "OPENPATHS_API_KEY",
+            "openrouter": "OPENROUTER_API_KEY",
+            "openai": "OPENAI_API_KEY",
+            "custom": "MJJ_API_KEY",
+        }.get(provider, "API key")
+        raise AuthError(
+            f"no {provider} credential; run `mjj login {provider}` or set {variable}"
+        )
+    return Credential(
+        kind="api_key",
+        token=key,
+        base_url=base_url,
+        source=source,
+        provider=provider,
+        api_style=api_style,
+        default_model=default_model,
+    )
+
+
+def save_provider_key(provider: str, api_key: str) -> Path:
+    provider = provider.strip().lower()
+    if provider not in PROVIDER_DEFAULTS and provider != "custom":
+        raise AuthError(f"unknown provider {provider!r}")
+    if not api_key.strip():
+        raise AuthError("API key cannot be empty")
+    path = provider_auth_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        doc = {}
+    if not isinstance(doc, dict):
+        doc = {}
+    providers = doc.setdefault("providers", {})
+    if not isinstance(providers, dict):
+        providers = doc["providers"] = {}
+    providers[provider] = {"api_key": api_key.strip()}
+    temporary = path.with_suffix(".json.tmp")
+    temporary.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
+    try:
+        os.chmod(temporary, 0o600)
+    except OSError:  # Windows ACLs, packaged stores and unusual filesystems
+        pass
+    temporary.replace(path)
+    return path
+
+
+def remove_provider_key(provider: str) -> bool:
+    path = provider_auth_path()
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    if not isinstance(doc, dict):
+        return False
+    providers = doc.get("providers") or {}
+    if not isinstance(providers, dict):
+        return False
+    if provider not in providers:
+        return False
+    del providers[provider]
+    path.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
+    return True
+
+
+def login_chatgpt(*, device: bool = False) -> int:
+    """Run Codex's supported browser/device flow into the cache mjj reuses."""
+    executable = shutil.which("codex")
+    if not executable:
+        raise AuthError(
+            "ChatGPT sign-in requires the Codex CLI; install it or use "
+            "`mjj login openai` for an API key"
+        )
+    target = Path(
+        os.environ.get("MJJ_CODEX_HOME")
+        or os.environ.get("CODEX_HOME")
+        or codex_home()
+        or "~/.codex"
+    ).expanduser()
+    target.mkdir(parents=True, exist_ok=True)
+    command = [executable, "login"]
+    if device:
+        command.append("--device-auth")
+    environ = os.environ.copy()
+    environ["CODEX_HOME"] = str(target)
+    return subprocess.run(command, env=environ, check=False).returncode
+
+
+def logout_chatgpt() -> int:
+    executable = shutil.which("codex")
+    if not executable:
+        raise AuthError("ChatGPT logout requires the Codex CLI")
+    target = Path(
+        os.environ.get("MJJ_CODEX_HOME")
+        or os.environ.get("CODEX_HOME")
+        or codex_home()
+        or "~/.codex"
+    ).expanduser()
+    environ = os.environ.copy()
+    environ["CODEX_HOME"] = str(target)
+    return subprocess.run([executable, "logout"], env=environ, check=False).returncode
+
+
 def describe() -> dict:
     """What `mjj auth status` prints. Never returns secret material."""
     home = codex_home()
-    out: dict = {"codex_home": str(home) if home else None}
+    stored = _stored_provider_keys()
+    out: dict = {
+        "codex_home": str(home) if home else None,
+        "providers": {
+            name: {
+                "available": bool(provider_key(name)[0]),
+                "source": provider_key(name)[1] or None,
+            }
+            for name in ("openpaths", "openrouter", "openai")
+        },
+        "saved_providers": sorted(stored),
+    }
     if os.environ.get("MJJ_OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY"):
         out["env_api_key"] = True
     if not home:

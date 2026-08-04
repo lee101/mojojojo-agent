@@ -7,15 +7,19 @@ an interactive session. Everything else is introspection.
 from __future__ import annotations
 
 import argparse
+import getpass
 import json
 import sys
+import threading
+import time
 from pathlib import Path
 
 from . import auth
 from .agent import Agent, render, render_exec
-from .config import ConfigError, EFFORTS, VERBOSITIES, load as load_config
+from .config import ConfigError, EFFORTS, PROVIDERS, VERBOSITIES, load as load_config
 from .ledger import Budget, Ledger
 from .model import ModelClient, probe
+from .media import ImageInputError, prepare_image
 from .search.cli import main as search_main
 from .search.index import build_index
 from .session import Session, resume
@@ -34,8 +38,10 @@ def _agent(args) -> Agent:
         session = Session()
     client = ModelClient(
         model=args.model,
+        provider=args.provider,
         effort=args.effort,
         verbosity=args.verbosity,
+        resolver=auth.CredentialResolver(provider=args.provider),
     )
     agent = Agent(
         registry=build_registry(
@@ -55,13 +61,29 @@ def _agent(args) -> Agent:
 def cmd_exec(args) -> int:
     agent = _agent(args)
     prompt = _exec_prompt(args.prompt)
-    code, final_text = render_exec(
-        agent.run(prompt),
-        sys.stdout,
+    try:
+        images = tuple(prepare_image(path) for path in args.images)
+    except ImageInputError as exc:
+        print(f"mjj exec: {exc}", file=sys.stderr)
+        return 2
+    heartbeat = _Heartbeat(
         sys.stderr,
-        verbose=args.verbose,
-        jsonl=args.json,
+        f"{args.provider}/{args.model} · reasoning {args.effort}",
     )
+    try:
+        heartbeat.start()
+        code, final_text = render_exec(
+            agent.run(prompt, images=images),
+            sys.stdout,
+            sys.stderr,
+            verbose=args.verbose,
+            jsonl=args.json,
+        )
+    except KeyboardInterrupt:
+        print("mjj exec: interrupted", file=sys.stderr)
+        code, final_text = 130, ""
+    finally:
+        heartbeat.stop()
     if args.output_last_message:
         try:
             Path(args.output_last_message).expanduser().write_text(
@@ -76,6 +98,34 @@ def cmd_exec(args) -> int:
     if args.verbose:
         print(f"[{agent.ledger.summary()}]", file=sys.stderr)
     return code
+
+
+class _Heartbeat:
+    """Keep long reasoning turns visibly alive without touching stdout."""
+
+    def __init__(self, out, label: str, interval: float = 30.0) -> None:
+        self.out = out
+        self.label = label
+        self.interval = interval
+        self._stopped = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._started = 0.0
+
+    def start(self) -> None:
+        self._started = time.monotonic()
+        print(f"· working · {self.label}", file=self.out, flush=True)
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def _run(self) -> None:
+        while not self._stopped.wait(self.interval):
+            elapsed = int(time.monotonic() - self._started)
+            print(f"· still working · {elapsed}s", file=self.out, flush=True)
+
+    def stop(self) -> None:
+        self._stopped.set()
+        if self._thread:
+            self._thread.join(timeout=0.2)
 
 
 def _exec_prompt(positional: str | None, max_stdin_chars: int = 1_048_576) -> str:
@@ -99,36 +149,49 @@ def _exec_prompt(positional: str | None, max_stdin_chars: int = 1_048_576) -> st
 
 
 def cmd_repl(args) -> int:
-    agent = _agent(args)
-    print("mjj — ctrl-d to exit")
-    while True:
-        try:
-            line = input("› ").strip()
-        except (EOFError, KeyboardInterrupt):
-            print()
-            break
-        if not line:
-            continue
-        if line in ("/exit", "/quit"):
-            break
-        if line == "/usage":
-            print(agent.client.usage.summary(), "·", agent.ledger.summary())
-            continue
-        try:
-            render(agent.run(line), sys.stdout, verbose=args.verbose)
-        except KeyboardInterrupt:
-            print("\n[interrupted]")
-    if agent.session:
-        agent.session.close()
-    return 0
+    from .tui import run
+
+    return run(_agent(args), args)
 
 
 def cmd_auth(args) -> int:
     status = auth.describe()
     if args.probe:
-        status["probe"] = probe(args.model)
+        status["probe"] = probe(args.model, provider=args.provider)
     print(json.dumps(status, indent=2))
     return 0 if not args.probe or status["probe"].get("ok") else 1
+
+
+def cmd_login(args) -> int:
+    if args.login_provider == "chatgpt":
+        try:
+            return auth.login_chatgpt(device=args.device)
+        except auth.AuthError as exc:
+            print(f"mjj login: {exc}", file=sys.stderr)
+            return 2
+    try:
+        key = getpass.getpass(f"{args.login_provider} API key: ").strip()
+        if not key:
+            print("mjj login: API key cannot be empty", file=sys.stderr)
+            return 2
+        path = auth.save_provider_key(args.login_provider, key)
+    except (EOFError, KeyboardInterrupt, auth.AuthError) as exc:
+        print(f"mjj login: {exc or 'cancelled'}", file=sys.stderr)
+        return 2
+    print(f"saved {args.login_provider} credential to {path}")
+    return 0
+
+
+def cmd_logout(args) -> int:
+    if args.login_provider == "chatgpt":
+        try:
+            return auth.logout_chatgpt()
+        except auth.AuthError as exc:
+            print(f"mjj logout: {exc}", file=sys.stderr)
+            return 2
+    removed = auth.remove_provider_key(args.login_provider)
+    print(("removed" if removed else "no saved") + f" {args.login_provider} credential")
+    return 0
 
 
 def cmd_tools(args) -> int:
@@ -205,6 +268,7 @@ def cmd_skills(args) -> int:
 def cmd_config(args) -> int:
     values = args.resolved_config.public()
     values.update(
+        provider=args.provider,
         model=args.model,
         effort=args.effort,
         verbosity=args.verbosity,
@@ -228,6 +292,7 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = argparse.ArgumentParser(prog="mjj")
     parser.add_argument("--version", action="version", version=f"mjj {__version__}")
+    parser.add_argument("--provider", default=config.provider, choices=PROVIDERS)
     parser.add_argument("--model", default=config.model)
     parser.add_argument("--effort", default=config.effort, choices=EFFORTS)
     parser.add_argument("--verbosity", default=config.verbosity, choices=VERBOSITIES)
@@ -239,6 +304,14 @@ def main(argv: list[str] | None = None) -> int:
 
     run = sub.add_parser("exec", help="one headless run")
     run.add_argument("prompt", nargs="?")
+    run.add_argument("--provider", choices=PROVIDERS, default=argparse.SUPPRESS)
+    run.add_argument("--model", default=argparse.SUPPRESS)
+    run.add_argument("--effort", choices=EFFORTS, default=argparse.SUPPRESS)
+    run.add_argument("--verbosity", choices=VERBOSITIES, default=argparse.SUPPRESS)
+    run.add_argument(
+        "-i", "--image", dest="images", action="append", default=[], metavar="PATH",
+        help="attach an image (repeatable; sent as quality-85 WebP)",
+    )
     run.add_argument(
         "-C", "--cd", "--cwd", dest="cwd", default=argparse.SUPPRESS
     )
@@ -252,12 +325,32 @@ def main(argv: list[str] | None = None) -> int:
     run.set_defaults(func=cmd_exec)
 
     chat = sub.add_parser("chat", help="interactive session")
+    chat.add_argument("--provider", choices=PROVIDERS, default=argparse.SUPPRESS)
+    chat.add_argument("--model", default=argparse.SUPPRESS)
+    chat.add_argument("--effort", choices=EFFORTS, default=argparse.SUPPRESS)
     chat.add_argument("--resume", nargs="?", const="", default=None)
     chat.set_defaults(func=cmd_repl)
 
     who = sub.add_parser("auth", help="credential status")
     who.add_argument("--probe", action="store_true", help="make one real call")
     who.set_defaults(func=cmd_auth)
+
+    login = sub.add_parser("login", help="authenticate ChatGPT or save an API key")
+    login.add_argument(
+        "login_provider", choices=("chatgpt", "openpaths", "openrouter", "openai", "custom"),
+        nargs="?", default="chatgpt",
+    )
+    login.add_argument(
+        "--device", action="store_true", help="use ChatGPT device-code login"
+    )
+    login.set_defaults(func=cmd_login)
+
+    logout = sub.add_parser("logout", help="remove a saved login")
+    logout.add_argument(
+        "login_provider", choices=("chatgpt", "openpaths", "openrouter", "openai", "custom"),
+        nargs="?", default="chatgpt",
+    )
+    logout.set_defaults(func=cmd_logout)
 
     listing = sub.add_parser("tools", help="what the model can call")
     listing.set_defaults(func=cmd_tools)

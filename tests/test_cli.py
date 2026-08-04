@@ -5,6 +5,9 @@ import pytest
 from mjj import __version__
 from mjj import cli
 from mjj.cli import _exec_prompt, main
+from mjj.cli import _Heartbeat
+import io
+import time
 
 
 def test_cli_reports_version(capsys) -> None:
@@ -39,3 +42,51 @@ def test_exec_accepts_codex_style_cd_after_subcommand(tmp_path, monkeypatch) -> 
     monkeypatch.setattr(cli, "cmd_exec", capture)
     assert main(["exec", "-C", str(tmp_path), "task"]) == 0
     assert seen["cwd"] == str(tmp_path)
+
+
+def test_exec_accepts_provider_model_effort_and_images_after_subcommand(monkeypatch) -> None:
+    seen = {}
+
+    def capture(args) -> int:
+        seen.update(
+            provider=args.provider,
+            model=args.model,
+            effort=args.effort,
+            images=args.images,
+        )
+        return 0
+
+    monkeypatch.setattr(cli, "cmd_exec", capture)
+    assert main([
+        "exec", "--provider", "openpaths", "--model", "openpaths/auto-code",
+        "--effort", "xhigh", "--image", "reference.png", "task",
+    ]) == 0
+    assert seen == {
+        "provider": "openpaths",
+        "model": "openpaths/auto-code",
+        "effort": "xhigh",
+        "images": ["reference.png"],
+    }
+
+
+def test_login_defaults_to_chatgpt(monkeypatch) -> None:
+    seen = {}
+
+    def capture(args) -> int:
+        seen["provider"] = args.login_provider
+        return 0
+
+    monkeypatch.setattr(cli, "cmd_login", capture)
+    assert main(["login"]) == 0
+    assert seen == {"provider": "chatgpt"}
+
+
+def test_headless_heartbeat_keeps_long_reasoning_visibly_alive() -> None:
+    output = io.StringIO()
+    heartbeat = _Heartbeat(output, "openai/auto", interval=0.01)
+    heartbeat.start()
+    time.sleep(0.025)
+    heartbeat.stop()
+    rendered = output.getvalue()
+    assert "working · openai/auto" in rendered
+    assert "still working" in rendered

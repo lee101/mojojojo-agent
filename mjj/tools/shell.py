@@ -65,6 +65,7 @@ _UNSAFE_FIND = {
 }
 _UNSAFE_RG = {"--hostname-bin", "--pre", "--search-zip", "-z"}
 _UNSAFE_GIT_OPTIONS = {"--ext-diff", "--output", "--paginate", "-p", "--textconv"}
+_SHELL_OPERATORS = {"&&", "||", "|", ";", "&", ">", ">>", "<", "<<"}
 
 
 def _result(
@@ -123,7 +124,10 @@ def _display(command: str | list[str]) -> str:
 
 class ShellTool:
     name = "shell"
-    description = "Run a command with merged output, timeout, exit code, and optional cwd."
+    description = (
+        "Run argv with merged output, timeout, exit code, and optional cwd. "
+        "Strings are shlex-split, not shell code; use shell=true for &&, pipes or redirects."
+    )
     parameters = {
         "type": "object",
         "properties": {
@@ -169,6 +173,17 @@ class ShellTool:
                     return _result(ctx, f"cannot parse command: {exc}", ok=False)
                 if not policy_argv:
                     return _result(ctx, "command must not be empty", ok=False)
+                if any(
+                    part in _SHELL_OPERATORS
+                    or part.startswith((">", "<"))
+                    for part in policy_argv
+                ):
+                    return _result(
+                        ctx,
+                        "command contains shell operators but shell=false; "
+                        "use an argv array for one command or set shell=true",
+                        ok=False,
+                    )
                 argv = policy_argv
         elif isinstance(command, list) and command and all(
             isinstance(part, str) for part in command

@@ -15,6 +15,7 @@ except ImportError:  # pragma: no cover - Python 3.10
 
 EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
 VERBOSITIES = ("low", "medium", "high")
+PROVIDERS = ("auto", "openpaths", "openrouter", "openai", "custom")
 
 
 class ConfigError(ValueError):
@@ -23,7 +24,8 @@ class ConfigError(ValueError):
 
 @dataclass(frozen=True)
 class Config:
-    model: str = "gpt-5.6-sol"
+    provider: str = "auto"
+    model: str = "auto"
     effort: str = "high"
     verbosity: str = "low"
     tool_budget: int = 1600
@@ -73,6 +75,7 @@ def load(
         loaded.append(path.resolve())
 
     env_keys = {
+        "MJJ_PROVIDER": "provider",
         "MJJ_MODEL": "model",
         "MJJ_EFFORT": "effort",
         "MJJ_VERBOSITY": "verbosity",
@@ -115,7 +118,7 @@ def _merge_document(values: dict[str, Any], document: dict, path: Path) -> None:
     for section, name in ((agent, "agent"), (tools, "tools"), (skills, "skills")):
         if not isinstance(section, dict):
             raise ConfigError(f"[{name}] in {path} must be a table")
-    for key in ("model", "effort", "verbosity", "project_doc_max_bytes"):
+    for key in ("provider", "model", "effort", "verbosity", "project_doc_max_bytes"):
         if key in agent:
             values[key] = agent[key]
     if "budget" in tools:
@@ -136,6 +139,7 @@ def _merge_document(values: dict[str, Any], document: dict, path: Path) -> None:
 
 
 def _validated(values: Mapping[str, Any]) -> Config:
+    provider = values.get("provider", Config.provider)
     model = values.get("model", Config.model)
     effort = values.get("effort", Config.effort)
     verbosity = values.get("verbosity", Config.verbosity)
@@ -145,6 +149,8 @@ def _validated(values: Mapping[str, Any]) -> Config:
     )
     disabled = values.get("disabled_tools", ())
     skill_paths = values.get("skill_paths", ())
+    if provider not in PROVIDERS:
+        raise ConfigError(f"agent.provider must be one of {', '.join(PROVIDERS)}")
     if not isinstance(model, str) or not model.strip():
         raise ConfigError("agent.model must be a non-empty string")
     if effort not in EFFORTS:
@@ -178,6 +184,7 @@ def _validated(values: Mapping[str, Any]) -> Config:
     if not isinstance(skill_paths, (list, tuple)):
         raise ConfigError("skills.paths must be an array of paths")
     return Config(
+        provider=provider,
         model=model.strip(),
         effort=effort,
         verbosity=verbosity,

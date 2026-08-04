@@ -279,6 +279,7 @@
   }
 
   function showToast(message) {
+    if (params.get("toast") === "0") return;
     const toast = document.querySelector("#toast");
     toast.textContent = message;
     toast.classList.add("visible");

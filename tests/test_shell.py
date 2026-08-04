@@ -60,6 +60,15 @@ def test_string_command_is_not_interpolated_without_shell_true(tmp_path, monkeyp
     assert "expanded" in expanded.output
 
 
+def test_compound_string_is_rejected_instead_of_turning_operators_into_arguments(tmp_path):
+    result = ShellTool().run(
+        {"command": "mkdir -p output && cp source output"}, context(tmp_path)
+    )
+    assert not result.ok
+    assert "shell=false" in result.output
+    assert not (tmp_path / "output").exists()
+
+
 def test_shell_merges_stderr_reports_exit_and_honours_cwd(tmp_path):
     child = tmp_path / "child"
     child.mkdir()

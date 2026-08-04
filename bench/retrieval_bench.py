@@ -102,6 +102,31 @@ def benchmark(iterations: int = 20) -> dict:
                 separators=(",", ":"),
             )
         )
+        checkpoint_schema_tokens = estimate_tokens(
+            json.dumps(schemas["checkpoint"], separators=(",", ":"))
+        )
+        navigate_schema_tokens = estimate_tokens(
+            json.dumps(schemas["navigate"], separators=(",", ":"))
+        )
+        shell_job_parameter_tokens = estimate_tokens(
+            json.dumps(
+                {
+                    key: schemas["shell"]["parameters"]["properties"][key]
+                    for key in ("background", "job")
+                },
+                separators=(",", ":"),
+            )
+        )
+        format_parameter_tokens = estimate_tokens(
+            json.dumps(
+                {
+                    "format": schemas["check"]["parameters"]["properties"][
+                        "format"
+                    ]
+                },
+                separators=(",", ":"),
+            )
+        )
         raw_symbols = "\n".join(
             f"worker_{number:03}.py:1:def shared_worker_{number:03}():"
             for number in range(120)
@@ -137,6 +162,10 @@ def benchmark(iterations: int = 20) -> dict:
                 ),
                 "check_tool_schema": check_schema_tokens,
                 "map_parameters_schema": map_parameter_tokens,
+                "checkpoint_tool_schema": checkpoint_schema_tokens,
+                "navigate_tool_schema": navigate_schema_tokens,
+                "shell_job_parameters_schema": shell_job_parameter_tokens,
+                "format_parameter_schema": format_parameter_tokens,
                 "raw_symbol_listing": estimate_tokens(raw_symbols),
                 "repository_map": estimate_tokens(repo_map.output),
             },

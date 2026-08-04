@@ -5,7 +5,9 @@ from __future__ import annotations
 import os
 import shlex
 import subprocess
+import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 from .base import ToolContext, ToolResult
@@ -68,6 +70,22 @@ _UNSAFE_GIT_OPTIONS = {"--ext-diff", "--output", "--paginate", "-p", "--textconv
 _SHELL_OPERATORS = {"&&", "||", "|", ";", "&", ">", ">>", "<", "<<"}
 
 
+@dataclass
+class _ShellJob:
+    identifier: str
+    thread: threading.Thread | None = None
+    outcome: "_CommandOutcome | None" = None
+
+
+@dataclass(frozen=True)
+class _CommandOutcome:
+    body: str
+    ok: bool
+    exit_code: int
+    timed_out: bool
+    seconds: float
+
+
 def _result(
     ctx: ToolContext,
     text: str,
@@ -125,7 +143,7 @@ def _display(command: str | list[str]) -> str:
 class ShellTool:
     name = "shell"
     description = (
-        "Run argv with merged output, timeout, exit code, and optional cwd. "
+        "Run or queue argv with merged output, timeout, exit code, and optional cwd. "
         "Strings are shlex-split, not shell code; use shell=true for &&, pipes or redirects."
     )
     parameters = {
@@ -150,16 +168,33 @@ class ShellTool:
                 "default": False,
                 "description": "Interpret a string with the system shell",
             },
+            "background": {
+                "type": "boolean",
+                "description": "Queue without blocking; returns a job id.",
+            },
+            "job": {
+                "type": "string",
+                "description": "Poll a queued shell job.",
+            },
         },
-        "required": ["command"],
         "additionalProperties": False,
     }
 
     def run(self, args: dict, ctx: ToolContext) -> ToolResult:
+        job_id = args.get("job")
+        if job_id is not None:
+            if not isinstance(job_id, str) or not job_id:
+                return _result(ctx, "job must be a non-empty string", ok=False)
+            if args.get("command") is not None:
+                return _result(ctx, "job cannot be combined with command", ok=False)
+            return self._poll(ctx, job_id)
         command = args.get("command")
         use_shell = args.get("shell", False)
         if not isinstance(use_shell, bool):
             return _result(ctx, "shell must be a boolean", ok=False)
+        background = args.get("background", False)
+        if not isinstance(background, bool):
+            return _result(ctx, "background must be a boolean", ok=False)
         if isinstance(command, str):
             if not command.strip():
                 return _result(ctx, "command must not be empty", ok=False)
@@ -234,55 +269,155 @@ class ShellTool:
                     command=shown,
                 )
 
-        started = time.monotonic()
-        try:
-            completed = subprocess.run(
+        if background:
+            identifier = _start_shell_job(
+                ctx,
                 argv,
                 cwd=cwd,
-                shell=use_shell,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                errors="replace",
+                use_shell=use_shell,
                 timeout=float(timeout),
-                env=os.environ.copy(),
+                shown=shown,
             )
-        except subprocess.TimeoutExpired as exc:
-            elapsed = time.monotonic() - started
-            output = _timeout_output(exc.stdout)
-            body = _with_status(output, f"timed out after {timeout:g}s", 124)
+            if identifier is None:
+                return _result(
+                    ctx,
+                    "shell job limit reached; poll an existing job",
+                    ok=False,
+                )
             return _result(
                 ctx,
-                body,
-                ok=False,
-                hint="rerun with a larger timeout or narrower command",
+                f"shell {identifier} queued · poll shell job={identifier}",
                 command=shown,
                 cwd=str(cwd),
-                exit_code=124,
-                timed_out=True,
-                seconds=round(elapsed, 3),
+                job=identifier,
+                background=True,
             )
-        except OSError as exc:
-            return _result(
-                ctx,
-                f"could not run {shown}: {exc}",
-                ok=False,
-                command=shown,
-                cwd=str(cwd),
-            )
-
-        elapsed = time.monotonic() - started
-        body = _with_status(completed.stdout, None, completed.returncode)
+        outcome = _execute(
+            argv,
+            cwd=cwd,
+            use_shell=use_shell,
+            timeout=float(timeout),
+            shown=shown,
+        )
         return _result(
             ctx,
-            body,
-            ok=completed.returncode == 0,
+            outcome.body,
+            ok=outcome.ok,
             hint="rerun a narrower command or redirect output to a file",
             command=shown,
             cwd=str(cwd),
-            exit_code=completed.returncode,
-            seconds=round(elapsed, 3),
+            exit_code=outcome.exit_code,
+            timed_out=outcome.timed_out,
+            seconds=round(outcome.seconds, 3),
         )
+
+    @staticmethod
+    def _poll(ctx: ToolContext, identifier: str) -> ToolResult:
+        jobs = ctx.state.get("shell-jobs", {})
+        job = jobs.get(identifier) if isinstance(jobs, dict) else None
+        if not isinstance(job, _ShellJob):
+            return _result(ctx, f"unknown shell job: {identifier}", ok=False)
+        assert job.thread is not None
+        if job.thread.is_alive() or job.outcome is None:
+            return _result(ctx, f"shell {identifier} running", job=identifier)
+        outcome = job.outcome
+        return _result(
+            ctx,
+            outcome.body,
+            ok=outcome.ok,
+            hint="rerun a narrower command or redirect output to a file",
+            job=identifier,
+            exit_code=outcome.exit_code,
+            timed_out=outcome.timed_out,
+            seconds=round(outcome.seconds, 3),
+        )
+
+
+def _execute(
+    argv: str | list[str],
+    *,
+    cwd: Path,
+    use_shell: bool,
+    timeout: float,
+    shown: str,
+) -> _CommandOutcome:
+    started = time.monotonic()
+    try:
+        completed = subprocess.run(
+            argv,
+            cwd=cwd,
+            shell=use_shell,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            errors="replace",
+            timeout=timeout,
+            env=os.environ.copy(),
+        )
+    except subprocess.TimeoutExpired as exc:
+        elapsed = time.monotonic() - started
+        output = _timeout_output(exc.stdout)
+        body = _with_status(output, f"timed out after {timeout:g}s", 124)
+        return _CommandOutcome(body, False, 124, True, elapsed)
+    except OSError as exc:
+        elapsed = time.monotonic() - started
+        return _CommandOutcome(
+            f"could not run {shown}: {exc}", False, 127, False, elapsed
+        )
+    elapsed = time.monotonic() - started
+    return _CommandOutcome(
+        _with_status(completed.stdout, None, completed.returncode),
+        completed.returncode == 0,
+        completed.returncode,
+        False,
+        elapsed,
+    )
+
+
+def _start_shell_job(
+    ctx: ToolContext,
+    argv: str | list[str],
+    *,
+    cwd: Path,
+    use_shell: bool,
+    timeout: float,
+    shown: str,
+) -> str | None:
+    jobs = ctx.state.setdefault("shell-jobs", {})
+    assert isinstance(jobs, dict)
+    if len(jobs) >= 32:
+        completed = [
+            key
+            for key, value in jobs.items()
+            if isinstance(value, _ShellJob)
+            and value.thread is not None
+            and not value.thread.is_alive()
+        ]
+        for key in completed[: max(1, len(jobs) - 31)]:
+            jobs.pop(key, None)
+        if len(jobs) >= 32:
+            return None
+    sequence = 1
+    while f"s{sequence}" in jobs:
+        sequence += 1
+    identifier = f"s{sequence}"
+    job = _ShellJob(identifier)
+    jobs[identifier] = job
+
+    def run() -> None:
+        job.outcome = _execute(
+            argv,
+            cwd=cwd,
+            use_shell=use_shell,
+            timeout=timeout,
+            shown=shown,
+        )
+
+    job.thread = threading.Thread(
+        target=run, name=f"mjj-shell-{identifier}", daemon=True
+    )
+    job.thread.start()
+    return identifier
 
 
 def _timeout_output(output: str | bytes | None) -> str:

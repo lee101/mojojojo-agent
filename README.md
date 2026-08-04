@@ -71,7 +71,9 @@ the same quality-85 WebP vision path as `--image`. `!command` runs a local shell
 command and keeps its bounded result as context; `!!command` keeps it local.
 `/permissions` switches live between `auto`, `ask`, and `read-only`, while
 `/status`, `/diff`, `/review`, and `/init` cover the common repository-control
-flow without leaving the app.
+flow without leaving the app. Every successful patch creates an external,
+bounded checkpoint; `/undo` restores the latest one only when none of its files
+changed afterward, and `/checkpoints` shows the retained history.
 
 `/login chatgpt` launches the supported Codex browser sign-in and reuses its
 credential cache; `/login device` uses device-code sign-in. `/login openpaths`,
@@ -114,9 +116,10 @@ agent the compact workflow only when visual work calls for it. See the
 | --- | --- | --- |
 | find code | dump files into context | ranked `path:line` hits from a native int8 index |
 | understand a repository | read every file | reference-ranked symbol map, fitted to budget |
+| navigate symbols | require a fixed IDE stack | installed LSP when available, hybrid-index fallback otherwise |
 | run code | shell out to CPython | subset-compiled to Mojo, cached by content hash |
-| edit code | rewrite the file | atomic `apply_patch`, syntax gate, `+n/-n` summary |
-| validate code | run every build inline | parser checks now, compiler jobs in background |
+| edit code | rewrite the file | atomic `apply_patch`, syntax gate, checkpoint, `+n/-n` summary |
+| validate code | run every build inline | parser checks now, optional formatter, compiler jobs in background |
 | tool output | truncate at N bytes | one ledger, head+tail kept, exactly what was dropped is stated |
 | reasoning | re-derived each turn | reasoning items echoed back verbatim so the cache hits |
 | long sessions | resend an ever-growing transcript | server compaction replaces old items with opaque carried state |

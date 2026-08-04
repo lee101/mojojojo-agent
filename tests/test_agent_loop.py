@@ -229,6 +229,39 @@ def test_autonomous_idea_prompt_selects_a_high_impact_improvement(monkeypatch):
     assert "highest-impact one" in prompt
 
 
+def test_steering_arriving_during_a_response_runs_at_next_safe_boundary(
+    monkeypatch,
+) -> None:
+    calls = 0
+    agent = None
+
+    def stream(self, items, instructions, tools=None):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            yield Event(
+                "response.output_item.done", {"item": message("first answer")}
+            )
+            assert agent is not None
+            agent.steer("focus on the failing test")
+        else:
+            assert "focus on the failing test" in str(items)
+            yield Event(
+                "response.output_item.done", {"item": message("steered answer")}
+            )
+
+    monkeypatch.setattr(ModelClient, "stream", stream)
+    agent = Agent(registry=Registry())
+
+    steps = list(agent.run("initial task"))
+
+    assert calls == 2
+    assert [step.text for step in steps if step.kind == "steering"] == [
+        "focus on the failing test"
+    ]
+    assert agent.items[-2]["role"] == "user"
+
+
 def test_exec_renderer_keeps_progress_off_stdout() -> None:
     out, err = StringIO(), StringIO()
     steps = iter(

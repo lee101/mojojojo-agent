@@ -81,7 +81,8 @@ command substitution and JSONL consumers receive predictable output.
 bounded text context. Mentioned images are precompressed and sent to vision.
 Use `/init` to have the agent inspect a repository and generate an `AGENTS.md`,
 `/diff` for a bounded working-tree diff, and `/review [focus]` for a findings-first
-review that explicitly avoids edits.
+review that explicitly avoids edits. `/checkpoints` shows automatic patch
+snapshots and `/undo` restores the latest conflict-free one.
 
 ## Providers, reasoning, and images
 

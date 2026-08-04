@@ -90,15 +90,16 @@ data: {"kind":"text","text":"Done","name":"","meta":{}}
 ```
 
 The stream begins with a small `run` event carrying the run and session IDs.
-Agent events use `reasoning`, `text`, `tool_call`, `tool_result`, `usage`, or
-`error`. The last `usage` event has `meta.final = true` and includes exact model
+Agent events use `reasoning`, `text`, `tool_call`, `tool_result`, `steering`,
+`usage`, or `error`. The last `usage` event has `meta.final = true` and includes exact model
 usage, total billed tokens, the tool-output ledger summary, and the app.nz
 credit charge.
 
-### Attach, interrupt, and list sessions
+### Attach, steer, interrupt, and list sessions
 
 ```text
 GET  /v1/agent/runs/<run-id>
+POST /v1/agent/runs/<run-id>/steer    {"prompt":"new guidance"}
 POST /v1/agent/runs/<run-id>/interrupt
 GET  /v1/agent/sessions
 GET  /healthz
@@ -108,6 +109,9 @@ Run lookup is account-scoped. The attach endpoint follows future events from a
 live stream (up to four attachments); completed runs are represented by their
 session rollout rather than retained in memory. The interrupt endpoint sets the
 run's cancellation flag and closes an active model response.
+The steering endpoint accepts up to 32 bounded follow-ups. Guidance is appended
+at the next model boundary—after the current response or tool batch—so the
+append-only rollout remains ordered.
 
 The per-run event queue is bounded. A slow client therefore backpressures the
 agent instead of growing memory without limit. SSE keepalives detect a dead

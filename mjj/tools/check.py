@@ -12,6 +12,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..checkpoints import CheckpointError, store_for
 from ..syntax import SyntaxCheck, validate_path
 from .base import ToolContext, ToolResult
 
@@ -41,6 +42,10 @@ class CheckTool:
                 "type": "boolean",
                 "description": "Queue non-blocking language compiler checks.",
             },
+            "format": {
+                "type": "boolean",
+                "description": "Run an installed project formatter before checking.",
+            },
             "job": {
                 "type": "string",
                 "description": "Compiler job id to poll.",
@@ -58,12 +63,46 @@ class CheckTool:
         compile_requested = args.get("compile", False)
         if not isinstance(compile_requested, bool):
             return self._result(ctx, "compile must be true or false", ok=False)
+        format_requested = args.get("format", False)
+        if not isinstance(format_requested, bool):
+            return self._result(ctx, "format must be true or false", ok=False)
         try:
             paths = _resolve_paths(args.get("paths"), ctx)
         except ValueError as exc:
             return self._result(ctx, str(exc), ok=False)
         if not paths:
             return self._result(ctx, "no changed files; pass paths", ok=False)
+
+        formatted = None
+        checkpoint = None
+        if format_requested:
+            commands = _formatter_commands(ctx.cwd.resolve(), paths)
+            if not commands:
+                return self._result(
+                    ctx, "format: no installed formatter for these files", ok=False
+                )
+            if ctx.approve is not None:
+                try:
+                    approved = ctx.approve(
+                        "format",
+                        {
+                            "paths": [
+                                path.relative_to(ctx.cwd.resolve()).as_posix()
+                                for path in paths
+                            ],
+                            "formatters": [command[0] for command in commands],
+                        },
+                    )
+                except Exception as exc:
+                    return self._result(ctx, f"approval failed: {exc}", ok=False)
+                if not approved:
+                    return self._result(
+                        ctx, "format denied", ok=False, denied=True
+                    )
+            try:
+                formatted, checkpoint = _run_formatters(ctx, paths, commands)
+            except (OSError, CheckpointError, subprocess.SubprocessError) as exc:
+                return self._result(ctx, f"format failed: {exc}", ok=False)
 
         checks = [
             validate_path(path, label=path.relative_to(ctx.cwd.resolve()).as_posix())
@@ -77,6 +116,10 @@ class CheckTool:
                 f"FAIL {check.path}:{check.checker}: {check.message}"
                 for check in failures
             )
+            if formatted:
+                output = (
+                    f"format ✓ {formatted} · checkpoint {checkpoint}\n" + output
+                )
             return self._result(
                 ctx,
                 output,
@@ -84,6 +127,8 @@ class CheckTool:
                 files=len(paths),
                 checked=len(checked),
                 failures=len(failures),
+                formatted=formatted,
+                checkpoint=checkpoint,
             )
         labels = sorted({check.checker for check in checked})
         output = f"syntax ✓ {len(checked)}/{len(paths)}"
@@ -91,6 +136,13 @@ class CheckTool:
             output += " · " + ",".join(labels)
         if skipped:
             output += f" · {skipped} unchecked"
+        if formatted:
+            output = f"format ✓ {formatted} · checkpoint {checkpoint}\n" + output
+            changed = ctx.state.setdefault("changed-files", set())
+            if isinstance(changed, set):
+                changed.update(
+                    path.relative_to(ctx.cwd.resolve()).as_posix() for path in paths
+                )
 
         queued = None
         if compile_requested:
@@ -107,6 +159,8 @@ class CheckTool:
             checked=len(checked),
             skipped=skipped,
             compilers=queued,
+            formatted=formatted,
+            checkpoint=checkpoint,
         )
 
     def _poll(self, ctx: ToolContext, identifier: str) -> ToolResult:
@@ -263,6 +317,104 @@ def _compiler_commands(
         if item and shutil.which(item[0]):
             commands.append((item[0], [*item[1], str(path)], environment))
     return commands
+
+
+def _formatter_commands(
+    root: Path, paths: list[Path]
+) -> list[tuple[str, list[str]]]:
+    grouped: dict[str, list[Path]] = {}
+    for path in paths:
+        grouped.setdefault(path.suffix.lower(), []).append(path)
+    commands: list[tuple[str, list[str]]] = []
+
+    python_paths = grouped.get(".py", []) + grouped.get(".pyi", [])
+    if python_paths:
+        ruff = _project_executable(root, "ruff") or shutil.which("ruff")
+        black = _project_executable(root, "black") or shutil.which("black")
+        if ruff:
+            commands.append(("ruff", [ruff, "format", *map(str, python_paths)]))
+        elif black:
+            commands.append(("black", [black, "--quiet", *map(str, python_paths)]))
+
+    web_suffixes = {".js", ".jsx", ".ts", ".tsx", ".json", ".css", ".md"}
+    web_paths = [path for suffix in web_suffixes for path in grouped.get(suffix, [])]
+    prettier = _project_node_executable(root, "prettier")
+    if web_paths and prettier:
+        commands.append(("prettier", [prettier, "--write", *map(str, web_paths)]))
+
+    executable_by_suffix = {
+        ".go": ("gofmt", ["gofmt", "-w"]),
+        ".rs": ("rustfmt", ["rustfmt"]),
+        ".c": ("clang-format", ["clang-format", "-i"]),
+        ".cc": ("clang-format", ["clang-format", "-i"]),
+        ".cpp": ("clang-format", ["clang-format", "-i"]),
+        ".h": ("clang-format", ["clang-format", "-i"]),
+        ".hpp": ("clang-format", ["clang-format", "-i"]),
+    }
+    for suffix, suffix_paths in grouped.items():
+        formatter = executable_by_suffix.get(suffix)
+        if formatter and shutil.which(formatter[0]):
+            commands.append(
+                (formatter[0], [*formatter[1], *map(str, suffix_paths)])
+            )
+    return commands
+
+
+def _project_executable(root: Path, name: str) -> str | None:
+    candidates = (
+        root / ".venv" / "bin" / name,
+        root / ".venv" / "Scripts" / f"{name}.exe",
+        root / "venv" / "bin" / name,
+        root / "venv" / "Scripts" / f"{name}.exe",
+    )
+    return next((str(path) for path in candidates if path.is_file()), None)
+
+
+def _project_node_executable(root: Path, name: str) -> str | None:
+    candidates = (
+        root / "node_modules" / ".bin" / name,
+        root / "node_modules" / ".bin" / f"{name}.cmd",
+    )
+    return next((str(path) for path in candidates if path.is_file()), None)
+
+
+def _run_formatters(
+    ctx: ToolContext,
+    paths: list[Path],
+    commands: list[tuple[str, list[str]]],
+) -> tuple[str, str]:
+    store = store_for(ctx.cwd, ctx.state)
+    pending = store.begin(paths)
+    labels: list[str] = []
+    failure = ""
+    for label, command in commands:
+        try:
+            completed = subprocess.run(
+                command,
+                cwd=ctx.cwd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=30,
+                check=False,
+                env=os.environ.copy(),
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            failure = f"{label}: {type(exc).__name__}: {exc}"
+            break
+        if completed.returncode:
+            detail = " ".join(completed.stdout.split())[:300]
+            failure = f"{label}: {detail or f'exit {completed.returncode}'}"
+            break
+        labels.append(label)
+    if failure:
+        checkpoint = store.finish(pending)
+        store.undo(checkpoint.identifier)
+        raise CheckpointError(f"{failure}; changes restored")
+    checkpoint = store.finish(pending)
+    return ",".join(labels), checkpoint.identifier
 
 
 def _start_job(

@@ -30,7 +30,9 @@ bounded tool Registry ---- Ledger ---- filesystem / patch / shell / Python / sea
 4. Function calls dispatch through the registry. Tool output passes through one
    ledger before the clipped result is appended and returned to the model.
 5. A response without tool calls ends the turn, unless an explicit autonomous
-   mode appends a synthetic continuation message.
+   mode appends a synthetic continuation message. Hosted steering received
+   during the response is appended at this safe boundary and starts another
+   model pass without concurrent transcript writes.
 
 The transcript sent to a provider and the transcript stored on disk share the
 same Responses-style item shape. Chat-completions providers are translated in
@@ -70,6 +72,7 @@ inside. Hosted mode is stricter:
 - every account receives a non-identifying workspace root;
 - file and search paths are checked against that root;
 - hosted shell commands are allowlisted and shell interpretation is disabled;
+- hosted background shell jobs and language-server processes are disabled;
 - hosted Python fails closed when the local jail is unavailable;
 - browser cookies stop at the mojojojo proxy; the backend receives a service
   credential and an already-resolved subject;
@@ -89,4 +92,6 @@ See [hosted server](server.md) for the HTTP and billing contract, and
 | `mjj/session.py` | JSONL persistence, resume, branch, import, and export |
 | `mjj/tools/` | Bounded coding tools and registry |
 | `mjj/search/` | Exact, lexical, and vector retrieval |
+| `mjj/checkpoints.py` | External bounded snapshots and conflict-safe undo |
+| `mjj/lsp.py` | Installed language-server stdio transport |
 | `mjj/server.py` | Hosted workspaces, SSE runs, interrupts, and settlement |

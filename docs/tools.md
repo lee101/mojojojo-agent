@@ -52,6 +52,11 @@ defaults to 120 seconds.
 Stdout and stderr are merged in process order. The bounded result ends with an
 exit code; timeouts use exit code 124.
 
+Set `"background": true` to return a job ID immediately, then poll with
+`{"job":"s1"}`. At most 32 jobs are retained in a run and final
+output still passes through the ledger. Hosted sessions disable background
+shell jobs so a disconnected browser cannot orphan host processes.
+
 A small read-only allowlist runs without approval. It covers inspection
 commands such as `cat`, `ls`, `rg`, and read-only Git subcommands. Other
 commands call `ctx.approve("shell", details)` when an approval callback is
@@ -91,11 +96,23 @@ JSON, and TOML use their exact parsers; supported source languages use
 tree-sitter when the `syntax` extra is installed. A syntax failure rejects the
 whole patch before any write. New contents are then staged to temporary files
 and replaced only after every file and hunk validates. Success returns only
-per-file `+n/-n` counts and a compact syntax status, never file contents.
+per-file `+n/-n` counts, a compact syntax status, and a checkpoint ID, never
+file contents.
 
 Patches always pass through the configured approval policy before parsing or
 writing. The `py` tool does the same because arbitrary Python can mutate the
 workspace. Read-only mode therefore blocks both at the registry boundary.
+
+## `checkpoint`
+
+Each successful patch snapshots exactly the touched files before mutation.
+Snapshots live outside the repository, use `0700` directories and `0600`
+files, retain at most 50 checkpoints for seven days, and refuse more than 256
+files or 20 MiB. `{"action":"list"}` returns bounded metadata;
+`{"action":"undo"}` restores the latest checkpoint. Undo first verifies the
+post-patch content and mode of every file, so later user changes cause a safe
+conflict instead of being overwritten. `/checkpoints` and `/undo [ID]` expose
+the same operations in the TUI.
 
 ## `search`
 
@@ -104,6 +121,20 @@ identifier-aware BM25 and the optional mojo-embed int8 scan. Only after a
 normal miss does it inspect ignored or 2–32 MiB text. It returns capped,
 ranked `path:line` evidence and cursor-based follow-up rather than file dumps.
 See [search.md](search.md) for grounding, persistence, and measurements.
+
+## `navigate`
+
+`navigate` provides `definition`, `references`, `hover`, and document
+`symbols` for a one-based file position. It starts only an already-installed
+Pyright, TypeScript, Rust, Go, Clang, or Ruby language server and downloads
+nothing. If no server is installed, it falls back to the incremental hybrid
+index and still returns bounded `path:line` evidence. Hosted sessions always
+use the index fallback because language-server project configuration may be
+executable.
+
+```json
+{"action":"definition","path":"mjj/agent.py","line":151,"column":20}
+```
 
 ## `check`
 
@@ -117,6 +148,12 @@ loop. Poll the returned job through the same tool. Python jobs run real
 `py_compile` and, when the adjacent checkout is available, sample up to three
 files through `mojojojo-compiler`; JavaScript, shell, C/C++, Ruby, PHP, and Lua
 use their installed language checker. Compiler output remains ledger-bounded.
+
+Set `"format": true` to explicitly run a discovered formatter before checking.
+MJJ prefers project-local Ruff/Black and Prettier, then already-installed
+`gofmt`, `rustfmt`, or `clang-format`. Formatting passes through approval,
+checkpoints every target first, and restores those files when a formatter
+fails.
 
 ## `py`
 

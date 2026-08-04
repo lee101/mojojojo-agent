@@ -1,10 +1,58 @@
 import os
 import sys
+import time
 from pathlib import Path
 
 from mjj.ledger import Budget, Ledger
 from mjj.tools.base import ToolContext
 from mjj.tools.shell import ShellTool
+
+
+def test_background_shell_returns_immediately_and_can_be_polled(tmp_path) -> None:
+    ctx = context(tmp_path)
+    started = time.monotonic()
+
+    queued = ShellTool().run(
+        {
+            "command": [
+                sys.executable,
+                "-c",
+                "import time; time.sleep(0.4); print('background complete')",
+            ],
+            "background": True,
+        },
+        ctx,
+    )
+
+    assert queued.ok
+    assert time.monotonic() - started < 0.2
+    identifier = queued.meta["job"]
+    job = ctx.state["shell-jobs"][identifier]
+    job.thread.join(timeout=3)
+    completed = ShellTool().run({"job": identifier}, ctx)
+    assert completed.ok
+    assert "background complete" in completed.output
+    assert completed.meta["exit_code"] == 0
+
+
+def test_background_shell_timeout_is_reported_on_poll(tmp_path) -> None:
+    ctx = context(tmp_path)
+    queued = ShellTool().run(
+        {
+            "command": [sys.executable, "-c", "import time; time.sleep(1)"],
+            "timeout": 0.05,
+            "background": True,
+        },
+        ctx,
+    )
+    identifier = queued.meta["job"]
+    ctx.state["shell-jobs"][identifier].thread.join(timeout=3)
+
+    completed = ShellTool().run({"job": identifier}, ctx)
+
+    assert not completed.ok
+    assert completed.meta["timed_out"] is True
+    assert completed.meta["exit_code"] == 124
 
 
 def context(tmp_path: Path, approve=None, *, budget: int = 1600) -> ToolContext:

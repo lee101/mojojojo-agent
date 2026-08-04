@@ -86,3 +86,91 @@ def test_check_refuses_workspace_escape(tmp_path: Path) -> None:
     )
     assert not result.ok
     assert "inside the workspace" in result.output
+
+
+def test_opt_in_formatter_is_checkpointed_and_marks_changed_files(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("MJJ_CHECKPOINT_ROOT", str(tmp_path / "checkpoints"))
+    path = tmp_path / "module.py"
+    path.write_text("value=1\n")
+    context = ToolContext(tmp_path, Ledger())
+    monkeypatch.setattr(
+        check_module,
+        "_formatter_commands",
+        lambda _root, _paths: [
+            (
+                "fixture",
+                [
+                    sys.executable,
+                    "-c",
+                    "from pathlib import Path; Path('module.py').write_text('value = 1\\n')",
+                ],
+            )
+        ],
+    )
+
+    result = CheckTool().run({"paths": ["module.py"], "format": True}, context)
+
+    assert result.ok
+    assert path.read_text() == "value = 1\n"
+    assert result.meta["formatted"] == "fixture"
+    assert result.meta["checkpoint"]
+    assert context.state["changed-files"] == {"module.py"}
+
+
+def test_failed_formatter_rolls_back_partial_mutation(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("MJJ_CHECKPOINT_ROOT", str(tmp_path / "checkpoints"))
+    path = tmp_path / "module.py"
+    path.write_text("original = True\n")
+    context = ToolContext(tmp_path, Ledger())
+    monkeypatch.setattr(
+        check_module,
+        "_formatter_commands",
+        lambda _root, _paths: [
+            (
+                "broken",
+                [
+                    sys.executable,
+                    "-c",
+                    "from pathlib import Path; Path('module.py').write_text('damaged'); raise SystemExit(3)",
+                ],
+            )
+        ],
+    )
+
+    result = CheckTool().run({"paths": ["module.py"], "format": True}, context)
+
+    assert not result.ok
+    assert "changes restored" in result.output
+    assert path.read_text() == "original = True\n"
+
+
+def test_formatter_obeys_read_only_permissions(tmp_path: Path, monkeypatch) -> None:
+    path = tmp_path / "module.py"
+    path.write_text("value=1\n")
+    context = ToolContext(
+        tmp_path, Ledger(), approve=lambda _name, _details: False
+    )
+    monkeypatch.setattr(
+        check_module,
+        "_formatter_commands",
+        lambda _root, _paths: [("fixture", [sys.executable, "-c", "pass"])],
+    )
+
+    result = CheckTool().run({"paths": ["module.py"], "format": True}, context)
+
+    assert not result.ok and result.meta["denied"]
+    assert path.read_text() == "value=1\n"
+
+
+def test_formatter_discovery_prefers_project_local_ruff(tmp_path: Path) -> None:
+    binary = tmp_path / ".venv" / "bin" / "ruff"
+    binary.parent.mkdir(parents=True)
+    binary.write_text("fixture")
+    path = tmp_path / "module.py"
+    path.write_text("value=1\n")
+
+    commands = check_module._formatter_commands(tmp_path, [path])
+
+    assert commands == [("ruff", [str(binary), "format", str(path)])]

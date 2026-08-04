@@ -8,6 +8,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..checkpoints import CheckpointError, store_for
 from ..syntax import SyntaxCheck, validate_source
 from .base import ToolContext, ToolResult
 
@@ -85,7 +86,9 @@ class ApplyPatchTool:
             return _result(ctx, "input must be a string", ok=False)
         try:
             operations = _parse(patch)
-            summaries, checks = _plan_and_commit(operations, ctx)
+            summaries, checks, checkpoint, checkpoint_error = _plan_and_commit(
+                operations, ctx
+            )
         except (PatchError, OSError) as exc:
             return _result(
                 ctx,
@@ -97,6 +100,10 @@ class ApplyPatchTool:
         checked = sum(check.checked for check in checks)
         if checked:
             lines.append(f"syntax ✓ {checked} file{'' if checked == 1 else 's'}")
+        if checkpoint:
+            lines.append(f"checkpoint {checkpoint} · undo with checkpoint action=undo")
+        elif checkpoint_error:
+            lines.append(f"checkpoint unavailable · {checkpoint_error}")
         changed = ctx.state.setdefault("changed-files", set())
         if isinstance(changed, set):
             changed.update(summaries)
@@ -106,6 +113,8 @@ class ApplyPatchTool:
             hint="split very large patches into smaller patches",
             files=list(summaries),
             syntax=[check.__dict__ for check in checks],
+            checkpoint=checkpoint,
+            checkpoint_error=checkpoint_error,
         )
 
 
@@ -222,7 +231,7 @@ def _patch_path(path_arg: str, ctx: ToolContext) -> Path:
 
 def _plan_and_commit(
     operations: list[_Operation], ctx: ToolContext
-) -> tuple[dict[str, list[int]], list[SyntaxCheck]]:
+) -> tuple[dict[str, list[int]], list[SyntaxCheck], str | None, str]:
     plans: dict[Path, bytes | None] = {}
     snapshots: dict[Path, _Snapshot] = {}
     summaries: dict[str, list[int]] = {}
@@ -275,8 +284,29 @@ def _plan_and_commit(
                 f"syntax check failed: {relative} [{check.checker}] {check.message}"
             )
 
-    _commit(plans, snapshots)
-    return summaries, checks
+    pending = None
+    store = None
+    checkpoint_error = ""
+    try:
+        store = store_for(ctx.cwd, ctx.state)
+        pending = store.begin(plans)
+    except (OSError, CheckpointError) as exc:
+        pending = None
+        checkpoint_error = str(exc)
+    try:
+        _commit(plans, snapshots)
+    except Exception:
+        if pending is not None and store is not None:
+            store.cancel(pending)
+        raise
+    checkpoint = None
+    if pending is not None and store is not None:
+        try:
+            checkpoint = store.finish(pending, expected=plans).identifier
+        except (OSError, CheckpointError) as exc:
+            store.cancel(pending)
+            checkpoint_error = str(exc)
+    return summaries, checks, checkpoint, checkpoint_error
 
 
 def _snapshot(path: Path) -> _Snapshot:

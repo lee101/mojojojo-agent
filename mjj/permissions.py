@@ -41,6 +41,12 @@ def _describe(tool: str, details: dict) -> str:
         files = _PATCH_FILE.findall(str(details.get("input") or ""))
         suffix = ", ".join(files[:8]) or "repository files"
         return f"edits to {suffix}"
+    if tool == "checkpoint":
+        return f"checkpoint restore {str(details.get('id') or 'latest')[:80]}"
+    if tool == "format":
+        paths = details.get("paths")
+        suffix = ", ".join(map(str, paths[:8])) if isinstance(paths, list) else "files"
+        return f"formatting of {suffix}"
     if tool == "py":
         return "local Python execution"
     return f"tool {tool}"

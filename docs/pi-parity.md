@@ -25,22 +25,22 @@ still missing.
 | Continued autonomous work | Pi Infinity continuation flags | `--auto-next-steps`, `--auto-next-idea`, `/auto` |
 | Skills and project context | skills and context files | scoped `SKILL.md` plus bounded hierarchical `AGENTS.md` |
 | Runtime reload | `/reload` | `/reload` for tools and skills |
-| Shell and coding tools | read/write/edit/bash/grep/find/ls | read/list/search/apply-patch/shell/Python/native execution |
+| Shell and coding tools | read/write/edit/bash/grep/find/ls | read/list/search/navigate/apply-patch/shell/Python/native execution |
+| Checkpoint and undo | automatic snapshots and undo | external per-patch checkpoints, `/checkpoints`, `/undo` |
+| Background execution | compiler and shell jobs | pollable compiler and shell jobs |
+| Active steering | follow-up input during a run | bounded hosted follow-up queue at safe model boundaries |
 | Provider reach | direct provider adapters | OpenAI plus OpenPaths/OpenRouter/custom compatible gateways |
 
 ## Remaining parity work
 
 These are feature gaps, not presentation preferences:
 
-- **Active-turn steering and follow-up queues.** Pi and Codex accept new input
-  while tools are running; Mojo Agent's inline loop is still synchronous.
-- **MCP, LSP, and external integrations.** Grok and Codex expose MCP, while
-  Grok also supplies language-server diagnostics and navigation.
-- **Transparent checkpoints and undo.** OpenCode and Hermes protect agent
-  mutations with external shadow-Git snapshots; MJJ's patches are atomic but
-  do not yet provide cross-tool rollback.
-- **Background jobs and subagents.** Grok can manage long-running tasks and
-  reviewer/worker agents. Mojo Agent currently runs one foreground turn loop.
+- **MCP and external integrations.** Grok and Codex expose MCP. MJJ now has
+  installed-LSP navigation but no authenticated external tool-server runtime.
+- **Subagents.** Grok can manage reviewer/worker agents. MJJ backgrounds local
+  commands and compiler checks but still runs one model worker per session.
+- **Interactive TUI steering.** Hosted runs accept follow-ups while active; the
+  inline terminal still waits for the current response before reading input.
 - **Package/plugin runtime.** Pi extensions/packages and Grok/Codex plugins can
   add commands, tools, events, and UI. Mojo Agent supports portable Agent Skills
   but not arbitrary in-process plugins.
@@ -60,8 +60,8 @@ The presentation boundary remains deliberate:
   additional models through OpenPaths or OpenRouter so one transcript and tool
   protocol stays consistent.
 
-The implemented surface covers the shared foreground coding job: authenticate,
+The implemented surface covers the shared coding job: authenticate,
 select a model and reasoning level, attach files or images, inspect and edit a
 repository under an explicit permission mode, execute tools, review changes,
-continue autonomously, and resume or branch the result. The gaps above define
-the next parity milestones.
+continue autonomously, steer hosted work, undo safe patches, and resume or
+branch the result. The gaps above define the next parity milestones.

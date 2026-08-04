@@ -39,6 +39,7 @@ _RUN_PATH = re.compile(r"^/v1/agent/runs/([A-Za-z0-9_-]{8,64})$")
 _INTERRUPT_PATH = re.compile(
     r"^/v1/agent/runs/([A-Za-z0-9_-]{8,64})/interrupt$"
 )
+_STEER_PATH = re.compile(r"^/v1/agent/runs/([A-Za-z0-9_-]{8,64})/steer$")
 _SESSION_ID = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
 _MODEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _USER_ID = re.compile(r"^[A-Za-z0-9_-]{8,96}$")
@@ -258,6 +259,11 @@ class _WorkspaceTool:
             return ToolResult.error(ctx.ledger.clip(self.name, error))
         if self.name == "py":
             return self._run_python(args, ctx)
+        if self.name == "navigate":
+            # Language-server project configuration can execute code. Hosted
+            # navigation retains the index fallback but never starts a tenant
+            # configured server on the service host.
+            ctx.state["disable-lsp"] = True
         return self._tool.run(args, ctx)
 
     def _run_python(self, args: dict, ctx: ToolContext) -> ToolResult:
@@ -308,11 +314,15 @@ class _WorkspaceTool:
         )
 
     def _validate(self, args: dict, ctx: ToolContext) -> str:
-        if self.name in ("read", "list", "search") and args.get("path") is not None:
+        if self.name in ("read", "list", "search", "navigate") and args.get(
+            "path"
+        ) is not None:
             if not self._inside(ctx, args["path"]):
                 return "path must stay inside the user workspace"
         if self.name != "shell":
             return ""
+        if args.get("background", False):
+            return "background shell jobs are unavailable on the hosted agent"
         if args.get("shell", False):
             return "shell=true is unavailable on the hosted agent"
         if args.get("cwd") is not None and not self._inside(ctx, args["cwd"]):
@@ -386,6 +396,9 @@ class RunState:
     attach_lock: threading.Lock = field(default_factory=threading.Lock)
     attached: bool = False
     mirrors: dict[str, queue.Queue] = field(default_factory=dict)
+    steering: queue.Queue[str] = field(
+        default_factory=lambda: queue.Queue(maxsize=32)
+    )
     status: str = "running"
 
     def __post_init__(self) -> None:
@@ -679,6 +692,7 @@ class AgentService:
             approve=lambda _name, _request: False,
         )
         agent.items = state.items
+        agent.steering = state.steering
         failed = False
         try:
             steps = agent.run(state.prompt)
@@ -749,6 +763,21 @@ class AgentService:
     def interrupt(self, state: RunState) -> None:
         state.status = "interrupted"
         state.cancel.set()
+
+    def steer(self, state: RunState, payload: object) -> None:
+        if state.done.is_set() or state.status != "running":
+            raise RequestError(409, "run is no longer accepting steering")
+        if not isinstance(payload, dict):
+            raise RequestError(400, "JSON body must be an object")
+        prompt = payload.get("prompt")
+        if not isinstance(prompt, str) or not prompt.strip():
+            raise RequestError(400, "prompt is required")
+        if len(prompt) > self.config.max_prompt_chars:
+            raise RequestError(413, "prompt is too large")
+        try:
+            state.steering.put_nowait(prompt.strip())
+        except queue.Full as exc:
+            raise RequestError(429, "steering queue is full") from exc
 
 
 class AgentHTTPServer(ThreadingHTTPServer):
@@ -826,6 +855,21 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
                 self.service.interrupt(state)
                 self._json(
                     202, {"ok": True, "id": state.id, "status": state.status}
+                )
+            except RequestError as exc:
+                self._json(exc.status, {"error": str(exc)})
+            return
+        match = _STEER_PATH.fullmatch(urlsplit(self.path).path)
+        if match:
+            try:
+                user_key, _ = self.service.authenticate(self)
+                state = self.service.runs.get(match.group(1), user_key)
+                if state is None:
+                    raise RequestError(404, "live run not found")
+                payload = self._read_json()
+                self.service.steer(state, payload)
+                self._json(
+                    202, {"ok": True, "id": state.id, "status": "queued"}
                 )
             except RequestError as exc:
                 self._json(exc.status, {"error": str(exc)})

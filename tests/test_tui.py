@@ -6,6 +6,7 @@ from prompt_toolkit.document import Document
 
 from mjj.agent import Agent
 from mjj.model import ModelClient
+from mjj.tools import build_registry
 from mjj.tools.base import Registry
 from mjj.tools.shell import ShellTool
 from mjj.tui import InteractiveApp, WorkspaceCompleter
@@ -165,3 +166,28 @@ def test_init_does_not_overwrite_existing_agents_file(tmp_path, monkeypatch, cap
     assert turns == []
     assert (tmp_path / "AGENTS.md").read_text(encoding="utf-8") == "keep me"
     assert "already exists" in capsys.readouterr().out
+
+
+def test_undo_slash_command_restores_latest_patch(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("MJJ_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("MJJ_CHECKPOINT_ROOT", str(tmp_path / "checkpoints"))
+    target = tmp_path / "value.txt"
+    target.write_text("one\n")
+    registry = build_registry(only=["patch", "checkpoint"])
+    agent = Agent(
+        registry=registry,
+        client=ModelClient(),
+        cwd=tmp_path,
+        instructions="test",
+    )
+    registry.dispatch(
+        "apply_patch",
+        '{"input":"*** Begin Patch\\n*** Update File: value.txt\\n@@\\n-one\\n+two\\n*** End Patch"}',
+        agent.ctx,
+    )
+    app = InteractiveApp(agent, _args())
+
+    app.command("/undo")
+
+    assert target.read_text() == "one\n"
+    assert "restored" in capsys.readouterr().out

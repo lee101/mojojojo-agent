@@ -11,7 +11,17 @@ import os
 
 from .base import Registry, Tool, ToolContext, ToolResult  # noqa: F401
 
-MODULES = ("fs", "shell", "patch", "search", "check", "py_exec", "skills")
+MODULES = (
+    "fs",
+    "shell",
+    "patch",
+    "checkpoint",
+    "search",
+    "navigate",
+    "check",
+    "py_exec",
+    "skills",
+)
 
 
 def build_registry(

@@ -59,6 +59,8 @@ COMMANDS = {
     "/init": "generate a repository-specific AGENTS.md",
     "/review": "review working-tree changes without editing",
     "/diff": "show the bounded current Git diff",
+    "/undo": "restore the latest conflict-free patch checkpoint",
+    "/checkpoints": "list recent automatic patch checkpoints",
     "/auto": "set autonomy: off, steps, ideas, or full",
     "/session": "show current session information",
     "/history": "list recent sessions",
@@ -290,6 +292,11 @@ class InteractiveApp:
                         f"{step.meta.get('turn', 0)}\x1b[0m"
                     )
                 )
+            elif step.kind == "steering":
+                if text_open:
+                    print()
+                    text_open = False
+                print_formatted_text(ANSI("\x1b[38;5;45m  ↪ steering applied\x1b[0m"))
             elif step.kind == "error":
                 if text_open:
                     print()
@@ -383,6 +390,10 @@ class InteractiveApp:
             )
         elif command == "/diff":
             self._diff()
+        elif command == "/undo":
+            self._checkpoint("undo", value)
+        elif command == "/checkpoints":
+            self._checkpoint("list", "")
         elif command == "/auto":
             self._set_autonomy(value)
         elif command == "/session":
@@ -495,6 +506,15 @@ class InteractiveApp:
             )
             print(f"--- {label} ---")
             print(result.output or "(none)")
+
+    def _checkpoint(self, action: str, identifier: str) -> None:
+        arguments = {"action": action}
+        if identifier:
+            arguments["id"] = identifier
+        result = self.agent.registry.dispatch(
+            "checkpoint", json.dumps(arguments), self.agent.ctx
+        )
+        print(result.output)
 
     def _set_choice(self, name: str, value: str, choices: tuple[str, ...]) -> None:
         current = getattr(self.agent.client, name)

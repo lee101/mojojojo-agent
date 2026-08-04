@@ -236,6 +236,7 @@ def test_request_cannot_select_a_host_cwd(server_env, monkeypatch, cwd):
 
 def test_hosted_registry_blocks_absolute_tool_access(server_env, monkeypatch):
     from mjj.exec import local
+    from mjj.tools import navigate as navigate_module
 
     workspace = server_env["service"].workspace_for("u1")
     registry = _server_registry(workspace)
@@ -254,6 +255,28 @@ def test_hosted_registry_blocks_absolute_tool_access(server_env, monkeypatch):
     python = registry.dispatch("py", '{"code":"print(1)"}', context)
     assert not python.ok
     assert "sandbox unavailable" in python.output
+
+    background = registry.dispatch(
+        "shell", '{"command":["echo","ok"],"background":true}', context
+    )
+    assert not background.ok and "background" in background.output
+
+    outside_navigation = registry.dispatch(
+        "navigate", '{"action":"symbols","path":"/etc/passwd"}', context
+    )
+    assert not outside_navigation.ok and "workspace" in outside_navigation.output
+    (workspace / "module.py").write_text("def hosted_symbol():\n    pass\n")
+    monkeypatch.setattr(
+        navigate_module,
+        "server_for",
+        lambda _path: (_ for _ in ()).throw(
+            AssertionError("hosted navigation must not start LSP")
+        ),
+    )
+    hosted_navigation = registry.dispatch(
+        "navigate", '{"action":"symbols","path":"module.py"}', context
+    )
+    assert hosted_navigation.ok and hosted_navigation.meta["strategy"] == "index"
 
 
 def test_get_can_attach_to_a_live_stream(server_env, monkeypatch):
@@ -351,6 +374,76 @@ def test_concurrent_cap_and_interrupt_stop_the_generator(server_env, monkeypatch
     response.read()
     first.close()
     assert closed.wait(2)
+
+
+def test_live_run_accepts_queued_steering(server_env, monkeypatch):
+    first_response = threading.Event()
+    release = threading.Event()
+    rounds = 0
+
+    def steerable_stream(self, input_items, instructions, tools=None):
+        nonlocal rounds
+        rounds += 1
+        if rounds == 1:
+            first_response.set()
+            assert release.wait(2)
+            yield Event(
+                type="response.output_item.done",
+                data={
+                    "item": {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": "first"}],
+                    }
+                },
+            )
+        else:
+            assert "new priority" in str(input_items)
+            yield Event(
+                type="response.output_item.done",
+                data={
+                    "item": {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": "second"}],
+                    }
+                },
+            )
+
+    monkeypatch.setattr(ModelClient, "stream", steerable_stream)
+    payload = json.dumps({"prompt": "start"}).encode()
+    primary = http.client.HTTPConnection(
+        "127.0.0.1", server_env["port"], timeout=5
+    )
+    primary.request(
+        "POST",
+        "/v1/agent/runs",
+        body=payload,
+        headers={
+            **session_headers(server_env),
+            "Content-Type": "application/json",
+            "Content-Length": str(len(payload)),
+        },
+    )
+    response = primary.getresponse()
+    run_id = response.getheader("X-Run-ID")
+    assert first_response.wait(2)
+
+    status, _, body = request(
+        server_env,
+        "POST",
+        f"/v1/agent/runs/{run_id}/steer",
+        {"prompt": "new priority"},
+        session_headers(server_env),
+    )
+    assert status == 202
+    assert json.loads(body)["status"] == "queued"
+    release.set()
+    events = sse_events(response.read())
+    primary.close()
+
+    assert rounds == 2
+    assert any(event == "steering" for event, _data in events)
 
 
 def test_disconnecting_client_cancels_instead_of_orphaning(

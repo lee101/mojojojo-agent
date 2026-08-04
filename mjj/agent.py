@@ -10,6 +10,7 @@ prompt cache hit, and the cache is where the token savings actually live.
 from __future__ import annotations
 
 import json
+import queue
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -34,7 +35,7 @@ from .tools.base import Registry, ToolContext, ToolResult
 class Step:
     """What the caller sees while a turn runs."""
 
-    kind: str  # reasoning | text | tool_call | tool_result | compaction | autonomous | usage | error
+    kind: str  # reasoning | text | tool_call | tool_result | compaction | autonomous | steering | usage | error
     text: str = ""
     name: str = ""
     meta: dict = field(default_factory=dict)
@@ -55,6 +56,9 @@ class Agent:
     max_steps: int = 200
     approve: Callable[[str, dict], bool] | None = None
     items: list[dict] = field(default_factory=list)
+    steering: queue.Queue[str] = field(
+        default_factory=lambda: queue.Queue(maxsize=32), repr=False
+    )
 
     def __post_init__(self) -> None:
         if self.instructions is None:
@@ -97,6 +101,27 @@ class Agent:
         if self.session:
             self.session.record(item)
 
+    def steer(self, text: str) -> bool:
+        """Queue user guidance for the next safe model boundary."""
+        if not text.strip():
+            return False
+        try:
+            self.steering.put_nowait(text.strip())
+        except queue.Full:
+            return False
+        return True
+
+    def _drain_steering(self) -> list[str]:
+        drained = []
+        while True:
+            try:
+                text = self.steering.get_nowait()
+            except queue.Empty:
+                break
+            self.user(text)
+            drained.append(text)
+        return drained
+
     # -- the loop -----------------------------------------------------------
 
     def run(
@@ -120,6 +145,8 @@ class Agent:
         autonomous_turns = 0
         tool_rounds = 0
         while tool_rounds < self.max_steps:
+            for steering in self._drain_steering():
+                yield Step(kind="steering", text=steering)
             calls: list[dict] = []
             response_start = len(self.items)
             emitted_text = False
@@ -153,6 +180,12 @@ class Agent:
                             text="model completed without an assistant message",
                         )
                         return
+                steered = self._drain_steering()
+                if steered:
+                    for steering in steered:
+                        yield Step(kind="steering", text=steering)
+                    tool_rounds = 0
+                    continue
                 autonomous = auto_next_steps or auto_next_idea
                 under_limit = (
                     max_autonomous_turns == 0
@@ -254,6 +287,8 @@ def render(steps: Iterator[Step], out, verbose: bool = False) -> int:
             out.write(f"\n[compacted {step.meta.get('dropped_items', 0)} items]\n")
         elif step.kind == "autonomous":
             out.write(f"\n↻ autonomous continuation {step.meta.get('turn', 0)}\n")
+        elif step.kind == "steering":
+            out.write("\n↪ steering queued\n")
         elif step.kind == "error":
             failed = True
             out.write(f"\nerror: {step.text}\n")
@@ -309,6 +344,9 @@ def render_exec(
         elif step.kind == "autonomous" and not jsonl:
             err.write(f"↻ autonomous continuation {step.meta.get('turn', 0)}\n")
             err.flush()
+        elif step.kind == "steering" and not jsonl:
+            err.write("↪ steering applied\n")
+            err.flush()
         elif step.kind == "error":
             failed = True
             if not jsonl:
@@ -345,17 +383,32 @@ def tool_progress(step: Step, *, verbose: bool = False) -> str:
         )
     if step.name == "apply_patch":
         return "editing files"
+    if step.name == "checkpoint":
+        return (
+            f"restoring checkpoint {args.get('id', 'latest')}"
+            if args.get("action") == "undo"
+            else "listing checkpoints"
+        )
     if step.name == "shell":
+        if args.get("job"):
+            return f"polling shell job {args['job']}"
         command = args.get("command", "")
         if isinstance(command, list):
             command = " ".join(str(part) for part in command)
-        return f"running {str(command)[:180]}"
+        prefix = "queueing" if args.get("background") else "running"
+        return f"{prefix} {str(command)[:180]}"
     if step.name == "read":
         return f"reading {args.get('path', '')}".rstrip()
     if step.name == "list":
         return f"listing {args.get('path', '.')}"
     if step.name == "search":
         return f"searching for {args.get('query', '')}".rstrip()
+    if step.name == "navigate":
+        return f"{args.get('action', 'navigating')} {args.get('path', '')}".rstrip()
+    if step.name == "check":
+        if args.get("job"):
+            return f"polling check job {args['job']}"
+        return "formatting and checking" if args.get("format") else "checking files"
     rendered = step.text if verbose else step.text[:120]
     suffix = "…" if len(step.text) > len(rendered) else ""
     return f"{step.name} {rendered}{suffix}".rstrip()

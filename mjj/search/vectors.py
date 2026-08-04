@@ -88,10 +88,15 @@ def _library_candidates() -> list[str]:
     if configured:
         candidates.append(configured)
     repository = Path(__file__).resolve().parents[2]
-    candidates.append(
-        str(repository.parent / "mojo-embed" / "build" / "libmojo_embed.so")
-    )
-    candidates.append(str(Path(__file__).with_name("libmojo_embed.so")))
+    development_build = repository.parent / "mojo-embed" / "build"
+    package = Path(__file__).parent
+    for library_name in (
+        "mojo_embed.dll",
+        "libmojo_embed.so",
+        "libmojo_embed.dylib",
+    ):
+        candidates.append(str(development_build / library_name))
+        candidates.append(str(package / library_name))
     discovered = ctypes.util.find_library("mojo_embed")
     if discovered:
         candidates.append(discovered)

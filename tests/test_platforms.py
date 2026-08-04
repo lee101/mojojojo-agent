@@ -1,4 +1,7 @@
+from pathlib import Path
+
 from mjj.platforms import command_name, display_command, split_command
+from mjj.search.vectors import _library_candidates
 from mjj.tools import build_registry
 
 
@@ -60,3 +63,13 @@ def test_command_display_uses_host_specific_quoting() -> None:
 
     assert windows.startswith('"C:\\Program Files\\Python\\python.exe"')
     assert posix.startswith("'C:\\Program Files\\Python\\python.exe'")
+
+
+def test_mojo_embed_discovery_includes_windows_and_linux_libraries(
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("MJJ_MOJO_EMBED_LIB", raising=False)
+    names = {Path(candidate).name for candidate in _library_candidates()}
+
+    assert "mojo_embed.dll" in names
+    assert "libmojo_embed.so" in names

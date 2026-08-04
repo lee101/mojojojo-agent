@@ -6,7 +6,7 @@ from mjj.ledger import Ledger
 from mjj.lsp import LspServer
 from mjj.tools import navigate as navigate_module
 from mjj.tools.base import ToolContext
-from mjj.tools.navigate import NavigateTool
+from mjj.tools.navigate import NavigateTool, _apply_text_edits
 
 
 def test_real_stdio_lsp_transport_frames_requests(tmp_path, monkeypatch) -> None:
@@ -153,3 +153,233 @@ def test_navigation_rejects_workspace_escape_and_missing_position(tmp_path) -> N
 
     assert not escaped.ok and "inside the workspace" in escaped.output
     assert not missing.ok
+
+
+def test_lsp_rename_is_atomic_checked_and_checkpointed(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("MJJ_CHECKPOINT_ROOT", str(tmp_path / "checkpoints"))
+    path = tmp_path / "module.py"
+    path.write_text("def old_name():\n    return old_name()\n", encoding="utf-8")
+    monkeypatch.setattr(
+        navigate_module,
+        "server_for",
+        lambda _path: LspServer("python", "fixture-lsp", ("fixture",)),
+    )
+    monkeypatch.setattr(
+        navigate_module,
+        "request_lsp",
+        lambda *_args, **_kwargs: {
+            "changes": {
+                path.as_uri(): [
+                    {
+                        "range": {
+                            "start": {"line": 0, "character": 4},
+                            "end": {"line": 0, "character": 12},
+                        },
+                        "newText": "new_name",
+                    },
+                    {
+                        "range": {
+                            "start": {"line": 1, "character": 11},
+                            "end": {"line": 1, "character": 19},
+                        },
+                        "newText": "new_name",
+                    },
+                ]
+            }
+        },
+    )
+    approvals = []
+    context = ToolContext(tmp_path, Ledger(), approve=lambda name, args: approvals.append((name, args)) or True)
+
+    result = NavigateTool().run(
+        {
+            "action": "rename",
+            "path": "module.py",
+            "line": 1,
+            "column": 6,
+            "new_name": "new_name",
+        },
+        context,
+    )
+
+    assert result.ok
+    assert path.read_text() == "def new_name():\n    return new_name()\n"
+    assert result.meta["checkpoint"]
+    assert approvals[0][0] == "rename"
+    assert approvals[0][1]["edits"] == 2
+    assert context.state["changed-files"] == {"module.py"}
+
+
+def test_lsp_rename_rejects_escape_before_approval(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "module.py"
+    outside = tmp_path.parent / "outside.py"
+    path.write_text("old_name = 1\n", encoding="utf-8")
+    outside.write_text("old_name = 2\n", encoding="utf-8")
+    monkeypatch.setattr(
+        navigate_module,
+        "server_for",
+        lambda _path: LspServer("python", "fixture-lsp", ("fixture",)),
+    )
+    monkeypatch.setattr(
+        navigate_module,
+        "request_lsp",
+        lambda *_args, **_kwargs: {
+            "changes": {
+                outside.as_uri(): [
+                    {
+                        "range": {
+                            "start": {"line": 0, "character": 0},
+                            "end": {"line": 0, "character": 8},
+                        },
+                        "newText": "new_name",
+                    }
+                ]
+            }
+        },
+    )
+    approvals = []
+    context = ToolContext(tmp_path, Ledger(), approve=lambda *_args: approvals.append(True) or True)
+
+    result = NavigateTool().run(
+        {
+            "action": "rename",
+            "path": "module.py",
+            "line": 1,
+            "column": 2,
+            "new_name": "new_name",
+        },
+        context,
+    )
+
+    assert not result.ok and "escapes the workspace" in result.output
+    assert approvals == []
+    assert outside.read_text() == "old_name = 2\n"
+
+
+def test_lsp_rename_does_not_overwrite_change_made_during_approval(
+    tmp_path, monkeypatch
+) -> None:
+    path = tmp_path / "module.py"
+    path.write_text("old_name = 1\n", encoding="utf-8")
+    monkeypatch.setattr(
+        navigate_module,
+        "server_for",
+        lambda _path: LspServer("python", "fixture-lsp", ("fixture",)),
+    )
+    monkeypatch.setattr(
+        navigate_module,
+        "request_lsp",
+        lambda *_args, **_kwargs: {
+            "changes": {
+                path.as_uri(): [
+                    {
+                        "range": {
+                            "start": {"line": 0, "character": 0},
+                            "end": {"line": 0, "character": 8},
+                        },
+                        "newText": "new_name",
+                    }
+                ]
+            }
+        },
+    )
+
+    def approve(_name, _args):
+        path.write_text("newer_user_change = 2\n", encoding="utf-8")
+        return True
+
+    result = NavigateTool().run(
+        {
+            "action": "rename",
+            "path": "module.py",
+            "line": 1,
+            "column": 2,
+            "new_name": "new_name",
+        },
+        ToolContext(tmp_path, Ledger(), approve=approve),
+    )
+
+    assert not result.ok and "changed while approval was pending" in result.output
+    assert path.read_text() == "newer_user_change = 2\n"
+
+
+def test_lsp_call_hierarchy_renders_incoming_callers(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "module.py"
+    path.write_text("def target():\n    pass\n", encoding="utf-8")
+    monkeypatch.setattr(
+        navigate_module,
+        "server_for",
+        lambda _path: LspServer("python", "fixture-lsp", ("fixture",)),
+    )
+    monkeypatch.setattr(
+        navigate_module,
+        "request_lsp_call_hierarchy",
+        lambda *_args, **_kwargs: [
+            {
+                "from": {
+                    "name": "caller",
+                    "uri": path.as_uri(),
+                    "range": {
+                        "start": {"line": 4, "character": 0},
+                        "end": {"line": 4, "character": 6},
+                    },
+                    "selectionRange": {
+                        "start": {"line": 4, "character": 4},
+                        "end": {"line": 4, "character": 10},
+                    },
+                },
+                "fromRanges": [],
+            }
+        ],
+    )
+
+    result = NavigateTool().run(
+        {"action": "incoming_calls", "path": "module.py", "line": 1, "column": 6},
+        ToolContext(tmp_path, Ledger()),
+    )
+
+    assert result.ok
+    assert result.output == "module.py:5:5 caller"
+    assert result.meta == {"server": "fixture-lsp", "strategy": "lsp", "results": 1}
+
+
+def test_rename_requires_lsp_instead_of_text_fallback(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "module.py"
+    path.write_text("old_name = 1\n", encoding="utf-8")
+    monkeypatch.setattr(navigate_module, "server_for", lambda _path: None)
+
+    result = NavigateTool().run(
+        {
+            "action": "rename",
+            "path": "module.py",
+            "line": 1,
+            "column": 2,
+            "new_name": "new_name",
+        },
+        ToolContext(tmp_path, Ledger()),
+    )
+
+    assert not result.ok
+    assert "requires an installed language server" in result.output
+    assert path.read_text() == "old_name = 1\n"
+
+
+def test_workspace_edit_positions_use_lsp_utf16_units() -> None:
+    source = 'value = "😀"; old_name\n'
+    prefix = 'value = "😀"; '
+    start = len(prefix.encode("utf-16-le")) // 2
+
+    updated = _apply_text_edits(
+        source,
+        [
+            {
+                "range": {
+                    "start": {"line": 0, "character": start},
+                    "end": {"line": 0, "character": start + len("old_name")},
+                },
+                "newText": "new_name",
+            }
+        ],
+    )
+
+    assert updated == 'value = "😀"; new_name\n'

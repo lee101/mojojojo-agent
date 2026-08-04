@@ -31,6 +31,7 @@ still missing.
 | Skills and project context | skills and context files | scoped `SKILL.md` plus bounded hierarchical `AGENTS.md` |
 | Runtime reload | `/reload` | `/reload` for tools and skills |
 | Shell and coding tools | read/write/edit/bash/grep/find/ls | read/list/search/navigate/apply-patch/shell/Python/native execution |
+| Semantic navigation/refactors | LSP-backed code intelligence | definition/references/hover/symbols/call hierarchy; approval-gated atomic rename with checkpoint undo |
 | Checkpoint and undo | automatic snapshots and undo | external per-patch checkpoints, `/checkpoints`, `/undo` |
 | Background execution | compiler and shell jobs | pollable compiler and shell jobs |
 | Active steering | follow-up input during a run | bounded hosted follow-up queue at safe model boundaries |

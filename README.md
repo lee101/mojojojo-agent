@@ -89,6 +89,10 @@ Configured MCP stdio servers contribute bounded namespaced tools shared by the
 same loop; `/mcp` shows inventory and startup warnings, while `/reload` refreshes
 servers, built-ins, and skills. Multi-step work can maintain a structured
 `update_plan` state visible through `/plan`. See [the MCP guide](docs/mcp.md).
+Installed language servers also power call hierarchy and semantic rename.
+Multi-file rename edits are confined to the workspace, approval-gated,
+syntax-checked, atomic, and checkpointed for conflict-safe `/undo`; see the
+[LSP refactor guide](docs/lsp-refactors.md).
 
 `/login chatgpt` launches the supported Codex browser sign-in and reuses its
 credential cache; `/login device` uses device-code sign-in. `/login openpaths`,

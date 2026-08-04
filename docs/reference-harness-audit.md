@@ -19,7 +19,7 @@ network service, or optional compiler.
 | Hermes discovers nested project hints as tools enter subdirectories | `AGENTS.override.md` / `AGENTS.md` is injected once, on first access to that subtree, with an 8 KiB per-discovery and 32 KiB session ceiling | 0 schema tokens |
 | Aider ranks tree-sitter tags by cross-file references and mentioned identifiers | `list` with `symbols=true` ranks indexed declarations by cross-file term references and an optional task query, then pre-fits complete file blocks to the list budget | 43 schema tokens |
 | OpenCode and Hermes protect edits with external snapshots | Every successful patch stores a secure, bounded checkpoint outside the worktree; undo verifies post-edit hashes and modes before restoring | 79 schema tokens |
-| OpenCode exposes installed language servers | `navigate` provides definition, references, hover, and symbols through stdio LSP, with the hybrid index as its no-server fallback | 115 schema tokens |
+| OpenCode exposes installed language servers and semantic edits | `navigate` provides definition, references, hover, symbols, call hierarchy, and checkpointed atomic rename; safe reads keep the hybrid-index fallback | 126 schema tokens |
 | OpenCode discovers formatters; Hermes queues background work and steering | `check format=true` is approval-gated and checkpointed; shell jobs return pollable IDs; hosted steering queues user guidance at safe model boundaries | 64 parameter-schema tokens |
 | Codex keeps verifiable objectives alive across turns | Workspace-scoped goals persist independently of sessions, inject a bounded contract, retain 50 checkpoints, and expose their tool only while active | 0 schema tokens outside a goal |
 | Grok/Hermes use reviewer and worker agents | `delegate` runs four bounded model workers concurrently; reviewers are read-only and workers return isolated, snapshot-relative Git commits in deterministic order | 112 schema tokens |
@@ -44,9 +44,7 @@ the map itself works in the dependency-free fallback.
 
 ## High-value follow-ups
 
-1. **LSP refactors and call hierarchy.** Navigation is read-only today. Rename,
-   code actions, and workspace edits should reuse checkpoints and approval.
-2. **Plugin runtime and plan-mode UI.** Portable skills, MCP tools, structured
+1. **Plugin runtime and plan-mode UI.** Portable skills, MCP tools, structured
    plans, and durable goals cover most workflow composition, not in-process
    event hooks, configurable keymaps, or a dependency-aware plan editor.
 
@@ -59,7 +57,7 @@ listing. Median map construction was 30.197 ms. The two new `list` parameters
 cost 43 estimated schema tokens; spill recovery and scoped instructions change
 no tool schema.
 
-The follow-up tranche adds 79 tokens for `checkpoint`, 115 for `navigate`, 39
+The follow-up tranche adds 79 tokens for `checkpoint`, 126 for `navigate`, 39
 for shell job parameters, and 25 for opt-in formatting. These are estimated
 from the exact Responses tool JSON by the same benchmark. Steering changes the
 HTTP API and transcript only, so it adds no model tool-schema tokens.

@@ -99,6 +99,53 @@ def request_lsp(
         client.close()
 
 
+def request_lsp_call_hierarchy(
+    server: LspServer,
+    *,
+    root: Path,
+    path: Path,
+    position: dict,
+    direction: str,
+    timeout: float = 8.0,
+):
+    """Prepare a call-hierarchy item and request one direction in one session."""
+    if direction not in {"incoming", "outgoing"}:
+        raise ValueError("call hierarchy direction must be incoming or outgoing")
+    client = _Client(server.command, root)
+    try:
+        client.start(timeout)
+        client.notify(
+            "textDocument/didOpen",
+            {
+                "textDocument": {
+                    "uri": path.as_uri(),
+                    "languageId": server.language,
+                    "version": 1,
+                    "text": path.read_text(encoding="utf-8", errors="replace"),
+                }
+            },
+        )
+        prepared = client.request(
+            "textDocument/prepareCallHierarchy",
+            {
+                "textDocument": {"uri": path.as_uri()},
+                "position": position,
+            },
+            timeout,
+        )
+        items = prepared if isinstance(prepared, list) else [prepared]
+        item = next((value for value in items if isinstance(value, dict)), None)
+        if item is None:
+            return []
+        return client.request(
+            f"callHierarchy/{direction}Calls",
+            {"item": item},
+            timeout,
+        )
+    finally:
+        client.close()
+
+
 class _Client:
     def __init__(self, command: tuple[str, ...], root: Path) -> None:
         self.command = command

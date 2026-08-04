@@ -128,10 +128,34 @@ def test_exec_accepts_concise_loop_modes_after_subcommand(monkeypatch) -> None:
 
     monkeypatch.setattr(cli, "cmd_exec", capture)
 
-    assert main(["exec", "--loop", "forever", "task"]) == 0
+    assert main(["exec", "--loop", "forever", "--loop-turns", "4", "task"]) == 0
     assert main(["exec", "--loop", "ideas", "--loop-turns", "4", "task"]) == 0
     assert main(["exec", "task"]) == 0
     assert seen == [(True, True, 0), (False, True, 4), (False, False, 0)]
+
+
+def test_loop_off_overrides_configured_autonomy(tmp_path, monkeypatch) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / "config.toml").write_text(
+        "[agent]\nauto_next_steps=true\nauto_next_idea=true\nauto_max_turns=7\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MJJ_HOME", str(home))
+    seen = {}
+
+    def capture(args) -> int:
+        seen.update(
+            steps=args.auto_next_steps,
+            ideas=args.auto_next_idea,
+            turns=args.auto_max_turns,
+        )
+        return 0
+
+    monkeypatch.setattr(cli, "cmd_exec", capture)
+
+    assert main(["exec", "--loop", "off", "task"]) == 0
+    assert seen == {"steps": False, "ideas": False, "turns": 7}
 
 
 def test_exec_accepts_repeatable_opt_in_plugins_after_subcommand(

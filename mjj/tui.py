@@ -27,7 +27,7 @@ try:
     from prompt_toolkit import PromptSession, print_formatted_text
     from prompt_toolkit.completion import Completer, Completion
     from prompt_toolkit.formatted_text import ANSI, HTML
-    from prompt_toolkit.history import FileHistory
+    from prompt_toolkit.history import FileHistory, InMemoryHistory
     from prompt_toolkit.input import DummyInput
     from prompt_toolkit.key_binding import KeyBindings
     from prompt_toolkit.output import DummyOutput
@@ -72,6 +72,10 @@ except ImportError:
 
         def append_string(self, string: str) -> None:
             pass
+
+    class InMemoryHistory(FileHistory):
+        def __init__(self) -> None:
+            super().__init__(":memory:")
 
     class DummyInput:
         pass
@@ -199,6 +203,8 @@ VALUE_CHOICES = {
 
 
 _AT_QUERY = re.compile(r"(?:^|\s)@([^\s]*)$")
+MAX_HISTORY_ENTRY_CHARS = 65_536
+MAX_HISTORY_BYTES = 2 << 20
 
 
 def _workspace_history_path(cwd: str | Path) -> Path:
@@ -209,21 +215,13 @@ def _workspace_history_path(cwd: str | Path) -> Path:
     # and use a new directory so upgrading cannot turn that file into an error.
     directory = auth.mjj_home() / "prompt-history"
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-    try:
+    if os.name != "nt":
         directory.chmod(0o700)
-    except OSError:
-        pass
     path = directory / f"{digest}.txt"
-    if not path.exists():
-        try:
-            descriptor = os.open(path, os.O_WRONLY | os.O_CREAT, 0o600)
-            os.close(descriptor)
-        except OSError:
-            pass
-    try:
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT, 0o600)
+    os.close(descriptor)
+    if os.name != "nt":
         path.chmod(0o600)
-    except OSError:
-        pass
     return path
 
 
@@ -232,13 +230,56 @@ class DistinctFileHistory(FileHistory):
 
     def __init__(self, filename: str) -> None:
         super().__init__(filename)
+        self._path = Path(filename)
         self._last_appended: str | None = None
 
     def append_string(self, string: str) -> None:
         if string == self._last_appended:
             return
         self._last_appended = string
-        super().append_string(string)
+        if len(string) > MAX_HISTORY_ENTRY_CHARS:
+            return
+        try:
+            super().append_string(string)
+            self._trim()
+        except OSError:
+            # History is optional UI state. A full disk must not end the agent.
+            return
+
+    def _trim(self) -> None:
+        if self._path.stat().st_size <= MAX_HISTORY_BYTES:
+            return
+        content = self._path.read_bytes()
+        tail = content[-MAX_HISTORY_BYTES:]
+        boundary = tail.find(b"\n# ")
+        tail = tail[boundary + 1 :] if boundary >= 0 else b""
+        temporary = self._path.with_suffix(f".{os.getpid()}.tmp")
+        descriptor = os.open(
+            temporary,
+            os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
+            0o600,
+        )
+        try:
+            with os.fdopen(descriptor, "wb") as handle:
+                handle.write(tail)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, self._path)
+        finally:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
+def _history_for_workspace(
+    cwd: str | Path,
+) -> tuple[FileHistory | InMemoryHistory, str]:
+    try:
+        return DistinctFileHistory(str(_workspace_history_path(cwd))), ""
+    except OSError as exc:
+        detail = str(exc).replace("\n", " ")[:160]
+        return InMemoryHistory(), f"prompt history is in-memory: {detail}"
 
 
 def _model_choices(provider: str) -> tuple[str, ...]:
@@ -370,14 +411,14 @@ class InteractiveApp:
         self.agent.approve = self.permission_policy
         self.agent.ctx.approve = self.permission_policy
         self.bindings = self._bindings()
-        history = _workspace_history_path(self.agent.cwd)
+        history, self.history_warning = _history_for_workspace(self.agent.cwd)
         prompt_io = {}
         if not sys.stdin.isatty():
             prompt_io["input"] = DummyInput()
         if not sys.stdout.isatty():
             prompt_io["output"] = DummyOutput()
         self.session = PromptSession(
-            history=DistinctFileHistory(str(history)),
+            history=history,
             completer=WorkspaceCompleter(
                 self.agent.cwd,
                 provider=lambda: self.provider,
@@ -474,7 +515,9 @@ class InteractiveApp:
         images = f" · {len(self.attachments)} image" if self.attachments else ""
         cwd = Path(self.agent.cwd).name or str(self.agent.cwd)
         autonomy = self._autonomy_label()
-        auto = f" · loop {autonomy}" if autonomy != "off" else ""
+        limit = self.args.auto_max_turns
+        loop_value = f"{autonomy}:{limit}" if limit else autonomy
+        auto = f" · loop {loop_value}" if autonomy != "off" else ""
         goal = self.agent.current_goal()
         goal_label = f" · goal {goal.status}" if goal is not None else ""
         plan_state = self.agent.ctx.state.get("plan")
@@ -545,6 +588,8 @@ class InteractiveApp:
                 "for completion and hotkeys\x1b[0m"
             )
         warnings = self.agent.registry.warnings
+        if self.history_warning:
+            print_formatted_text(ANSI(f"\x1b[33mwarning: {self.history_warning}\x1b[0m"))
         for warning in warnings[:5]:
             print_formatted_text(ANSI(f"\x1b[33mwarning: {warning}\x1b[0m"))
         if len(warnings) > 5:
@@ -1064,7 +1109,10 @@ class InteractiveApp:
             self.args.auto_max_turns = limit
         self.args.auto_next_steps = mode in ("steps", "full")
         self.args.auto_next_idea = mode in ("ideas", "full")
-        print(f"autonomy: {self._autonomy_label()}")
+        print(
+            f"autonomy: {self._autonomy_label()} · max turns: "
+            f"{self.args.auto_max_turns or 'unlimited'}"
+        )
 
     def _goal(self, value: str) -> None:
         store = self.agent.goal_store or GoalStore(self.agent.cwd)

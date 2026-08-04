@@ -54,6 +54,9 @@ the transcript, and remains active when a turn cap is reached. See
 
 In the full terminal UI, Up and Down recall prompts from the current resolved
 working directory. Consecutive duplicates are stored once; `Ctrl+R` searches
-that directory's history. Files are keyed by a hash of the directory under
+that directory's history. Oversized entries are skipped and each history file
+is bounded to 2 MiB. Files are keyed by a hash of the directory under
 `$MJJ_HOME/prompt-history/`, with directory mode `0700` and file mode `0600`.
 The older global `$MJJ_HOME/history` file is left untouched during upgrade.
+If persistent history is unavailable, the UI warns and uses in-memory history;
+an optional composer feature never prevents the agent from starting.

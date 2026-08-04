@@ -65,7 +65,8 @@ def test_auto_command_updates_live_autonomy_controls(tmp_path, monkeypatch, caps
     assert args.auto_next_steps is True
     assert args.auto_next_idea is True
     assert args.auto_max_turns == 3
-    assert "autonomy: full" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "autonomy: full" in output and "max turns: 3" in output
 
 
 def test_loop_forever_is_an_unlimited_full_autonomy_alias(
@@ -82,7 +83,8 @@ def test_loop_forever_is_an_unlimited_full_autonomy_alias(
     assert args.auto_next_steps is True
     assert args.auto_next_idea is True
     assert args.auto_max_turns == 0
-    assert "autonomy: full" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "autonomy: full" in output and "max turns: unlimited" in output
 
 
 def test_prompt_history_is_private_distinct_and_scoped_by_directory(
@@ -104,8 +106,65 @@ def test_prompt_history_is_private_distinct_and_scoped_by_directory(
     assert first.parent == second.parent == tmp_path / "home" / "prompt-history"
     if os.name != "nt":
         assert first.stat().st_mode & 0o777 == 0o600
+        assert first.parent.stat().st_mode & 0o777 == 0o700
     assert first.read_text(encoding="utf-8").count("same prompt") == 1
     assert legacy.read_text(encoding="utf-8") == "old global prompt\n"
+
+
+def test_unavailable_prompt_history_degrades_to_memory(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setenv("MJJ_HOME", str(tmp_path / "home"))
+
+    def unavailable(cwd):
+        raise PermissionError("history denied")
+
+    monkeypatch.setattr("mjj.tui._workspace_history_path", unavailable)
+    agent = Agent(registry=Registry(), cwd=tmp_path, instructions="test")
+    app = InteractiveApp(agent, _args())
+
+    app._welcome()
+
+    assert "prompt history is in-memory" in app.history_warning
+    assert "history denied" in capsys.readouterr().out
+
+
+def test_prompt_history_skips_large_entries_and_trims_at_entry_boundaries(
+    tmp_path, monkeypatch
+):
+    path = tmp_path / "history"
+    path.touch()
+    monkeypatch.setattr("mjj.tui.MAX_HISTORY_ENTRY_CHARS", 40)
+    monkeypatch.setattr("mjj.tui.MAX_HISTORY_BYTES", 220)
+    history = DistinctFileHistory(str(path))
+
+    history.append_string("x" * 41)
+    for index in range(12):
+        history.append_string(f"prompt {index:02d} with text")
+
+    content = path.read_text(encoding="utf-8")
+    loaded = list(DistinctFileHistory(str(path)).load_history_strings())
+    assert path.stat().st_size <= 220
+    assert "x" * 41 not in content
+    assert "prompt 11 with text" in loaded
+    assert "prompt 00 with text" not in loaded
+
+
+def test_prompt_history_append_failure_does_not_end_the_session(
+    tmp_path, monkeypatch
+):
+    path = tmp_path / "history"
+    path.touch()
+    history = DistinctFileHistory(str(path))
+
+    def disk_full(self, string):
+        raise OSError("disk full")
+
+    monkeypatch.setattr("prompt_toolkit.history.FileHistory.append_string", disk_full)
+
+    history.append_string("keep running")
+
+    assert path.read_text(encoding="utf-8") == ""
 
 
 def test_cache_command_updates_policy_and_reports_telemetry(

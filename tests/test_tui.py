@@ -111,6 +111,123 @@ def test_workspace_completer_offers_images_for_preview_commands(tmp_path) -> Non
     assert [item.text for item in matches] == ['"art/water result.webp"']
 
 
+def test_workspace_completer_offers_live_command_values(tmp_path) -> None:
+    completer = WorkspaceCompleter(tmp_path, provider="openai")
+    auto_completer = WorkspaceCompleter(tmp_path)
+
+    model = list(completer.get_completions(Document("/model terra"), None))
+    effort = list(completer.get_completions(Document("/reasoning xh"), None))
+    provider = list(
+        completer.get_completions(Document("/provider router"), None)
+    )
+    permissions = list(
+        completer.get_completions(Document("/permissions read"), None)
+    )
+    auto_model = list(
+        auto_completer.get_completions(Document("/model sol"), None)
+    )
+    described = list(
+        completer.get_completions(Document("/sign"), None)
+    )
+
+    assert [item.text for item in model] == ["gpt-5.6-terra"]
+    assert [item.text for item in effort] == ["xhigh"]
+    assert [item.text for item in provider] == ["openrouter"]
+    assert [item.text for item in permissions] == ["read-only"]
+    assert [item.text for item in auto_model] == ["gpt-5.6-sol"]
+    assert [item.text for item in described] == ["/login"]
+
+
+def test_model_selection_accepts_number_substring_and_relative_change(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    monkeypatch.setenv("MJJ_HOME", str(tmp_path / "home"))
+    agent = Agent(
+        registry=Registry(),
+        client=ModelClient(
+            model="auto",
+            provider="openai",
+            effort="medium",
+            verbosity="low",
+        ),
+        cwd=tmp_path,
+        instructions="test",
+    )
+    app = InteractiveApp(agent, _args())
+
+    app.command("/model 2")
+    assert agent.client.model == "gpt-5.6-sol"
+    app.command("/model terra")
+    assert agent.client.model == "gpt-5.6-terra"
+    app.command("/model prev")
+    assert agent.client.model == "gpt-5.6-sol"
+    app.command("/model gpt")
+    assert agent.client.model == "gpt-5.6-sol"
+    app.command("/reasoning next")
+    assert agent.client.effort == "high"
+    app.command("/verbosity next")
+    assert agent.client.verbosity == "medium"
+
+    app.command("/model")
+    output = capsys.readouterr().out
+    assert "* 2. gpt-5.6-sol" in output
+    assert "ambiguous model" in output
+    assert "/model NUMBER|NAME|next|prev" in output
+
+
+def test_help_and_hotkey_aliases_report_the_live_surface(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    monkeypatch.setenv("MJJ_HOME", str(tmp_path / "home"))
+    agent = Agent(registry=Registry(), cwd=tmp_path, instructions="test")
+    app = InteractiveApp(agent, _args())
+
+    app.command("/commands")
+    app.command("/keys")
+
+    output = capsys.readouterr().out
+    assert "/model" in output and "/reasoning" in output
+    assert "F2 or Alt+M" in output
+    assert "F3 or Alt+R" in output
+    assert "F4 or Alt+V" in output
+
+
+def test_provider_change_resets_incompatible_known_model(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("MJJ_HOME", str(tmp_path / "home"))
+    agent = Agent(
+        registry=Registry(),
+        client=ModelClient(model="gpt-5.6-sol", provider="openai"),
+        cwd=tmp_path,
+        instructions="test",
+    )
+    app = InteractiveApp(agent, _args())
+
+    app.command("/provider openrouter")
+
+    assert agent.client.provider == "openrouter"
+    assert agent.client.model == "auto"
+    assert agent.client.resolver.provider == "openrouter"
+
+
+def test_portable_model_reasoning_and_verbosity_bindings_are_registered(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("MJJ_HOME", str(tmp_path / "home"))
+    agent = Agent(registry=Registry(), cwd=tmp_path, instructions="test")
+    app = InteractiveApp(agent, _args())
+    sequences = {
+        tuple(getattr(key, "value", key) for key in binding.keys)
+        for binding in app.bindings.bindings
+    }
+
+    assert ("f2",) in sequences and ("escape", "m") in sequences
+    assert ("f3",) in sequences and ("escape", "r") in sequences
+    assert ("f4",) in sequences and ("escape", "v") in sequences
+    assert ("escape", "c-m") in sequences
+
+
 def test_shell_shortcuts_control_whether_output_enters_context(
     tmp_path, monkeypatch, capsys
 ) -> None:

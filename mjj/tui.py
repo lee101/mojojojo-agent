@@ -14,6 +14,7 @@ import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 
 from prompt_toolkit import PromptSession, print_formatted_text
 from prompt_toolkit.completion import Completer, Completion
@@ -28,7 +29,7 @@ from .config import EFFORTS, PROVIDERS, VERBOSITIES
 from .context_files import IMAGE_SUFFIXES, discover_project_files
 from .goals import GoalStore
 from .media import ImageAttachment, ImageInputError, prepare_image
-from .permissions import PermissionPolicy
+from .permissions import PERMISSION_MODES, PermissionPolicy
 from .session import (
     Session,
     export_session,
@@ -44,9 +45,11 @@ from .tools import build_registry
 
 COMMANDS = {
     "/help": "show commands and keyboard shortcuts",
+    "/commands": "alias for /help",
     "/model": "show or set the model",
     "/provider": "show or set auto/openpaths/openrouter/openai/custom",
     "/effort": "show or set reasoning effort",
+    "/reasoning": "alias for /effort",
     "/verbosity": "show or set response verbosity",
     "/image": "attach an image to the next prompt",
     "/images": "show queued image attachments",
@@ -78,6 +81,7 @@ COMMANDS = {
     "/copy": "copy the last assistant response with OSC 52",
     "/reload": "reload tools and discovered skills",
     "/hotkeys": "show keyboard shortcuts",
+    "/keys": "alias for /hotkeys",
     "/clear": "clear the terminal",
     "/new": "start a fresh conversation",
     "/exit": "leave mjj",
@@ -92,23 +96,92 @@ MODEL_PRESETS = {
     "custom": ("auto",),
 }
 
+VALUE_CHOICES = {
+    "/provider": PROVIDERS,
+    "/effort": EFFORTS,
+    "/reasoning": EFFORTS,
+    "/verbosity": VERBOSITIES,
+    "/permissions": PERMISSION_MODES,
+    "/auto": ("off", "steps", "ideas", "full"),
+    "/goal": ("pause", "resume", "complete", "blocked", "clear", "set"),
+    "/login": ("chatgpt", "device", "openpaths", "openrouter", "openai", "custom"),
+    "/logout": ("chatgpt", "openpaths", "openrouter", "openai", "custom"),
+}
+
 
 _AT_QUERY = re.compile(r"(?:^|\s)@([^\s]*)$")
 
 
+def _model_choices(provider: str) -> tuple[str, ...]:
+    if provider != "auto":
+        return MODEL_PRESETS.get(provider, ("auto",))
+    return tuple(
+        dict.fromkeys(
+            model
+            for models in MODEL_PRESETS.values()
+            for model in models
+        )
+    )
+
+
 class WorkspaceCompleter(Completer):
-    def __init__(self, cwd: str | Path):
+    def __init__(
+        self,
+        cwd: str | Path,
+        *,
+        provider: str | Callable[[], str] = "auto",
+    ):
         self.files = discover_project_files(cwd)
+        self._provider = provider
+
+    @property
+    def provider(self) -> str:
+        return self._provider() if callable(self._provider) else self._provider
 
     def get_completions(self, document, complete_event):
         text = document.text_before_cursor
         if text.startswith("/") and " " not in text:
-            for command, description in COMMANDS.items():
-                if command.startswith(text):
+            query = text[1:].lower()
+            prefix_matches = [
+                (command, description)
+                for command, description in COMMANDS.items()
+                if command.startswith(text)
+            ]
+            matches = prefix_matches or [
+                (command, description)
+                for command, description in COMMANDS.items()
+                if query in command[1:].lower() or query in description.lower()
+            ]
+            matches.sort(
+                key=lambda item: (
+                    not item[0].startswith(text),
+                    len(item[0]),
+                    item[0],
+                )
+            )
+            for command, description in matches:
+                yield Completion(
+                    command,
+                    start_position=-len(text),
+                    display_meta=description,
+                )
+            return
+        command, separator, raw = text.partition(" ")
+        if separator and (command == "/model" or command in VALUE_CHOICES):
+            choices = (
+                (*_model_choices(self.provider), "next", "prev")
+                if command == "/model"
+                else (*VALUE_CHOICES[command], "next", "prev")
+                if command in {"/provider", "/effort", "/reasoning", "/verbosity"}
+                else VALUE_CHOICES[command]
+            )
+            query = raw.lower()
+            for choice in choices:
+                if query in choice.lower():
                     yield Completion(
-                        command,
-                        start_position=-len(text),
-                        display_meta=description,
+                        choice,
+                        start_position=-len(raw),
+                        display_meta=command[1:],
                     )
             return
         if text.startswith(("/image ", "/preview ")):
@@ -172,7 +245,10 @@ class InteractiveApp:
         history.parent.mkdir(parents=True, exist_ok=True)
         self.session = PromptSession(
             history=FileHistory(str(history)),
-            completer=WorkspaceCompleter(self.agent.cwd),
+            completer=WorkspaceCompleter(
+                self.agent.cwd,
+                provider=lambda: self.provider,
+            ),
             complete_while_typing=True,
             key_bindings=self.bindings,
             bottom_toolbar=self._toolbar,
@@ -214,6 +290,24 @@ class InteractiveApp:
             self._cycle_model(-1)
             event.app.invalidate()
 
+        @bindings.add("f2")
+        @bindings.add("escape", "m")
+        def model_next(event) -> None:
+            self._cycle_model(1)
+            event.app.invalidate()
+
+        @bindings.add("f3")
+        @bindings.add("escape", "r")
+        def effort_next(event) -> None:
+            self._cycle_effort(1)
+            event.app.invalidate()
+
+        @bindings.add("f4")
+        @bindings.add("escape", "v")
+        def verbosity_next(event) -> None:
+            self._cycle_verbosity(1)
+            event.app.invalidate()
+
         @bindings.add("escape", "enter")
         def newline(event) -> None:
             event.current_buffer.insert_text("\n")
@@ -221,26 +315,45 @@ class InteractiveApp:
         return bindings
 
     def _cycle_effort(self, direction: int) -> None:
-        current = self.agent.client.effort
-        index = EFFORTS.index(current) if current in EFFORTS else 0
-        self.agent.client.effort = EFFORTS[(index + direction) % len(EFFORTS)]
+        self.agent.client.effort = _cycle_choice(
+            self.agent.client.effort,
+            EFFORTS,
+            direction,
+        )
 
     def _cycle_model(self, direction: int) -> None:
         models = MODEL_PRESETS.get(self.provider, ("auto",))
-        current = self.agent.client.model
-        index = models.index(current) if current in models else 0
-        self.agent.client.model = models[(index + direction) % len(models)]
+        self.agent.client.model = _cycle_choice(
+            self.agent.client.model,
+            models,
+            direction,
+        )
+
+    def _cycle_verbosity(self, direction: int) -> None:
+        self.agent.client.verbosity = _cycle_choice(
+            self.agent.client.verbosity,
+            VERBOSITIES,
+            direction,
+        )
 
     def _toolbar(self):
         images = f" · {len(self.attachments)} image" if self.attachments else ""
         cwd = Path(self.agent.cwd).name or str(self.agent.cwd)
         autonomy = self._autonomy_label()
         auto = f" · auto {autonomy}" if autonomy != "off" else ""
+        goal = self.agent.current_goal()
+        goal_label = f" · goal {goal.status}" if goal is not None else ""
+        model_key = (
+            "F2 model"
+            if len(MODEL_PRESETS.get(self.provider, ("auto",))) > 1
+            else "/model"
+        )
         return HTML(
             " <b>mjj</b> · "
             f"{html.escape(self.provider)}/{html.escape(self.agent.client.model)} · "
-            f"reasoning <b>{html.escape(self.agent.client.effort)}</b>{auto}{images} · "
-            f"{html.escape(cwd)}   ←/→ effort · ⇧↑/↓ model · / commands "
+            f"reasoning <b>{html.escape(self.agent.client.effort)}</b>"
+            f"{auto}{goal_label}{images} · "
+            f"{html.escape(cwd)}   {model_key} · F3 effort · / commands "
         )
 
     def run(self) -> int:
@@ -267,12 +380,18 @@ class InteractiveApp:
         return 0
 
     def _welcome(self) -> None:
+        model_hint = (
+            "F2 model"
+            if len(MODEL_PRESETS.get(self.provider, ("auto",))) > 1
+            else "/model chooses a model"
+        )
         print_formatted_text(
             ANSI(
                 "\x1b[38;5;45m╭─ mjj\x1b[0m  coding agent\n"
                 f"\x1b[38;5;45m│\x1b[0m  {self.provider}/{self.agent.client.model}"
                 f"  ·  reasoning {self.agent.client.effort}\n"
-                "\x1b[38;5;45m╰─\x1b[0m  Type / for commands; Alt+Enter inserts a newline."
+                f"\x1b[38;5;45m╰─\x1b[0m  / commands · {model_hint} · "
+                "F3 reasoning · Alt+Enter newline"
             )
         )
 
@@ -356,25 +475,16 @@ class InteractiveApp:
         value = value.strip()
         if command in ("/exit", "/quit"):
             self.done = True
-        elif command == "/help":
-            for name, description in COMMANDS.items():
-                print(f"{name:12} {description}")
-        elif command == "/effort":
+        elif command in ("/help", "/commands"):
+            self._show_help()
+        elif command in ("/effort", "/reasoning"):
             self._set_choice("effort", value, EFFORTS)
         elif command == "/verbosity":
             self._set_choice("verbosity", value, VERBOSITIES)
         elif command == "/model":
-            if value:
-                self.agent.client.model = value
-            print(f"model: {self.agent.client.model}")
+            self._set_model(value)
         elif command == "/provider":
-            if value:
-                if value not in PROVIDERS:
-                    print("provider must be one of: " + ", ".join(PROVIDERS))
-                    return
-                self.agent.client.provider = value
-                self.agent.client.resolver = auth.CredentialResolver(provider=value)
-            print(f"provider: {self.provider}")
+            self._set_provider(value)
         elif command == "/image":
             self._attach(value)
         elif command == "/images":
@@ -399,7 +509,7 @@ class InteractiveApp:
         elif command == "/usage":
             print(self.agent.client.usage.summary(), "·", self.agent.ledger.summary())
         elif command == "/models":
-            print("\n".join(MODEL_PRESETS.get(self.provider, ("auto",))))
+            self._show_models()
         elif command == "/settings":
             print(
                 json.dumps(
@@ -480,11 +590,8 @@ class InteractiveApp:
             if self.agent.goal_store is not None:
                 self.agent.bind_goal_store(self.agent.goal_store)
             print("reloaded tools and skills")
-        elif command == "/hotkeys":
-            print(
-                "←/→ effort · Shift+↑/↓ model · Alt+Enter newline · "
-                "@ file · ! shell+context · !! shell-only · Ctrl+C interrupt"
-            )
+        elif command in ("/hotkeys", "/keys"):
+            self._show_hotkeys()
         elif command == "/clear":
             print("\x1b[2J\x1b[H", end="")
         elif command == "/new":
@@ -583,12 +690,85 @@ class InteractiveApp:
     def _set_choice(self, name: str, value: str, choices: tuple[str, ...]) -> None:
         current = getattr(self.agent.client, name)
         if value:
-            if value not in choices:
-                print(f"{name} must be one of: {', '.join(choices)}")
+            try:
+                current = _select_choice(value, current, choices, label=name)
+            except ValueError as exc:
+                print(exc)
                 return
-            setattr(self.agent.client, name, value)
-            current = value
+            setattr(self.agent.client, name, current)
         print(f"{name}: {current}")
+
+    def _set_model(self, value: str) -> None:
+        models = _model_choices(self.provider)
+        if not value:
+            self._show_models()
+            return
+        try:
+            selected = _select_choice(
+                value,
+                self.agent.client.model,
+                models,
+                label="model",
+                allow_custom=True,
+            )
+        except ValueError as exc:
+            print(exc)
+            return
+        self.agent.client.model = selected
+        print(f"model: {selected}")
+
+    def _set_provider(self, value: str) -> None:
+        if not value:
+            print(f"provider: {self.provider} · choices: {', '.join(PROVIDERS)}")
+            return
+        try:
+            selected = _select_choice(
+                value,
+                self.provider,
+                PROVIDERS,
+                label="provider",
+            )
+        except ValueError as exc:
+            print(exc)
+            return
+        previous_model = self.agent.client.model
+        known_models = {
+            model for models in MODEL_PRESETS.values() for model in models
+        }
+        target_models = MODEL_PRESETS.get(selected, ("auto",))
+        if previous_model in known_models and previous_model not in target_models:
+            self.agent.client.model = "auto"
+        self.agent.client.provider = selected
+        self.agent.client.resolver = auth.CredentialResolver(provider=selected)
+        print(f"provider: {selected} · model: {self.agent.client.model}")
+
+    def _show_models(self) -> None:
+        models = _model_choices(self.provider)
+        print(f"model shortcuts for {self.provider}:")
+        for index, model in enumerate(models, 1):
+            marker = "*" if model == self.agent.client.model else " "
+            print(f" {marker} {index}. {model}")
+        if self.agent.client.model not in models:
+            print(f" * custom: {self.agent.client.model}")
+        if self.provider == "auto":
+            print("auto routing: select /provider for guaranteed compatibility")
+        print("use /model NUMBER|NAME|next|prev; custom model names are accepted")
+
+    def _show_help(self) -> None:
+        for name, description in COMMANDS.items():
+            print(f"{name:12} {description}")
+        print()
+        self._show_hotkeys()
+
+    @staticmethod
+    def _show_hotkeys() -> None:
+        print(
+            "F2 or Alt+M: next provider-specific model · "
+            "Shift+↑/↓: model forward/back\n"
+            "F3 or Alt+R: next reasoning · empty ←/→: reasoning back/forward\n"
+            "F4 or Alt+V: next verbosity · Alt+Enter: newline · Ctrl+C: interrupt\n"
+            "@file: attach context · !command: include output · !!command: local only"
+        )
 
     def _attach(self, value: str) -> None:
         if not value:
@@ -880,6 +1060,45 @@ def _path_argument(value: str) -> str:
     if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
         return value[1:-1]
     return value
+
+
+def _cycle_choice(current: str, choices: tuple[str, ...], direction: int) -> str:
+    if not choices:
+        return current
+    if current not in choices:
+        return choices[0] if direction >= 0 else choices[-1]
+    index = choices.index(current)
+    return choices[(index + direction) % len(choices)]
+
+
+def _select_choice(
+    value: str,
+    current: str,
+    choices: tuple[str, ...],
+    *,
+    label: str,
+    allow_custom: bool = False,
+) -> str:
+    query = value.strip()
+    lowered = query.lower()
+    if lowered in {"next", "prev"}:
+        return _cycle_choice(current, choices, 1 if lowered == "next" else -1)
+    if query.isdigit():
+        index = int(query)
+        if 1 <= index <= len(choices):
+            return choices[index - 1]
+        raise ValueError(f"{label} number must be between 1 and {len(choices)}")
+    exact = [choice for choice in choices if choice.lower() == lowered]
+    if exact:
+        return exact[0]
+    matches = [choice for choice in choices if lowered in choice.lower()]
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        raise ValueError(f"ambiguous {label}: {', '.join(matches)}")
+    if allow_custom and query:
+        return query
+    raise ValueError(f"{label} must be one of: {', '.join(choices)}")
 
 
 def _message_text(item: dict) -> str:

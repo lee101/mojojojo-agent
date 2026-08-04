@@ -79,3 +79,8 @@ equivalent is `/permissions`.
 Providers are `auto`, `openpaths`, `openrouter`, `openai`, and `custom`.
 `custom` reads `MJJ_BASE_URL`, `MJJ_API_KEY`, `MJJ_API_STYLE` (`responses` or
 `chat_completions`), and an optional `MJJ_DEFAULT_MODEL`.
+
+Model IDs remain open-ended. The built-in picker includes `grok-4.5` for
+OpenPaths, `x-ai/grok-4.5` for OpenRouter, and current Codex choices for OpenAI.
+Concrete Codex and Grok IDs receive one short request-time prompt hint; unknown
+and auto-routed IDs receive no extra prompt text.

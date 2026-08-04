@@ -30,3 +30,34 @@ Style:
 - Report what you did in a sentence or two. No summaries of your own summary.
 
 You have a large reasoning budget. Spend it before you act, not after."""
+
+
+_PROJECT_DOC_MARKER = "\n\n--- project-doc ---\n\n"
+_MODEL_HINTS = {
+    "codex": "For Codex models, keep working through tools until the requested change is verified.",
+    "grok": "For Grok models, favor exact tool calls over narration and keep working until verified.",
+}
+
+
+def model_family(model: str) -> str:
+    """Return the small prompt profile implied by a concrete model ID."""
+    leaf = model.strip().lower().rsplit("/", 1)[-1]
+    if leaf.startswith("grok-"):
+        return "grok"
+    if "codex" in leaf or leaf.startswith(
+        ("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna")
+    ):
+        return "codex"
+    return "neutral"
+
+
+def for_model(instructions: str, model: str) -> str:
+    """Add one model-family hint while leaving repository rules last."""
+    hint = _MODEL_HINTS.get(model_family(model))
+    if not hint or hint in instructions:
+        return instructions
+    base, marker, project = instructions.partition(_PROJECT_DOC_MARKER)
+    return f"{base}\n\n{hint}{marker}{project}"
+
+
+__all__ = ["SYSTEM_PROMPT", "for_model", "model_family"]

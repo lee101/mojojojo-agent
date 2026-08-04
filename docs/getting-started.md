@@ -94,9 +94,17 @@ snapshots and `/undo` restores the latest conflict-free one.
 ```bash
 mjj exec --provider openpaths --model openpaths/auto-code \
   --effort high "fix the tests"
+mjj exec --provider openpaths --model grok-4.5 "implement and test the change"
+mjj exec --provider openrouter --model x-ai/grok-4.5 "review this repository"
+mjj exec --provider openai --model gpt-5.3-codex "repair the failing build"
 mjj exec --provider openrouter --model openrouter/auto "review this repository"
 mjj exec --image screenshot.png "match the current page to this reference"
 ```
+
+The `/model` picker includes these Grok 4.5 and Codex shortcuts. MJJ detects
+the concrete model on each request and adds only one short family-specific
+execution hint. Auto routers and unknown models keep the neutral base prompt
+with no added tokens.
 
 Images are orientation-corrected, bounded to a 2048-pixel edge, and encoded in
 memory as WebP quality 85 before they are sent to model vision. Repeat

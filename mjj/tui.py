@@ -92,9 +92,21 @@ COMMANDS = {
 
 MODEL_PRESETS = {
     "auto": ("auto",),
-    "openai": ("auto", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"),
-    "openpaths": ("auto", "openpaths/auto-code", "openpaths/auto", "openpaths/auto-hard"),
-    "openrouter": ("auto", "openrouter/auto"),
+    "openai": (
+        "auto",
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+        "gpt-5.6-luna",
+        "gpt-5.3-codex",
+    ),
+    "openpaths": (
+        "auto",
+        "grok-4.5",
+        "openpaths/auto-code",
+        "openpaths/auto",
+        "openpaths/auto-hard",
+    ),
+    "openrouter": ("auto", "x-ai/grok-4.5", "openrouter/auto"),
     "custom": ("auto",),
 }
 

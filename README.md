@@ -105,10 +105,15 @@ OpenAI Responses, OpenPaths, OpenRouter, and custom OpenAI-compatible gateways
 share one agent loop and tool transcript. `auto` uses an explicitly scoped mjj
 OpenAI key first, then prefers `OPENPATHS_API_KEY` when present, then an existing
 ChatGPT/Codex sign-in or `OPENAI_API_KEY`. OpenRouter is selected explicitly so
-an unrelated exported key cannot silently change providers.
+an unrelated exported key cannot silently change providers. At request time,
+MJJ adds at most one short model-family hint for Codex or Grok and no hint for
+unknown models; changing `/model` changes the profile without rebuilding the
+session prompt.
 
 ```bash
 mjj exec --provider openpaths --model openpaths/auto-code "fix the tests"
+mjj exec --provider openpaths --model grok-4.5 "implement and verify this feature"
+mjj exec --provider openai --model gpt-5.3-codex "repair the failing build"
 mjj exec --provider openrouter --model openrouter/auto "review this repo"
 mjj exec --image screenshot.png "match this design in the current app"
 mjj exec --permission-mode read-only @src/router.py "review this file"

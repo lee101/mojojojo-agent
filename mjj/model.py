@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from typing import Any, Iterator
 
 from .auth import AuthError, Credential, CredentialResolver
+from .prompt import for_model as prompt_for_model
 
 DEFAULT_MODEL = os.environ.get("MJJ_MODEL", "gpt-5.6-sol")
 DEFAULT_EFFORT = os.environ.get("MJJ_EFFORT", "high")
@@ -126,9 +127,10 @@ class ModelClient:
         tools: list[dict],
         credential: Credential,
     ) -> dict:
+        model = self.effective_model(credential)
         body: dict[str, Any] = {
-            "model": self.effective_model(credential),
-            "instructions": instructions,
+            "model": model,
+            "instructions": prompt_for_model(instructions, model),
             "input": input_items,
             "tools": tools,
             "tool_choice": "auto",
@@ -165,9 +167,13 @@ class ModelClient:
         tools: list[dict],
         credential: Credential,
     ) -> dict:
+        model = self.effective_model(credential)
         body: dict[str, Any] = {
-            "model": self.effective_model(credential),
-            "messages": _chat_messages(input_items, instructions),
+            "model": model,
+            "messages": _chat_messages(
+                input_items,
+                prompt_for_model(instructions, model),
+            ),
             "tools": [_chat_tool(tool) for tool in tools],
             "tool_choice": "auto" if tools else None,
             "stream": True,

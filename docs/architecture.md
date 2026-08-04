@@ -39,6 +39,12 @@ The transcript sent to a provider and the transcript stored on disk share the
 same Responses-style item shape. Chat-completions providers are translated in
 `mjj/model.py`, outside the loop.
 
+Immediately before building a provider request, the concrete model ID selects
+a tiny prompt profile. Codex and Grok receive one family-specific execution
+sentence; neutral and auto-routed models receive none. The hint is inserted
+before project instructions, preserving repository-rule precedence, and is
+recomputed after a live `/model` switch without rewriting transcript history.
+
 Terminal images follow the same event boundary. `display_image` appends a small
 relative-path metadata result; only `mjj/tui.py` resolves and paints it. Native
 Kitty graphics and ANSI preview bytes therefore never enter model context,

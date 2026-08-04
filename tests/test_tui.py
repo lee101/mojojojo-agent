@@ -113,9 +113,15 @@ def test_workspace_completer_offers_images_for_preview_commands(tmp_path) -> Non
 
 def test_workspace_completer_offers_live_command_values(tmp_path) -> None:
     completer = WorkspaceCompleter(tmp_path, provider="openai")
+    openpaths = WorkspaceCompleter(tmp_path, provider="openpaths")
+    openrouter = WorkspaceCompleter(tmp_path, provider="openrouter")
     auto_completer = WorkspaceCompleter(tmp_path)
 
     model = list(completer.get_completions(Document("/model terra"), None))
+    grok = list(openpaths.get_completions(Document("/model grok"), None))
+    routed_grok = list(
+        openrouter.get_completions(Document("/model grok"), None)
+    )
     effort = list(completer.get_completions(Document("/reasoning xh"), None))
     provider = list(
         completer.get_completions(Document("/provider router"), None)
@@ -131,6 +137,8 @@ def test_workspace_completer_offers_live_command_values(tmp_path) -> None:
     )
 
     assert [item.text for item in model] == ["gpt-5.6-terra"]
+    assert [item.text for item in grok] == ["grok-4.5"]
+    assert [item.text for item in routed_grok] == ["x-ai/grok-4.5"]
     assert [item.text for item in effort] == ["xhigh"]
     assert [item.text for item in provider] == ["openrouter"]
     assert [item.text for item in permissions] == ["read-only"]

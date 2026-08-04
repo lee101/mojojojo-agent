@@ -33,6 +33,19 @@ def test_request_enables_server_side_compaction():
     assert body["text"] == {"verbosity": "low"}
 
 
+def test_request_profiles_codex_prompt_from_effective_model():
+    credential = Credential(
+        "api_key",
+        "sk-test",
+        "https://example.test/v1",
+        default_model="gpt-5.3-codex",
+    )
+
+    body = ModelClient(model="auto").request_body([], "brief", [], credential)
+
+    assert "For Codex models" in body["instructions"]
+
+
 def test_compaction_can_be_disabled():
     client = ModelClient(compact_threshold=0)
     body = client.request_body([], "brief", [], API_CREDENTIAL)
@@ -201,6 +214,23 @@ def test_chat_request_translates_responses_tools_and_images():
     assert body["reasoning_effort"] == "high"
     assert body["messages"][1]["content"][1]["type"] == "image_url"
     assert body["tools"][0]["function"]["name"] == "read"
+
+
+def test_chat_request_profiles_openrouter_grok_prompt():
+    credential = Credential(
+        "api_key",
+        "or-test",
+        "https://example.test/v1",
+        provider="openrouter",
+        api_style="chat_completions",
+    )
+
+    body = ModelClient(model="x-ai/grok-4.5").chat_request_body(
+        [], "brief", [], credential
+    )
+
+    assert body["model"] == "x-ai/grok-4.5"
+    assert "For Grok models" in body["messages"][0]["content"]
 
 
 def test_chat_stream_is_normalized_to_agent_events(monkeypatch):

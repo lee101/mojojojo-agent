@@ -115,3 +115,36 @@ def test_delete_failure_is_atomic_with_add(tmp_path):
 
     assert not result.ok
     assert not (tmp_path / "added.txt").exists()
+
+
+def test_python_syntax_validation_is_atomic_and_records_changed_files(tmp_path):
+    source = tmp_path / "valid.py"
+    source.write_text("value = 1\n")
+    invalid, invalid_ctx = apply(
+        tmp_path,
+        """*** Begin Patch
+*** Update File: valid.py
+@@
+-value = 1
++def broken(
+*** End Patch""",
+    )
+
+    assert not invalid.ok
+    assert "syntax check failed" in invalid.output
+    assert "py_compile" in invalid.output
+    assert source.read_text() == "value = 1\n"
+    assert "changed-files" not in invalid_ctx.state
+
+    valid, valid_ctx = apply(
+        tmp_path,
+        """*** Begin Patch
+*** Update File: valid.py
+@@
+-value = 1
++value = 2
+*** End Patch""",
+    )
+    assert valid.ok
+    assert "syntax ✓ 1 file" in valid.output
+    assert valid_ctx.state["changed-files"] == {"valid.py"}

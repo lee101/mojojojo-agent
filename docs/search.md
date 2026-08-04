@@ -1,7 +1,9 @@
 # Repository search
 
 `search` returns addresses and a little evidence, not file dumps. Its default
-`auto` mode fuses three rankings into one deduplicated list:
+`auto` mode chooses the cheapest trustworthy tier. A bounded exact result is
+returned directly without paying for an embedding scan. Broad or non-literal
+queries fuse three rankings into one deduplicated list:
 
 1. a literal or regex scan, using `rg` when installed and a bounded Python
    scan otherwise;
@@ -14,6 +16,12 @@ Multiple hits in one file share one path header instead of repeating it. The
 complete result is passed through `ctx.ledger.clip("search", ...)` exactly
 once.
 
+If normal indexed search finds nothing, one last-resort pass considers ignored
+text and files between 2 and 32 MiB. It still excludes dependency/build trees
+unless the caller explicitly scopes one, refuses known binary suffixes and
+NUL-containing data, caps naming comparisons at 16 KiB per line, and caps all
+rendered evidence lines. This slower tier never runs after a normal hit.
+
 ```text
 mjj/search/index.py:
   257: def search(
@@ -24,6 +32,14 @@ The requested `limit` is a ceiling, not a quota. The fused score distribution
 decides how much to return: a sharp confidence cliff after the first one to
 three hits stops the list there, while a flatter distribution keeps spending
 the allowance on broader or naming-variant queries.
+
+When a broad result has another page, its final line provides a numeric
+`cursor`. Repeating the same search with that cursor retrieves the next ranked
+page without making the first response pay for every match:
+
+```json
+{"query": "shared_result", "limit": 8, "cursor": 8}
+```
 
 The tool builds `.mjj/index` on its first call. The identical path is exposed
 as a disk-search CLI, and an index can be prepared explicitly:
@@ -44,13 +60,15 @@ Tool calls accept:
 {"query": "refreshAccessToken", "mode": "auto", "path": "mjj", "limit": 8}
 ```
 
-- `auto` uses and fuses all three signals.
+- `auto` returns a decisive literal set immediately, otherwise fuses the
+  available signals.
 - `literal` uses only the `rg`/Python literal path. Set `"regex": true` for a
   regular expression.
 - `semantic` uses only the static-vector ranking. It is useful for naming
   variants and approximate identifiers when no literal survives.
 - `path` limits results to one workspace-relative file or directory.
 - `limit` is between 1 and 20; the default ceiling is 8.
+- `cursor` is the continuation offset from a previous broad result.
 
 ## What “semantic” means here
 
@@ -169,37 +187,37 @@ source-context reads, and formatting. The `rg` comparison is
 the ranked evidence with reading its complete top-result file. Returned tokens
 use the harness's dependency-free four-characters-per-token estimate.
 
-Measured on 2026-07-31 with CPython 3.12.3, Linux 6.8, an Intel Xeon E5-2697
-v4, and the adjacent prebuilt mojo-embed library:
+Measured on 2026-08-04 with CPython 3.12.3, Linux 6.8, an Intel Xeon E5-2697
+v4, and the dependency-free Python vector fallback:
 
 ```text
 Corpus: `/nvme0n1-disk/code/mojojojo`
-Index: 98 files, 1819 chunks, mojo-embed backend; query time is median of 7 runs.
+Index: 270 files, 3377 chunks, python backend; query time is median of 7 runs.
 
 | Case | MJJ time | rg time | MJJ tokens | rg tokens |
 |---|---:|---:|---:|---:|
-| Fresh index build | 3227.00 ms | — | — | — |
-| Unchanged incremental index | 28.97 ms | — | — | — |
-| `errInsufficientCredits` | 38.14 ms | 31.49 ms | 19 | 20 |
-| `workerBootstrap` | 41.94 ms | 38.80 ms | 39 | 42 |
-| `mojojail` | 38.30 ms | 36.16 ms | 141 | 850 |
-| `billed_ms` | 39.05 ms | 30.93 ms | 131 | 545 |
+| Fresh index build | 4756.03 ms | — | — | — |
+| Unchanged incremental index | 22.09 ms | — | — | — |
+| `errInsufficientCredits` | 9.97 ms | 9.35 ms | 56 | 64 |
+| `workerBootstrap` | 9.91 ms | 9.37 ms | 39 | 42 |
+| `mojojail` | 124.86 ms | 10.11 ms | 132 | 850 |
+| `billed_ms` | 112.70 ms | 10.58 ms | 131 | 498 |
 
 | Naming-variant case | MJJ time | MJJ tokens | rg tokens | Top result | Top-file read tokens |
 |---|---:|---:|---:|---|---:|
-| `worker_bootstrap` | 48.53 ms | 235 | 0 | `scaling.go` | 1339 |
+| `worker_bootstrap` | 127.11 ms | 243 | 0 | `vector_scaling.go` | 1685 |
 ```
 
-The rare exact identifiers are now at or below raw `rg`: one
-`errInsufficientCredits` line costs 19 estimated tokens, and two
-`workerBootstrap` lines share a file header and cost 39. The broader searches
-retain eight ranked results while withholding 709 tokens for `mojojail` and
-414 for `billed_ms` compared with `rg`. The naming variant has no literal `rg`
-hit, still ranks `scaling.go` first, and returns 1104 fewer estimated tokens
+Decisive literal queries now skip BM25/vector work and land within about 1 ms
+of raw `rg` on this run. Broad queries retain the hybrid ranking and withhold
+718 and 367 estimated tokens respectively, but are roughly 12× slower than
+`rg` on the Python vector fallback. The naming variant has no literal `rg` hit,
+still ranks `vector_scaling.go` first, and returns 1442 fewer estimated tokens
 than reading that file.
 
-MJJ was slower than `rg` on every literal row in this run. That is the cost of
-also running BM25, the int8 scan, fusion, and adaptive selection; the fix is an
-output-token win, not a latency claim. This benchmark does not claim
-model-level semantic recall, and the exact timings should be regenerated on
-another machine rather than copied as universal numbers.
+`bench/retrieval_bench.py` adds an adversarial 120-match corpus, ignored and
+2 MiB files, a binary decoy, cursored pages, and schema accounting. On the same
+machine, two 56-token pages withheld 1301 of 1413 raw-match tokens; an excluded
+2 MiB tail match took 38.575 ms. The always-present `check` tool schema costs
+122 estimated cached-context tokens. These are harness measurements, not model
+recall or artistic-quality claims, and should be regenerated on other machines.

@@ -16,6 +16,7 @@ dependencies = [
 [project.optional-dependencies]
 server = ["uvicorn>=0.30", "starlette>=0.37"]
 accel = ["mojosub"]
+syntax = ["tree-sitter-language-pack>=0.9"]
 
 [project.scripts]
 mjj = "mjj.cli:main"

@@ -91,6 +91,7 @@ mjj exec --provider openpaths --model openpaths/auto-code "fix the tests"
 mjj exec --provider openrouter --model openrouter/auto "review this repo"
 mjj exec --image screenshot.png "match this design in the current app"
 mjj exec --permission-mode read-only @src/router.py "review this file"
+mjj visualize signal-field --kind aurora --palette ultraviolet --seed 29
 ```
 
 Images are orientation-corrected, bounded to a 2048-pixel edge, precompressed
@@ -100,34 +101,42 @@ the actual asset when building a project. See [`visualbench/`](visualbench/) for
 the shader gallery, deterministic browser captures, and screenshot health
 scores used to test this workflow.
 
+`mjj visualize` expands a short command into a standalone deterministic WebGL
+experience with procedural and image-transform modes. It is an on-demand CLI
+primitive used through the existing shell tool, so it adds **zero always-on
+tool-schema tokens** to ordinary turns. A bundled visualizer skill teaches the
+agent the compact workflow only when visual work calls for it. See the
+[visualizer guide](docs/visualizers.md) for modes and measured token expansion.
+
 ## Why it is cheaper
 
 | what a harness does | usual approach | here |
 | --- | --- | --- |
 | find code | dump files into context | ranked `path:line` hits from a native int8 index |
 | run code | shell out to CPython | subset-compiled to Mojo, cached by content hash |
-| edit code | rewrite the file | `apply_patch` envelope, per-file `+n/-n` summary |
+| edit code | rewrite the file | atomic `apply_patch`, syntax gate, `+n/-n` summary |
+| validate code | run every build inline | parser checks now, compiler jobs in background |
 | tool output | truncate at N bytes | one ledger, head+tail kept, exactly what was dropped is stated |
 | reasoning | re-derived each turn | reasoning items echoed back verbatim so the cache hits |
 | long sessions | resend an ever-growing transcript | server compaction replaces old items with opaque carried state |
 
 ### Search, against ripgrep
 
-Corpus is a real 99-file repository. `bench/search_bench.py` reproduces it.
+Corpus is a real 270-file repository. `bench/search_bench.py` reproduces it.
 
 | query | mjj tokens | `rg -n` tokens |
 | --- | ---: | ---: |
-| `errInsufficientCredits` | 19 | 20 |
+| `errInsufficientCredits` | 56 | 64 |
 | `workerBootstrap` | 39 | 42 |
 | `mojojail` | 141 | 850 |
 | `billed_ms` | 131 | 545 |
-| `worker_bootstrap` → finds `workerBootstrap` | 235 | 0 (rg finds nothing; reading the file costs 1339) |
+| `worker_bootstrap` → finds `workerBootstrap` | 243 | 0 (rg finds nothing; reading the file costs 1685) |
 
 Search that always answers is worse than search that says *no matches*, so a
 hit must share a distinctive word with the query. [docs/search.md](docs/search.md)
 shows the measurements that forced that design.
 
-The same fused `rg` + lexical + mojo-embed path is usable directly from disk:
+The same adaptive literal → lexical/mojo-embed path is usable directly from disk:
 
 ```bash
 mjj search workerBootstrap src --stats

@@ -18,6 +18,7 @@ _OUTLINE = re.compile(
     r")"
 )
 _COLLAPSE_AT = 100
+_MAX_RENDERED_LINE = 480
 
 
 def _result(
@@ -150,7 +151,17 @@ class ReadTool:
 def _numbered(lines: list[str], start: int, end: int) -> str:
     if end < start:
         return ""
-    return "\n".join(f"{number}: {lines[number - 1]}" for number in range(start, end + 1))
+    return "\n".join(
+        f"{number}: {_bounded_line(lines[number - 1])}"
+        for number in range(start, end + 1)
+    )
+
+
+def _bounded_line(line: str) -> str:
+    if len(line) <= _MAX_RENDERED_LINE:
+        return line
+    omitted = len(line) - _MAX_RENDERED_LINE
+    return f"{line[:_MAX_RENDERED_LINE]}… [{omitted} chars omitted]"
 
 
 @dataclass(frozen=True)

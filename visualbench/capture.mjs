@@ -73,17 +73,23 @@ try {
     const started = performance.now();
     await page.goto(`http://127.0.0.1:${port}${visualCase.path}`, { waitUntil: "networkidle" });
     await page.waitForFunction(() => window.__VISUALBENCH_READY__ === true, null, { timeout: 20_000 });
+    const loaded = performance.now();
     const state = await page.evaluate(() => ({
       ready: document.body.dataset.ready,
       fallback: document.body.dataset.ready === "fallback",
-      canvas: [...document.querySelectorAll("canvas")].map(canvas => ({ width: canvas.width, height: canvas.height }))
+      canvas: [...document.querySelectorAll("canvas")].map(canvas => ({ width: canvas.width, height: canvas.height })),
+      metrics: window.__VISUALBENCH_METRICS__ || null
     }));
     const screenshot = join(output, `${visualCase.id}.png`);
+    const screenshotStarted = performance.now();
     await page.screenshot({ path: screenshot, fullPage: true });
+    const finished = performance.now();
     results.push({
       id: visualCase.id,
       screenshot,
-      milliseconds: Math.round(performance.now() - started),
+      milliseconds: Math.round(finished - started),
+      loadMilliseconds: Math.round(loaded - started),
+      screenshotMilliseconds: Math.round(finished - screenshotStarted),
       bytes: statSync(screenshot).size,
       consoleErrors,
       ...state

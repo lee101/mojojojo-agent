@@ -14,3 +14,21 @@ test("capture ids and paths are unique and deterministic", () => {
     assert.ok(item.prompt.length > 30);
   }
 });
+
+test("native generated fixture is standalone and capture-aware", async () => {
+  const generated = await readFile(
+    new URL("../gallery/signal-forge/index.html", import.meta.url),
+    "utf8"
+  );
+  assert.match(generated, /window\.__VISUALBENCH_READY__/);
+  assert.match(generated, /motion/);
+  assert.doesNotMatch(generated, /https?:\/\//);
+  assert.ok(generated.length > 10_000);
+  const transformed = await readFile(
+    new URL("../gallery/signal-rift/index.html", import.meta.url),
+    "utf8"
+  );
+  assert.match(transformed, /data:image\/webp;base64,/);
+  assert.match(transformed, /"kind":"image-rift"/);
+  assert.doesNotMatch(transformed, /https?:\/\//);
+});

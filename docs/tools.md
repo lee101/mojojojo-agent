@@ -73,10 +73,12 @@ class, function, or other line anchor, and multiple anchors can narrow a
 location. Context matching retries with trailing and surrounding whitespace
 ignored. `*** End of File` constrains a hunk to the file end.
 
-The entire patch is parsed and applied in memory before writes begin. New
-contents are staged to temporary files and replaced only after every file and
-hunk validates. On success the result contains only per-file `+n/-n` counts,
-never file contents.
+The entire patch is parsed and applied in memory before writes begin. Python,
+JSON, and TOML use their exact parsers; supported source languages use
+tree-sitter when the `syntax` extra is installed. A syntax failure rejects the
+whole patch before any write. New contents are then staged to temporary files
+and replaced only after every file and hunk validates. Success returns only
+per-file `+n/-n` counts and a compact syntax status, never file contents.
 
 Patches always pass through the configured approval policy before parsing or
 writing. The `py` tool does the same because arbitrary Python can mutate the
@@ -84,10 +86,24 @@ workspace. Read-only mode therefore blocks both at the registry boundary.
 
 ## `search`
 
-`search` fuses bounded `rg --json` literal candidates, identifier-aware BM25,
-and the optional mojo-embed int8 scan. It returns ranked `path:line` evidence,
-not file dumps. See [search.md](search.md) for modes, grounding, persistence,
-and measured token comparisons.
+`search` uses a decisive `rg`/Python literal tier before paying for
+identifier-aware BM25 and the optional mojo-embed int8 scan. Only after a
+normal miss does it inspect ignored or 2–32 MiB text. It returns capped,
+ranked `path:line` evidence and cursor-based follow-up rather than file dumps.
+See [search.md](search.md) for grounding, persistence, and measurements.
+
+## `check`
+
+`check` validates explicitly named files, files changed through `apply_patch`,
+or current Git changes. Python (`py_compile` semantics), JSON, and TOML work
+without extras. Install `mojojojo-agent[syntax]` for tree-sitter parsers across
+JavaScript/TypeScript, Mojo, Go, Rust, C/C++, Bash, and other common languages.
+
+Set `"compile": true` to queue compiler checks without blocking the agent
+loop. Poll the returned job through the same tool. Python jobs run real
+`py_compile` and, when the adjacent checkout is available, sample up to three
+files through `mojojojo-compiler`; JavaScript, shell, C/C++, Ruby, PHP, and Lua
+use their installed language checker. Compiler output remains ledger-bounded.
 
 ## `py`
 

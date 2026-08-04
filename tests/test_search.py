@@ -209,3 +209,82 @@ def test_search_tool_rejects_workspace_escape(tmp_path: Path) -> None:
     assert not result.ok
     assert "inside the workspace" in result.output
     assert ledger.tool_calls == 1
+
+
+def test_auto_exact_search_skips_vector_scan(tmp_path: Path, monkeypatch) -> None:
+    _write_fixture(tmp_path)
+    index = build_index(tmp_path)
+
+    def unexpected(*_args, **_kwargs):
+        raise AssertionError("decisive literal search should not scan vectors")
+
+    monkeypatch.setattr(index.vectors, "search_text", unexpected)
+    hits = index.search("refresh_access_token", mode="auto", limit=8)
+
+    assert hits
+    assert hits[0].sources == ("literal",)
+
+
+def test_search_falls_back_to_ignored_and_large_text_only_after_a_miss(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / ".gitignore").write_text("ignored.py\nlarge.txt\n")
+    (tmp_path / "normal.py").write_text("normal_token = True\n")
+    (tmp_path / "ignored.py").write_text("fallback_secret_needle = True\n")
+    (tmp_path / "binary.dat").write_bytes(b"fallback_secret_needle\0hidden")
+    (tmp_path / "large.txt").write_text(
+        "x" * (2 * 1024 * 1024 + 8) + "\noversize_quasar_needle\n"
+    )
+    context = ToolContext(tmp_path, Ledger())
+    tool = SearchTool()
+
+    normal = tool.run({"query": "normal_token"}, context)
+    ignored = tool.run({"query": "fallback_secret_needle"}, context)
+    large = tool.run({"query": "oversize_quasar_needle"}, context)
+
+    assert "normal.py:1" in normal.output
+    assert normal.meta["strategy"] == "literal"
+    assert "ignored.py:1" in ignored.output
+    assert "binary.dat" not in ignored.output
+    assert ignored.meta["strategy"] == "fallback"
+    assert "large.txt:2" in large.output
+    assert large.meta["strategy"] == "fallback"
+
+
+def test_search_cursor_pages_broad_results_and_caps_long_lines(tmp_path: Path) -> None:
+    for number in range(12):
+        (tmp_path / f"item_{number:02}.txt").write_text(
+            f"shared_result {number} " + "z" * 2_000 + "\n"
+        )
+    context = ToolContext(tmp_path, Ledger())
+    tool = SearchTool()
+
+    first = tool.run({"query": "shared_result", "limit": 3}, context)
+    second = tool.run(
+        {"query": "shared_result", "limit": 3, "cursor": first.meta["next_cursor"]},
+        context,
+    )
+
+    assert first.meta["next_cursor"] == 3
+    assert "cursor 3" in first.output
+    assert second.meta["cursor"] == 3
+    assert first.output != second.output
+    assert max(map(len, first.output.splitlines())) < 260
+
+
+def test_small_budget_cursor_advances_only_past_fully_rendered_hits(tmp_path: Path) -> None:
+    for number in range(20):
+        (tmp_path / f"match_{number:02}.py").write_text(
+            f"bounded_match = {number}\n"
+        )
+    ledger = Ledger(Budget(default=64, search=64))
+    context = ToolContext(tmp_path, ledger)
+
+    first = SearchTool().run(
+        {"query": "bounded_match", "limit": 20}, context
+    )
+
+    assert not ledger.drops
+    assert 0 < first.meta["hits"] < 20
+    assert first.meta["next_cursor"] == first.meta["hits"]
+    assert f"cursor {first.meta['hits']}" in first.output

@@ -35,6 +35,8 @@ MAGIC = b"MJJIDX01"
 VERSION = 1
 HEADER = struct.Struct("<8sIIIIQ")
 MAX_FILE_BYTES = 2 * 1024 * 1024
+MAX_FALLBACK_FILE_BYTES = 32 * 1024 * 1024
+MAX_FALLBACK_FILES = 20_000
 MAX_CHUNK_LINES = 120
 LITERAL_CANDIDATES = 240
 CONFIDENT_SCORE = 0.20
@@ -296,13 +298,19 @@ class RepositoryIndex:
         semantic: list[tuple[int, float]] = []
         if mode in {"auto", "literal"}:
             literal = self._literal(query, regex, scope)
-        if mode == "auto":
+        # A bounded literal set is already the strongest possible answer. Do
+        # not pay for BM25 and a complete vector scan just to confirm it. A
+        # saturated literal set still uses fusion so broad queries are ranked.
+        decisive_literal = (
+            mode == "auto" and 0 < len(literal) <= wanted
+        )
+        if mode == "auto" and not decisive_literal:
             lexical = [
                 item for item in self.lexical().search(query, candidate_count)
                 if _in_scope(self.chunks[item[0]].path, scope)
                 and self._grounded(item[0], query)
             ]
-        if mode in {"auto", "semantic"}:
+        if mode == "semantic" or mode == "auto" and not decisive_literal:
             semantic = [
                 item
                 for item in self.vectors.search_text(query, candidate_count)
@@ -361,6 +369,90 @@ class RepositoryIndex:
             if len(hits) >= wanted:
                 break
         return hits[:_adaptive_count(hits)]
+
+    def fallback_search(
+        self,
+        query: str,
+        *,
+        regex: bool = False,
+        limit: int = 10,
+        scope: str = "",
+    ) -> list[SearchHit]:
+        """Last-resort literal/naming search of excluded text files.
+
+        Normal search never indexes ignored files or files above 2 MiB. This
+        tier is intentionally called only after that search misses. It streams
+        at most 32 MiB per file, refuses binary data, retains hard directory
+        exclusions unless explicitly scoped, and never emits an unbounded
+        source line.
+        """
+        if not query:
+            return []
+        expression = re.compile(query if regex else re.escape(query))
+        wanted = min(max(1, int(limit)), 50)
+        normalised_query = re.sub(r"[^a-z0-9]", "", query.lower())
+        candidates: list[tuple[float, str, int, str, str]] = []
+        for relative, size in _fallback_files(self.root, self.files, scope):
+            path = self.root / relative
+            try:
+                with path.open("rb") as raw:
+                    if b"\0" in raw.read(8192):
+                        continue
+                with path.open(
+                    "r", encoding="utf-8", errors="replace"
+                ) as source:
+                    for line_number, line in enumerate(source, 1):
+                        exact = list(expression.finditer(line))
+                        source_name = (
+                            "fallback-large"
+                            if size > MAX_FILE_BYTES
+                            else "fallback-ignored"
+                        )
+                        if exact:
+                            score = 1.0 + min(len(exact), 8) / 10.0
+                        elif (
+                            not regex
+                            and len(normalised_query) >= 4
+                            and len(line) <= 16_384
+                            and normalised_query
+                            in re.sub(r"[^a-z0-9]", "", line.lower())
+                        ):
+                            score = 0.5
+                            source_name += "-naming"
+                        else:
+                            continue
+                        candidates.append(
+                            (
+                                score,
+                                relative,
+                                line_number,
+                                _short(line),
+                                source_name,
+                            )
+                        )
+                        if len(candidates) >= LITERAL_CANDIDATES:
+                            break
+            except (OSError, UnicodeError):
+                continue
+            if len(candidates) >= LITERAL_CANDIDATES:
+                break
+        candidates.sort(key=lambda item: (-item[0], item[1], item[2]))
+        return [
+            SearchHit(
+                chunk=Chunk(
+                    path=path,
+                    start_line=line,
+                    end_line=line,
+                    signature=context,
+                    terms={},
+                ),
+                line=line,
+                score=score,
+                sources=(source,),
+                context=context,
+            )
+            for score, path, line, context, source in candidates[:wanted]
+        ]
 
     def _grounded(self, row: int, query: str) -> bool:
         """Does this chunk share any word with the query?
@@ -818,6 +910,52 @@ def _discover_files(root: Path) -> dict[str, tuple[int, int]]:
             continue
         result[relative] = (stat.st_mtime_ns, stat.st_size)
     return result
+
+
+def _fallback_files(
+    root: Path,
+    indexed: Mapping[str, tuple[int, int]],
+    scope: str,
+) -> Iterator[tuple[str, int]]:
+    """Yield excluded candidate files without entering dependency/build trees."""
+    scope = _normalise_scope(scope)
+    target = root / scope if scope else root
+    if target.is_file():
+        candidates: Iterable[Path] = (target,)
+    elif target.is_dir():
+        def walked() -> Iterator[Path]:
+            seen = 0
+            for directory, names, filenames in os.walk(target, topdown=True):
+                relative_directory = Path(directory).relative_to(root)
+                names[:] = [
+                    name
+                    for name in names
+                    if not _hard_skipped((relative_directory / name).as_posix())
+                ]
+                for name in filenames:
+                    if seen >= MAX_FALLBACK_FILES:
+                        return
+                    seen += 1
+                    yield Path(directory) / name
+
+        candidates = walked()
+    else:
+        return
+    for path in candidates:
+        try:
+            relative = path.relative_to(root).as_posix()
+            stat_result = path.stat()
+        except (OSError, ValueError):
+            continue
+        if (
+            relative in indexed
+            or not path.is_file()
+            or path.is_symlink()
+            or stat_result.st_size > MAX_FALLBACK_FILE_BYTES
+            or path.suffix.lower() in _BINARY_SUFFIXES
+        ):
+            continue
+        yield relative, stat_result.st_size
 
 
 def _git_files(root: Path) -> list[str] | None:

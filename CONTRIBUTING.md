@@ -13,6 +13,8 @@ Python 3.10 or newer and [uv](https://docs.astral.sh/uv/) are required:
 git clone https://github.com/lee101/mojojojo-agent.git
 cd mojojojo-agent
 uv sync
+# Optional multi-language tree-sitter validation:
+uv sync --extra syntax
 uv run pytest -q
 uv run mjj --version
 ```

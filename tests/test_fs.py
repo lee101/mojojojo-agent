@@ -48,6 +48,19 @@ def test_read_refuses_binary_and_clips_the_reason(tmp_path):
     assert ctx.ledger.tool_calls == 1
 
 
+def test_read_caps_a_single_generated_line_but_keeps_its_address(tmp_path):
+    (tmp_path / "minified.js").write_text("const payload='" + "x" * 20_000 + "';\n")
+
+    result = ReadTool().run(
+        {"path": "minified.js", "start": 1, "end": 1}, context(tmp_path)
+    )
+
+    assert result.ok
+    assert result.output.startswith("1: const payload=")
+    assert "chars omitted" in result.output
+    assert len(result.output) < 550
+
+
 def test_list_is_sorted_gitignore_aware_and_depth_limited(tmp_path):
     (tmp_path / ".gitignore").write_text("ignored.txt\ncache/\n")
     (tmp_path / "z.txt").write_text("")

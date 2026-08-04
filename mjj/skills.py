@@ -11,6 +11,7 @@ from typing import Iterable
 
 PROJECT_DIRS = (".mjj/skills", ".agents/skills", ".codex/skills", ".claude/skills")
 USER_DIRS = ("skills", "~/.agents/skills", "~/.codex/skills", "~/.claude/skills")
+BUILTIN_DIR = Path(__file__).with_name("builtin_skills")
 MAX_SKILLS = 128
 MAX_DEPTH = 4
 _NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
@@ -61,6 +62,7 @@ def discover(
     working = Path(cwd).expanduser().resolve()
     roots: list[tuple[str, Path]] = []
     roots.extend(("extra", Path(path).expanduser().resolve()) for path in extra_paths)
+    roots.append(("builtin", BUILTIN_DIR))
     project = _project_root(working)
     roots.extend(("project", project / relative) for relative in PROJECT_DIRS)
     if include_user:

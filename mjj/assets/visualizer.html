@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="theme-color" content="#070912" />
+  <title>__MJJ_TITLE__</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #070912; }
+    body { color: #f4f0e8; }
+    canvas { width: 100%; height: 100%; display: block; cursor: crosshair; }
+    .chrome { position: fixed; inset: 0; pointer-events: none; display: grid; grid-template-rows: auto 1fr auto; padding: clamp(18px, 3vw, 44px); }
+    header, footer { display: flex; justify-content: space-between; align-items: center; gap: 20px; }
+    .brand, .index, .hint { font: 650 10px/1.2 ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: .19em; text-transform: uppercase; }
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .brand::before { content: ""; width: 8px; height: 8px; border: 1px solid currentColor; transform: rotate(45deg); box-shadow: 0 0 20px currentColor; }
+    .index, .hint { opacity: .62; }
+    .hero { align-self: center; max-width: min(720px, 72vw); }
+    .eyebrow { margin: 0 0 18px; font: 600 11px/1.2 ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: .22em; text-transform: uppercase; opacity: .72; }
+    h1 { margin: 0; font-size: clamp(54px, 9.5vw, 150px); font-weight: 480; line-height: .78; letter-spacing: -.072em; text-wrap: balance; text-shadow: 0 10px 55px rgba(0,0,0,.3); }
+    h1 em { font-family: Georgia, serif; font-weight: 400; }
+    .image-mode .hero { justify-self: end; max-width: 34vw; text-align: right; }
+    .image-mode h1 { font-size: clamp(46px, 6vw, 96px); line-height: .84; }
+    .readout { display: flex; gap: 8px; pointer-events: auto; }
+    button { appearance: none; color: inherit; border: 1px solid rgba(255,255,255,.2); background: rgba(8,9,17,.28); backdrop-filter: blur(14px); border-radius: 999px; padding: 9px 13px; font: 650 9px/1 ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: .12em; text-transform: uppercase; cursor: pointer; }
+    button:hover, button:focus-visible { background: rgba(255,255,255,.13); outline: none; border-color: rgba(255,255,255,.55); }
+    .fallback { position: fixed; inset: 0; display: grid; place-items: center; padding: 30px; text-align: center; background: radial-gradient(circle at 50% 40%, #28214d, #070912 65%); }
+    .fallback[hidden] { display: none; }
+    @media (max-width: 600px) { .chrome { padding: 20px; } .hero, .image-mode .hero { justify-self: start; max-width: 92vw; text-align: left; } .hint { display: none; } footer { align-items: flex-end; } .readout { flex-direction: column; } }
+  </style>
+</head>
+<body>
+  <canvas id="field" aria-label="Interactive procedural visual field"></canvas>
+  <div class="chrome">
+    <header><div class="brand">Signal Forge</div><div class="index" id="index"></div></header>
+    <main class="hero">
+      <p class="eyebrow" id="eyebrow"></p>
+      <h1>__MJJ_TITLE_HTML__</h1>
+    </main>
+    <footer>
+      <div class="hint">Move to bend the field · tap to pause</div>
+      <div class="readout"><button id="mode" type="button"></button><button id="palette" type="button"></button></div>
+    </footer>
+  </div>
+  <section class="fallback" id="fallback" hidden><div><p class="eyebrow">Static signal</p><h2>WebGL could not start.</h2></div></section>
+  <script>
+  (() => {
+    "use strict";
+    const config = __MJJ_CONFIG__;
+    const kinds = ["aurora", "contours", "cells", "tunnel", "image-rift", "image-relief"];
+    const palettes = ["ultraviolet", "pelagic", "ember", "acid"];
+    const query = new URLSearchParams(location.search);
+    let kind = kinds.includes(query.get("kind")) ? query.get("kind") : config.kind;
+    let palette = palettes.includes(query.get("palette")) ? query.get("palette") : config.palette;
+    let time = Number.parseFloat(query.get("time") ?? "0") || 0;
+    let running = query.get("motion") !== "0" && !matchMedia("(prefers-reduced-motion: reduce)").matches;
+    let previous = performance.now();
+    const started = performance.now();
+    const canvas = document.querySelector("#field");
+    const fallback = document.querySelector("#fallback");
+    const gl = canvas.getContext("webgl", { antialias: false, preserveDrawingBuffer: true, alpha: false });
+    const fail = error => {
+      fallback.hidden = false; canvas.hidden = true; document.body.dataset.ready = "fallback";
+      window.__VISUALBENCH_READY__ = true; console.error(error);
+    };
+    if (!gl) { fail(new Error("WebGL unavailable")); return; }
+
+    const vertex = `attribute vec2 p; varying vec2 vUv; void main(){vUv=p*.5+.5;gl_Position=vec4(p,0.,1.);}`;
+    const fragment = `
+      precision highp float;
+      varying vec2 vUv;
+      uniform vec2 uResolution, uPointer, uImageSize;
+      uniform float uTime, uSeed, uHasImage;
+      uniform int uKind, uPalette;
+      uniform sampler2D uImage;
+      #define PI 3.14159265359
+      float hash21(vec2 p){p=fract(p*vec2(123.34,456.21));p+=dot(p,p+45.32+uSeed);return fract(p.x*p.y);}
+      vec2 hash22(vec2 p){float n=sin(dot(p,vec2(41.,289.))+uSeed);return fract(vec2(262144.,32768.)*n);}
+      float noise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(hash21(i),hash21(i+vec2(1,0)),f.x),mix(hash21(i+vec2(0,1)),hash21(i+1.),f.x),f.y);}
+      float fbm(vec2 p){float a=.5,n=0.;mat2 r=mat2(.8,.6,-.6,.8);for(int i=0;i<5;i++){n+=a*noise(p);p=r*p*2.03+13.1;a*=.5;}return n;}
+      vec3 ramp(float t){
+        t=clamp(t,0.,1.);
+        if(uPalette==0) return mix(vec3(.025,.015,.10),vec3(.82,.16,1.),smoothstep(0.,.72,t))+vec3(.12,.48,.9)*pow(t,3.);
+        if(uPalette==1) return mix(vec3(.005,.055,.075),vec3(.16,.92,.75),t)+vec3(.55,.80,.42)*pow(t,5.);
+        if(uPalette==2) return mix(vec3(.09,.012,.018),vec3(1.,.22,.035),t)+vec3(1.,.62,.12)*pow(t,4.);
+        return mix(vec3(.015,.025,.005),vec3(.72,1.,.02),t)+vec3(.04,.45,.95)*pow(1.-t,5.);
+      }
+      vec2 coverUv(vec2 uv){vec2 p=uv-.5;float sa=uResolution.x/uResolution.y,ia=uImageSize.x/uImageSize.y;if(sa>ia)p.x*=sa/ia;else p.y*=ia/sa;return p+.5;}
+      vec3 source(vec2 uv){if(uHasImage<.5){float n=fbm(uv*4.+uSeed);return ramp(n);}return texture2D(uImage,clamp(uv,.002,.998)).rgb;}
+      float luma(vec3 c){return dot(c,vec3(.299,.587,.114));}
+      vec3 aurora(vec2 p){float n=fbm(p*1.5+vec2(uTime*.035,-uTime*.02));float ribbon=exp(-7.*abs(p.y*.62+sin(p.x*1.35+n*2.4+uTime*.08)*.23));float veil=exp(-11.*abs(p.y*.9+sin(p.x*2.1-n*1.7)*.35));vec3 c=ramp(n*.62+ribbon*.65);c+=ramp(.75+n*.2)*veil*.5;float stars=step(.997,hash21(floor((p+8.)*120.)))*(.4+.6*hash21(floor(p*91.)));return c*(.16+ribbon+veil*.35)+stars;}
+      vec3 contours(vec2 p){float n=fbm(p*2.2+vec2(uTime*.018,0));float bands=abs(fract(n*11.)-.5);float line=1.-smoothstep(.025,.09,bands);float ridge=fbm(p*4.5+3.);vec3 c=ramp(n*.82+ridge*.16);c=mix(c*.32,vec3(.96,.94,.83),line*.88);return c*(.55+ridge*.65);}
+      vec3 cells(vec2 p){p*=3.2;vec2 i=floor(p),f=fract(p);float d=9.,d2=9.,cell=0.;for(int y=-1;y<=1;y++)for(int x=-1;x<=1;x++){vec2 g=vec2(float(x),float(y));vec2 o=hash22(i+g);o=.5+.43*sin(uTime*.09+6.2831*o);float nd=length(g+o-f);if(nd<d){d2=d;d=nd;cell=hash21(i+g);}else if(nd<d2)d2=nd;}float edge=smoothstep(.02,.11,d2-d);return ramp(cell*.75+(1.-d)*.25)*edge+vec3(.95)*pow(1.-edge,7.)*.7;}
+      vec3 tunnel(vec2 p){float a=atan(p.y,p.x)/PI;float r=length(p);float depth=1./(r+.08)+uTime*.055;float ribs=sin(a*18.+depth*3.5);float tiles=sin(depth*7.)*sin(a*31.);float glow=exp(-4.*r);float v=.42+.24*ribs+.18*tiles+glow*.7;return ramp(v)*(1.-smoothstep(.1,1.2,r))+.04*ramp(glow);}
+      vec3 imageRift(vec2 uv,vec2 p){vec2 q=coverUv(uv);float n=fbm(p*3.+uTime*.025);vec2 dir=normalize(p+vec2(.001));vec2 warp=dir*sin(length(p)*28.-uTime*.22+n*4.)*.018;float split=.006+.018*length(p);return vec3(source(q+warp+vec2(split,0)).r,source(q+warp).g,source(q+warp-vec2(split,0)).b)*(.78+n*.42);}
+      vec3 imageRelief(vec2 uv){vec2 q=coverUv(uv),e=2./uImageSize;float tl=luma(source(q+e*vec2(-1,1))),tr=luma(source(q+e*vec2(1,1))),bl=luma(source(q+e*vec2(-1,-1))),br=luma(source(q+e*vec2(1,-1)));vec2 g=vec2(-tl-bl+tr+br,tl+tr-bl-br);float edge=length(g);float base=luma(source(q));float lines=1.-smoothstep(.03,.12,abs(fract(base*9.)-.5));return mix(ramp(base),vec3(.94),lines*.3)*(1.-smoothstep(.08,.7,edge))+ramp(edge)*smoothstep(.06,.6,edge);}
+      void main(){vec2 p=(gl_FragCoord.xy*2.-uResolution)/uResolution.y;p+=(uPointer-.5)*.12;vec3 c;if(uKind==0)c=aurora(p);else if(uKind==1)c=contours(p);else if(uKind==2)c=cells(p);else if(uKind==3)c=tunnel(p);else if(uKind==4)c=imageRift(vUv,p);else c=imageRelief(vUv);float vignette=1.-smoothstep(.28,1.35,length(p*.68));float grain=hash21(gl_FragCoord.xy+floor(uTime*12.))-.5;c*=.62+.45*vignette;c+=grain*.025;c=pow(max(c,0.),vec3(.88));gl_FragColor=vec4(c,1.);}
+    `;
+    const compile = (type, source) => { const shader=gl.createShader(type); gl.shaderSource(shader,source); gl.compileShader(shader); if(!gl.getShaderParameter(shader,gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(shader)); return shader; };
+    let program;
+    try { program=gl.createProgram(); gl.attachShader(program,compile(gl.VERTEX_SHADER,vertex)); gl.attachShader(program,compile(gl.FRAGMENT_SHADER,fragment)); gl.linkProgram(program); if(!gl.getProgramParameter(program,gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(program)); gl.useProgram(program); }
+    catch(error){ fail(error); return; }
+    const buffer=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,buffer); gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,-1,1,1,-1,1,1]),gl.STATIC_DRAW);
+    const position=gl.getAttribLocation(program,"p"); gl.enableVertexAttribArray(position); gl.vertexAttribPointer(position,2,gl.FLOAT,false,0,0);
+    const uniform = name => gl.getUniformLocation(program,name);
+    const u={resolution:uniform("uResolution"),pointer:uniform("uPointer"),time:uniform("uTime"),seed:uniform("uSeed"),kind:uniform("uKind"),palette:uniform("uPalette"),image:uniform("uImage"),imageSize:uniform("uImageSize"),hasImage:uniform("uHasImage")};
+    const texture=gl.createTexture(); gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D,texture); gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE); gl.uniform1i(u.image,0);
+    let imageSize=[1,1], hasImage=0, ready=false, pointer=[.5,.5], pointerTarget=[.5,.5];
+    gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,1,1,0,gl.RGBA,gl.UNSIGNED_BYTE,new Uint8Array([20,20,30,255]));
+    const syncLabels=()=>{document.body.classList.toggle("image-mode",kind.startsWith("image-"));document.querySelector("#mode").textContent=kind;document.querySelector("#palette").textContent=palette;document.querySelector("#index").textContent=`${String(kinds.indexOf(kind)+1).padStart(2,"0")} / ${String(kinds.length).padStart(2,"0")}`;document.querySelector("#eyebrow").textContent=`${palette} field · seed ${config.seed}`;};
+    syncLabels();
+    const resize=()=>{const dpr=Math.min(devicePixelRatio,2),w=Math.max(1,Math.round(innerWidth*dpr)),h=Math.max(1,Math.round(innerHeight*dpr));if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;gl.viewport(0,0,w,h);}};
+    addEventListener("resize",resize); addEventListener("pointermove",event=>{pointerTarget=[event.clientX/innerWidth,1-event.clientY/innerHeight];}); addEventListener("click",event=>{if(event.target.tagName!=="BUTTON")running=!running;});
+    document.querySelector("#mode").addEventListener("click",()=>{kind=kinds[(kinds.indexOf(kind)+1)%kinds.length];syncLabels();});
+    document.querySelector("#palette").addEventListener("click",()=>{palette=palettes[(palettes.indexOf(palette)+1)%palettes.length];syncLabels();});
+    const frame=now=>{resize();if(running)time+=Math.min((now-previous)/1000,.05);previous=now;pointer[0]+=(pointerTarget[0]-pointer[0])*.06;pointer[1]+=(pointerTarget[1]-pointer[1])*.06;gl.uniform2f(u.resolution,canvas.width,canvas.height);gl.uniform2f(u.pointer,pointer[0],pointer[1]);gl.uniform1f(u.time,time);gl.uniform1f(u.seed,config.seed);gl.uniform1i(u.kind,kinds.indexOf(kind));gl.uniform1i(u.palette,palettes.indexOf(palette));gl.uniform2f(u.imageSize,imageSize[0],imageSize[1]);gl.uniform1f(u.hasImage,hasImage);gl.drawArrays(gl.TRIANGLES,0,6);if(!ready){ready=true;document.body.dataset.ready="webgl";window.__VISUALBENCH_METRICS__={generator:"mjj visualize",kind,palette,firstFrameMilliseconds:Math.round(performance.now()-started),sourceImage:Boolean(hasImage)};window.__VISUALBENCH_READY__=true;}requestAnimationFrame(frame);};
+    if(config.source){const image=new Image();image.onload=()=>{imageSize=[image.naturalWidth,image.naturalHeight];hasImage=1;gl.bindTexture(gl.TEXTURE_2D,texture);gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,true);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,image);requestAnimationFrame(frame);};image.onerror=()=>requestAnimationFrame(frame);image.src=config.source;}else requestAnimationFrame(frame);
+  })();
+  </script>
+</body>
+</html>

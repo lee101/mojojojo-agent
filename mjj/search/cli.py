@@ -38,6 +38,8 @@ def search(
             scope = ""
     index = build_index(root_path, force=force)
     hits = index.search(query, mode=mode, regex=regex, limit=limit, scope=scope)
+    if not hits:
+        hits = index.fallback_search(query, regex=regex, limit=limit, scope=scope)
     return index, hits
 
 

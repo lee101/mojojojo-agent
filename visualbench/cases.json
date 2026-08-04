@@ -34,5 +34,41 @@
     "path": "/gallery/image-rift/?motion=0&toast=0&time=7&mode=prism",
     "viewport": { "width": 390, "height": 844 },
     "prompt": "Keep the image shader usable and composed on a phone viewport."
+  },
+  {
+    "id": "forge-aurora",
+    "path": "/gallery/signal-forge/?motion=0&time=11&kind=aurora&palette=ultraviolet",
+    "viewport": { "width": 1440, "height": 900 },
+    "prompt": "Generate a deterministic ultraviolet aurora flow field with an editorial interface."
+  },
+  {
+    "id": "forge-contours",
+    "path": "/gallery/signal-forge/?motion=0&time=11&kind=contours&palette=pelagic",
+    "viewport": { "width": 1440, "height": 900 },
+    "prompt": "Generate deterministic pelagic topographic contours with layered spatial structure."
+  },
+  {
+    "id": "forge-cells",
+    "path": "/gallery/signal-forge/?motion=0&time=11&kind=cells&palette=ember",
+    "viewport": { "width": 1440, "height": 900 },
+    "prompt": "Generate a deterministic ember Voronoi field with luminous stained-glass cells."
+  },
+  {
+    "id": "forge-tunnel-mobile",
+    "path": "/gallery/signal-forge/?motion=0&time=11&kind=tunnel&palette=acid",
+    "viewport": { "width": 390, "height": 844 },
+    "prompt": "Generate a deterministic acid signal tunnel that remains composed on a phone viewport."
+  },
+  {
+    "id": "forge-image-rift",
+    "path": "/gallery/signal-rift/?motion=0&time=11&kind=image-rift&palette=acid",
+    "viewport": { "width": 1440, "height": 900 },
+    "prompt": "Precompress and transform the source image into a deterministic chromatic signal rift."
+  },
+  {
+    "id": "forge-image-relief",
+    "path": "/gallery/signal-rift/?motion=0&time=11&kind=image-relief&palette=pelagic",
+    "viewport": { "width": 1440, "height": 900 },
+    "prompt": "Precompress and transform the source image into deterministic luminous topographic relief."
   }
 ]

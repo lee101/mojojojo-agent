@@ -8,6 +8,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..syntax import SyntaxCheck, validate_source
 from .base import ToolContext, ToolResult
 
 _BEGIN = "*** Begin Patch"
@@ -84,7 +85,7 @@ class ApplyPatchTool:
             return _result(ctx, "input must be a string", ok=False)
         try:
             operations = _parse(patch)
-            summaries = _plan_and_commit(operations, ctx)
+            summaries, checks = _plan_and_commit(operations, ctx)
         except (PatchError, OSError) as exc:
             return _result(
                 ctx,
@@ -93,11 +94,18 @@ class ApplyPatchTool:
                 hint="read the target around the failed context and retry",
             )
         lines = [f"{path}: +{counts[0]} -{counts[1]}" for path, counts in summaries.items()]
+        checked = sum(check.checked for check in checks)
+        if checked:
+            lines.append(f"syntax ✓ {checked} file{'' if checked == 1 else 's'}")
+        changed = ctx.state.setdefault("changed-files", set())
+        if isinstance(changed, set):
+            changed.update(summaries)
         return _result(
             ctx,
             "\n".join(lines),
             hint="split very large patches into smaller patches",
             files=list(summaries),
+            syntax=[check.__dict__ for check in checks],
         )
 
 
@@ -214,7 +222,7 @@ def _patch_path(path_arg: str, ctx: ToolContext) -> Path:
 
 def _plan_and_commit(
     operations: list[_Operation], ctx: ToolContext
-) -> dict[str, list[int]]:
+) -> tuple[dict[str, list[int]], list[SyntaxCheck]]:
     plans: dict[Path, bytes | None] = {}
     snapshots: dict[Path, _Snapshot] = {}
     summaries: dict[str, list[int]] = {}
@@ -255,8 +263,20 @@ def _plan_and_commit(
             counts[0] += chunk.additions
             counts[1] += chunk.deletions
 
+    checks: list[SyntaxCheck] = []
+    for path, content in plans.items():
+        if content is None:
+            continue
+        relative = path.relative_to(ctx.cwd.resolve()).as_posix()
+        check = validate_source(relative, content)
+        checks.append(check)
+        if check.checked and not check.ok:
+            raise PatchError(
+                f"syntax check failed: {relative} [{check.checker}] {check.message}"
+            )
+
     _commit(plans, snapshots)
-    return summaries
+    return summaries, checks
 
 
 def _snapshot(path: Path) -> _Snapshot:

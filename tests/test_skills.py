@@ -26,6 +26,10 @@ def test_discovers_project_skill_and_loads_bundled_files(tmp_path: Path):
 
     skills = discover(tmp_path, include_user=False)
     assert [(skill.qualified_name, skill.description) for skill in skills] == [
+        (
+            "builtin:visualizer",
+            "Build deterministic procedural WebGL or image-transform visualizers with minimal model-written source and measurable visualbench output.",
+        ),
         ("project:prove-it", "Do the useful thing")
     ]
     result = SkillTool(include_user=False).run(
@@ -45,6 +49,7 @@ def test_no_name_returns_compact_catalog(tmp_path: Path):
     )
     assert result.ok
     assert result.output.splitlines() == [
+        "builtin:visualizer: Build deterministic procedural WebGL or image-transform visualizers with minimal model-written source and measurable visualbench output.",
         "project:one: First workflow",
         "project:two: Second workflow",
     ]
@@ -54,7 +59,9 @@ def test_hosted_mode_does_not_discover_user_skills(tmp_path: Path, monkeypatch):
     home = tmp_path / "mjj-home"
     write_skill(home / "skills", "host-secret")
     monkeypatch.setenv("MJJ_HOME", str(home))
-    assert discover(tmp_path, include_user=False) == []
+    assert [skill.qualified_name for skill in discover(tmp_path, include_user=False)] == [
+        "builtin:visualizer"
+    ]
     assert "host-secret" in [
         skill.name for skill in discover(tmp_path, include_user=True)
     ]

@@ -33,6 +33,8 @@ instead of being paid for in context.
 | `mjj/project_docs.py` | bounded root-to-cwd `AGENTS.md` discovery |
 | `mjj/tools/` | shell, apply_patch, read/ls, py, search, skill loading |
 | `mjj/skills.py` | scoped `SKILL.md` discovery and metadata |
+| `mjj/syntax.py` | exact parsers + optional per-language tree-sitter checks |
+| `mjj/visualize.py` | token-free native WebGL visualizer expansion |
 | `mjj/search/` | mojo-embed backed index: literal + lexical + semantic |
 | `mjj/kernels/` | mojosub `@jit` hot paths with CPython fallbacks |
 | `mjj/server.py` | SSE agent backend with app.nz SSO + credit billing |
@@ -98,6 +100,7 @@ uv run pytest -q                     # unit tests (offline, no creds needed)
 uv run mjj exec "..."                # headless run
 uv run mjj search QUERY [PATH]        # hybrid disk search
 uv run mjj index                      # build or refresh a repo index
+uv run mjj visualize demo --kind cells # scaffold standalone WebGL
 bench/run.sh                         # all benchmarks under a lock
 ```
 

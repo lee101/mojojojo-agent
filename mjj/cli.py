@@ -41,6 +41,7 @@ from .session import (
 from .skills import discover
 from .tools import build_registry
 from .version import __version__
+from .visualize import KINDS, PALETTES, VisualizerError, generate_visualizer
 
 
 def _agent(args) -> Agent:
@@ -381,6 +382,25 @@ def cmd_import(args) -> int:
     return 0
 
 
+def cmd_visualize(args) -> int:
+    try:
+        result = generate_visualizer(
+            args.output,
+            cwd=args.cwd,
+            kind=args.kind,
+            palette=args.palette,
+            seed=args.seed,
+            title=args.title,
+            image=args.image,
+            force=args.force,
+        )
+    except VisualizerError as exc:
+        print(f"mjj visualize: {exc}", file=sys.stderr)
+        return 2
+    print(json.dumps(result.public(), indent=2) if args.json else result.summary())
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     bootstrap = argparse.ArgumentParser(add_help=False)
@@ -521,6 +541,20 @@ def main(argv: list[str] | None = None) -> int:
     importing = sub.add_parser("import", help="import a JSONL session")
     importing.add_argument("input")
     importing.set_defaults(func=cmd_import)
+
+    visual = sub.add_parser(
+        "visualize", help="scaffold a deterministic standalone WebGL visualizer"
+    )
+    visual.add_argument("output", help="output directory inside the working tree")
+    visual.add_argument("--kind", choices=KINDS, default="aurora")
+    visual.add_argument("--palette", choices=PALETTES, default="ultraviolet")
+    visual.add_argument("--seed", type=int, default=17)
+    visual.add_argument("--title", default="Living signal")
+    visual.add_argument("--image", help="optional source image; embedded as quality-85 WebP")
+    visual.add_argument("--force", action="store_true")
+    visual.add_argument("--json", action="store_true")
+    visual.add_argument("-C", "--cd", "--cwd", dest="cwd", default=argparse.SUPPRESS)
+    visual.set_defaults(func=cmd_visualize)
 
     args = parser.parse_args(argv)
     if args.auto_max_turns < 0:

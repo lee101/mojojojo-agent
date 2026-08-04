@@ -14,6 +14,22 @@ Windows PowerShell:
 irm https://mojojojo.cc/install.ps1 | iex
 ```
 
+Both installers verify the published SHA-256 checksum and smoke-test the new
+binary before atomically replacing an existing installation. To pin or stage a
+release, download the installer and pass options directly:
+
+```bash
+./install.sh --version v0.3.0 --install-dir "$HOME/.local/bin"
+```
+
+```powershell
+.\install.ps1 -Version v0.3.0 -InstallDir "$env:LOCALAPPDATA\Programs\mjj"
+```
+
+The equivalent environment variables are `MJJ_VERSION`, `MJJ_INSTALL_DIR`,
+`MJJ_REPO`, and `MJJ_BASE_URL`. PowerShell updates the user PATH by default;
+pass `-NoPathUpdate` or set `MJJ_NO_PATH_UPDATE=1` to opt out.
+
 The installers select your platform, download the latest release, verify its
 published SHA-256 checksum, and install in a user-owned directory. They do not
 require a system Python. You can instead install the Python package with

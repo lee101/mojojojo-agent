@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import json
+import io
+import time
+
 import pytest
 
 from mjj import __version__
 from mjj import cli
-import io
-import time
-
 from mjj.cli import _Heartbeat, _exec_prompt, main
+from mjj.plugins import PluginInfo
 
 
 def test_cli_reports_version(capsys) -> None:
@@ -113,6 +115,61 @@ def test_exec_accepts_autonomy_and_session_controls_after_subcommand(monkeypatch
         "fork": "abc123",
         "name": "experiment",
     }
+
+
+def test_exec_accepts_repeatable_opt_in_plugins_after_subcommand(
+    tmp_path, monkeypatch
+) -> None:
+    seen = {}
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / "config.toml").write_text(
+        '[plugins]\nenabled = ["configured"]\n', encoding="utf-8"
+    )
+    monkeypatch.setenv("MJJ_HOME", str(home))
+
+    def capture(args) -> int:
+        seen["plugins"] = args.plugins
+        return 0
+
+    monkeypatch.setattr(cli, "cmd_exec", capture)
+    assert main(["exec", "--plugin", "review", "--plugin", "deploy", "task"]) == 0
+    assert seen == {"plugins": ["configured", "review", "deploy"]}
+
+
+def test_plugins_command_lists_enabled_and_missing_without_loading(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("MJJ_HOME", str(home))
+    monkeypatch.setattr(
+        cli,
+        "plugin_inventory",
+        lambda: (PluginInfo("review", "review_plugin:tools", "review-pkg"),),
+    )
+
+    assert (
+        main(["--plugin", "review", "--plugin", "missing", "plugins", "--json"])
+        == 0
+    )
+
+    rows = json.loads(capsys.readouterr().out)
+    assert rows == [
+        {
+            "name": "review",
+            "value": "review_plugin:tools",
+            "distribution": "review-pkg",
+            "enabled": True,
+        },
+        {
+            "name": "missing",
+            "value": None,
+            "distribution": None,
+            "enabled": True,
+            "missing": True,
+        },
+    ]
 
 
 def test_exec_accepts_a_durable_goal_after_subcommand(monkeypatch) -> None:

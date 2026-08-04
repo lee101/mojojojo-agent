@@ -216,6 +216,13 @@ only when configured. Discovery, schemas, binary content, and text results are
 bounded, and each call follows the active permission mode. See [MCP tool
 servers](mcp.md).
 
+## Installed plugin tools
+
+Explicitly enabled Python package entry points contribute namespaced
+`PLUGIN__TOOL` functions. They retain approval gates and pass every result
+through the bounded ledger. Repository config cannot activate installed code.
+See [plugin tools](plugins.md) for the package contract and trust boundary.
+
 ## `delegate`
 
 `delegate` runs up to four independent reviewer or worker agents concurrently.

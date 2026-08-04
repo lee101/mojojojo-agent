@@ -709,6 +709,7 @@ class InteractiveApp:
                 disabled=self.args.disabled_tools,
                 skill_paths=self.args.skill_paths,
                 mcp_servers=self.args.resolved_config.mcp_servers,
+                plugins=self.args.plugins,
             )
             if self.agent.goal_store is not None:
                 self.agent.bind_goal_store(self.agent.goal_store)

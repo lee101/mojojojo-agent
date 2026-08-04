@@ -29,6 +29,7 @@ from .ledger import Budget, Ledger
 from .model import ModelClient, probe
 from .media import ImageInputError, prepare_image
 from .permissions import PermissionPolicy
+from .plugins import plugin_inventory
 from .search.cli import main as search_main
 from .search.index import build_index
 from .session import (
@@ -74,6 +75,7 @@ def _agent(args) -> Agent:
         disabled=args.disabled_tools,
         skill_paths=args.skill_paths,
         mcp_servers=args.resolved_config.mcp_servers,
+        plugins=args.plugins,
     )
     try:
         agent = Agent(
@@ -278,6 +280,7 @@ def cmd_tools(args) -> int:
         disabled=args.disabled_tools,
         skill_paths=args.skill_paths,
         mcp_servers=args.resolved_config.mcp_servers,
+        plugins=args.plugins,
     )
     try:
         for warning in registry.warnings:
@@ -286,6 +289,35 @@ def cmd_tools(args) -> int:
             print(f"{schema['name']:12} {schema['description'].splitlines()[0]}")
     finally:
         registry.close()
+    return 0
+
+
+def cmd_plugins(args) -> int:
+    enabled = set(args.plugins)
+    inventory = plugin_inventory()
+    installed = {plugin.name for plugin in inventory}
+    rows = [plugin.public(enabled=plugin.name in enabled) for plugin in inventory]
+    rows.extend(
+        {
+            "name": name,
+            "value": None,
+            "distribution": None,
+            "enabled": True,
+            "missing": True,
+        }
+        for name in args.plugins
+        if name not in installed
+    )
+    if args.json:
+        print(json.dumps(rows, indent=2))
+        return 0
+    if not rows:
+        print("no mojojojo.tools plugins installed")
+        return 0
+    for row in rows:
+        marker = "*" if row["enabled"] else " "
+        detail = row.get("distribution") or row.get("value") or "not installed"
+        print(f"{marker} {row['name']:24} {detail}")
     return 0
 
 
@@ -358,6 +390,7 @@ def cmd_config(args) -> int:
         effort=args.effort,
         verbosity=args.verbosity,
         tool_budget=args.tool_budget,
+        plugins=args.plugins,
     )
     print(json.dumps(values, indent=2))
     return 0
@@ -498,6 +531,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--auto-max-turns", type=int, default=config.auto_max_turns)
     parser.add_argument("-C", "--cd", "--cwd", dest="cwd", default=known.cwd)
     parser.add_argument("--config")
+    parser.add_argument(
+        "--plugin",
+        dest="plugins",
+        action="append",
+        default=list(config.plugins),
+        metavar="NAME",
+        help="enable an installed mojojojo.tools plugin (repeatable)",
+    )
     parser.add_argument("-v", "--verbose", action="store_true")
     sub = parser.add_subparsers(dest="command")
 
@@ -513,6 +554,12 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--auto-next-steps", action="store_true", default=argparse.SUPPRESS)
     run.add_argument("--auto-next-idea", action="store_true", default=argparse.SUPPRESS)
     run.add_argument("--auto-max-turns", type=int, default=argparse.SUPPRESS)
+    run.add_argument(
+        "--plugin",
+        dest="command_plugins",
+        action="append",
+        default=argparse.SUPPRESS,
+    )
     run.add_argument(
         "--goal",
         metavar="OBJECTIVE",
@@ -546,6 +593,12 @@ def main(argv: list[str] | None = None) -> int:
     chat.add_argument("--auto-next-steps", action="store_true", default=argparse.SUPPRESS)
     chat.add_argument("--auto-next-idea", action="store_true", default=argparse.SUPPRESS)
     chat.add_argument("--auto-max-turns", type=int, default=argparse.SUPPRESS)
+    chat.add_argument(
+        "--plugin",
+        dest="command_plugins",
+        action="append",
+        default=argparse.SUPPRESS,
+    )
     chat.add_argument("--goal", metavar="OBJECTIVE")
     chat_persistence = chat.add_mutually_exclusive_group()
     chat_persistence.add_argument("--resume", nargs="?", const="", default=None)
@@ -576,6 +629,10 @@ def main(argv: list[str] | None = None) -> int:
 
     listing = sub.add_parser("tools", help="what the model can call")
     listing.set_defaults(func=cmd_tools)
+
+    plugins = sub.add_parser("plugins", help="list installed and enabled plugins")
+    plugins.add_argument("--json", action="store_true")
+    plugins.set_defaults(func=cmd_plugins)
 
     searching = sub.add_parser("search", help="hybrid disk search")
     searching.add_argument("query")
@@ -640,6 +697,9 @@ def main(argv: list[str] | None = None) -> int:
     visual.set_defaults(func=cmd_visualize)
 
     args = parser.parse_args(argv)
+    args.plugins = list(
+        dict.fromkeys([*args.plugins, *getattr(args, "command_plugins", [])])
+    )
     if args.auto_max_turns < 0:
         parser.error("--auto-max-turns must be non-negative")
     args.disabled_tools = config.disabled_tools

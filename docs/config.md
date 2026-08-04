@@ -31,6 +31,9 @@ disabled = []
 [skills]
 paths = ["../shared-agent-skills"]
 
+[plugins]
+enabled = ["review"]
+
 [mcp_servers.browser]
 command = "npx"
 args = ["-y", "@example/browser-mcp"]
@@ -42,7 +45,8 @@ Supported environment equivalents are `MJJ_PROVIDER`, `MJJ_MODEL`, `MJJ_EFFORT`,
 `MJJ_VERBOSITY`, `MJJ_PERMISSION_MODE`, `MJJ_TOOL_BUDGET`, `MJJ_PROJECT_DOC_MAX_BYTES`,
 `MJJ_AUTO_NEXT_STEPS`, `MJJ_AUTO_NEXT_IDEA`, `MJJ_AUTO_MAX_TURNS`,
 comma-separated `MJJ_DISABLE_TOOLS`, and path-separator-delimited
-`MJJ_SKILL_PATHS`. A zero project-doc budget disables `AGENTS.md` discovery.
+`MJJ_SKILL_PATHS`. `MJJ_PLUGINS` is a comma-separated list of installed plugin
+entry-point names. A zero project-doc budget disables `AGENTS.md` discovery.
 An autonomy turn limit of zero means unlimited continuation until interrupted.
 Credentials and executor endpoints keep their existing dedicated environment
 variables and never appear in `mjj config` output.
@@ -59,6 +63,12 @@ configuration file; `startup_timeout`, `tool_timeout`, and `max_tools` are
 bounded. `env_vars` forwards selected environment variables, while `env` adds
 literal values. Resolved config output shows only environment key names. See
 [MCP tool servers](mcp.md) for the runtime and permission boundary.
+
+Installed Python plugins are executable code and therefore use a narrower
+trust rule than ordinary configuration: `[plugins].enabled` is accepted from
+the user config or an explicit `--config` file, but not from a repository's
+`.mjj/config.toml`. Command-line `--plugin NAME` and `MJJ_PLUGINS` may also
+enable them. See [plugin tools](plugins.md) for the package contract and caps.
 
 Operational tool overrides are also intentionally separate from model
 configuration. `MJJ_IMAGE_PROTOCOL` accepts `auto`, `kitty`, `ansi`, or `off`;

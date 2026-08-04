@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
@@ -19,6 +20,8 @@ EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
 VERBOSITIES = ("low", "medium", "high")
 PROVIDERS = ("auto", "openpaths", "openrouter", "openai", "custom")
 MAX_MCP_SERVERS = 16
+MAX_PLUGINS = 8
+PLUGIN_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
 
 
 @dataclass(frozen=True)
@@ -64,12 +67,14 @@ class Config:
     disabled_tools: tuple[str, ...] = ()
     skill_paths: tuple[Path, ...] = ()
     mcp_servers: tuple[MCPServerConfig, ...] = ()
+    plugins: tuple[str, ...] = ()
     files: tuple[Path, ...] = field(default=(), repr=False)
 
     def public(self) -> dict[str, Any]:
         result = asdict(self)
         result["skill_paths"] = [str(path) for path in self.skill_paths]
         result["mcp_servers"] = [server.public() for server in self.mcp_servers]
+        result["plugins"] = list(self.plugins)
         result["files"] = [str(path) for path in self.files]
         return result
 
@@ -86,17 +91,17 @@ def load(
     values: dict[str, Any] = {}
     loaded: list[Path] = []
     user_home = Path(env.get("MJJ_HOME") or "~/.mjj").expanduser()
-    candidates = [user_home / "config.toml"]
+    candidates = [(user_home / "config.toml", True)]
+    requested = Path(explicit).expanduser().resolve() if explicit is not None else None
+    if requested is not None and not requested.is_file():
+        raise ConfigError(f"config file does not exist: {requested}")
     project = _project_config(working)
-    if project is not None and project not in candidates:
-        candidates.append(project)
-    if explicit is not None:
-        requested = Path(explicit).expanduser().resolve()
-        if not requested.is_file():
-            raise ConfigError(f"config file does not exist: {requested}")
-        candidates.append(requested)
+    if project is not None and project != candidates[0][0]:
+        candidates.append((project, project.resolve() == requested))
+    if requested is not None and all(path.resolve() != requested for path, _ in candidates):
+        candidates.append((requested, True))
 
-    for path in candidates:
+    for path, trusted_plugins in candidates:
         if not path.is_file():
             continue
         try:
@@ -104,7 +109,13 @@ def load(
                 document = tomllib.load(handle)
         except (OSError, tomllib.TOMLDecodeError) as exc:
             raise ConfigError(f"cannot load {path}: {exc}") from exc
-        _merge_document(values, document, path, env)
+        _merge_document(
+            values,
+            document,
+            path,
+            env,
+            allow_plugins=trusted_plugins,
+        )
         loaded.append(path.resolve())
 
     env_keys = {
@@ -138,6 +149,12 @@ def load(
             for part in env["MJJ_SKILL_PATHS"].split(os.pathsep)
             if part.strip()
         )
+    if "MJJ_PLUGINS" in env:
+        values["plugins"] = tuple(
+            part.strip()
+            for part in env["MJJ_PLUGINS"].split(",")
+            if part.strip()
+        )
     values["files"] = tuple(loaded)
     return _validated(values)
 
@@ -157,11 +174,19 @@ def _merge_document(
     document: dict,
     path: Path,
     environ: Mapping[str, str],
+    *,
+    allow_plugins: bool,
 ) -> None:
     agent = document.get("agent", {})
     tools = document.get("tools", {})
     skills = document.get("skills", {})
-    for section, name in ((agent, "agent"), (tools, "tools"), (skills, "skills")):
+    plugins = document.get("plugins", {})
+    for section, name in (
+        (agent, "agent"),
+        (tools, "tools"),
+        (skills, "skills"),
+        (plugins, "plugins"),
+    ):
         if not isinstance(section, dict):
             raise ConfigError(f"[{name}] in {path} must be a table")
     for key in (
@@ -192,6 +217,14 @@ def _merge_document(
                 candidate = path.parent / candidate
             resolved.append(candidate.resolve())
         values["skill_paths"] = tuple(resolved)
+    if "enabled" in plugins:
+        enabled = plugins["enabled"]
+        if not allow_plugins and enabled:
+            raise ConfigError(
+                f"plugins.enabled in project config {path} is not trusted; "
+                "enable installed code from ~/.mjj/config.toml, --config, or MJJ_PLUGINS"
+            )
+        values["plugins"] = enabled
     raw_servers = document.get("mcp_servers", {})
     if not isinstance(raw_servers, dict):
         raise ConfigError(f"[mcp_servers] in {path} must be a table")
@@ -271,6 +304,7 @@ def _validated(values: Mapping[str, Any]) -> Config:
     disabled = values.get("disabled_tools", ())
     skill_paths = values.get("skill_paths", ())
     raw_mcp_servers = values.get("mcp_servers", {})
+    plugins = values.get("plugins", ())
     if provider not in PROVIDERS:
         raise ConfigError(f"agent.provider must be one of {', '.join(PROVIDERS)}")
     if not isinstance(model, str) or not model.strip():
@@ -319,6 +353,18 @@ def _validated(values: Mapping[str, Any]) -> Config:
         raise ConfigError("tools.disabled must be an array of tool names")
     if not isinstance(skill_paths, (list, tuple)):
         raise ConfigError("skills.paths must be an array of paths")
+    if not isinstance(plugins, (list, tuple)) or any(
+        not isinstance(item, str) or not item.strip() for item in plugins
+    ):
+        raise ConfigError("plugins.enabled must be an array of entry-point names")
+    plugins = tuple(dict.fromkeys(item.strip() for item in plugins))
+    if len(plugins) > MAX_PLUGINS:
+        raise ConfigError(f"plugins.enabled may contain at most {MAX_PLUGINS} names")
+    if any(not PLUGIN_NAME.fullmatch(item) for item in plugins):
+        raise ConfigError(
+            "plugins.enabled names must start with a letter and contain only "
+            "letters, numbers, underscores, or hyphens"
+        )
     mcp_servers: list[MCPServerConfig] = []
     if not isinstance(raw_mcp_servers, dict):
         raise ConfigError("mcp_servers must be a table")
@@ -366,6 +412,7 @@ def _validated(values: Mapping[str, Any]) -> Config:
         disabled_tools=tuple(dict.fromkeys(item.strip() for item in disabled)),
         skill_paths=tuple(Path(item).expanduser().resolve() for item in skill_paths),
         mcp_servers=tuple(mcp_servers),
+        plugins=plugins,
         files=tuple(values.get("files", ())),
     )
 

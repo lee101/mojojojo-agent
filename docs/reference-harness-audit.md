@@ -24,6 +24,7 @@ network service, or optional compiler.
 | Codex keeps verifiable objectives alive across turns | Workspace-scoped goals persist independently of sessions, inject a bounded contract, retain 50 checkpoints, and expose their tool only while active | 0 schema tokens outside a goal |
 | Grok/Hermes use reviewer and worker agents | `delegate` runs four bounded model workers concurrently; reviewers are read-only and workers return isolated, snapshot-relative Git commits in deterministic order | 112 schema tokens |
 | Grok/Codex expose external tools and structured plans | Configured MCP stdio tools are namespaced and bounded; `update_plan` keeps at most 20 validated steps and returns count-only updates | MCP costs zero unless configured; plan schema is measured below |
+| Pi/Grok/Codex support installed extensions | Trusted opt-in Python entry points contribute namespaced tools; imports, counts, schemas, descriptions, failures, approvals, and results are bounded | 0 schema tokens unless enabled |
 
 The map deliberately reuses MJJ's incremental search chunks instead of adding
 NetworkX, SQLite, another parser cache, or an always-running service. With the
@@ -44,9 +45,10 @@ the map itself works in the dependency-free fallback.
 
 ## High-value follow-ups
 
-1. **Plugin runtime and plan-mode UI.** Portable skills, MCP tools, structured
-   plans, and durable goals cover most workflow composition, not in-process
-   event hooks, configurable keymaps, or a dependency-aware plan editor.
+1. **Plan-mode UI and broader extension hooks.** Portable skills, MCP tools,
+   opt-in package tools, structured plans, and durable goals cover most
+   workflow composition, not in-process events, plugin commands, configurable
+   keymaps, or a dependency-aware plan editor.
 
 ## Measured cost
 

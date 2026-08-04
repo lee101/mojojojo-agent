@@ -150,3 +150,65 @@ def test_mcp_server_count_is_bounded(tmp_path: Path):
 
     with pytest.raises(ConfigError, match="at most 16"):
         load(tmp_path, explicit=path, environ={})
+
+
+def test_plugins_load_only_from_trusted_config_or_environment(tmp_path: Path):
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / "config.toml").write_text(
+        '[plugins]\nenabled = ["review", "review", "visual"]\n',
+        encoding="utf-8",
+    )
+
+    trusted = load(tmp_path, environ={"MJJ_HOME": str(home)})
+    overridden = load(
+        tmp_path,
+        environ={"MJJ_HOME": str(home), "MJJ_PLUGINS": "shell-extra,review"},
+    )
+
+    assert trusted.plugins == ("review", "visual")
+    assert trusted.public()["plugins"] == ["review", "visual"]
+    assert overridden.plugins == ("shell-extra", "review")
+
+
+def test_project_config_cannot_silently_enable_executable_plugins(tmp_path: Path):
+    project = tmp_path / "repo"
+    (project / ".git").mkdir(parents=True)
+    (project / ".mjj").mkdir()
+    (project / ".mjj" / "config.toml").write_text(
+        '[plugins]\nenabled = ["surprise"]\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="project config.*not trusted"):
+        load(project, environ={"MJJ_HOME": str(tmp_path / "empty-home")})
+
+
+def test_explicit_config_may_enable_plugins_but_the_list_is_bounded(tmp_path: Path):
+    explicit = tmp_path / "plugins.toml"
+    explicit.write_text('[plugins]\nenabled = ["chosen"]\n', encoding="utf-8")
+    assert load(tmp_path, explicit=explicit, environ={}).plugins == ("chosen",)
+
+    explicit.write_text(
+        "[plugins]\nenabled = [" + ",".join(f'\"p{i}\"' for i in range(9)) + "]\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError, match="at most 8"):
+        load(tmp_path, explicit=explicit, environ={})
+
+
+def test_explicit_project_config_is_a_trusted_plugin_choice(tmp_path: Path):
+    project = tmp_path / "repo"
+    config = project / ".mjj" / "config.toml"
+    (project / ".git").mkdir(parents=True)
+    config.parent.mkdir()
+    config.write_text('[plugins]\nenabled = ["chosen"]\n', encoding="utf-8")
+
+    resolved = load(
+        project,
+        explicit=config,
+        environ={"MJJ_HOME": str(tmp_path / "empty-home")},
+    )
+
+    assert resolved.plugins == ("chosen",)
+    assert resolved.files == (config.resolve(),)

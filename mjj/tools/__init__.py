@@ -34,6 +34,7 @@ def build_registry(
     include_user_skills: bool = True,
     skill_paths=(),
     mcp_servers=(),
+    plugins=(),
 ) -> Registry:
     registry = Registry()
     disabled_names = {
@@ -70,4 +71,22 @@ def build_registry(
                     registry.add(tool)
         except Exception as exc:
             registry.warnings.append(f"MCP discovery failed: {exc}")
+    if (only is None or "plugins" in only) and plugins:
+        try:
+            from ..plugins import load_plugin_tools
+
+            tools, warnings, resources = load_plugin_tools(plugins)
+            registry.warnings.extend(warnings)
+            registry.resources.extend(resources)
+            for tool in tools:
+                if tool.name in disabled_names:
+                    continue
+                if tool.name in registry.tools:
+                    registry.warnings.append(
+                        f"plugin tool name collision ignored: {tool.name}"
+                    )
+                    continue
+                registry.add(tool)
+        except Exception as exc:
+            registry.warnings.append(f"plugin discovery failed: {exc}")
     return registry

@@ -28,6 +28,7 @@ still missing.
 | Structured plans | Grok Plan mode; Codex plan updates | bounded `update_plan` state and `/plan` inspection |
 | Reviewer/worker subagents | Grok delegated workers and review agents | `delegate`: four concurrent bounded children, read-only review, isolated worker commits, deterministic merge |
 | External tools | Grok/Codex MCP | configured local stdio MCP, namespaced tools, bounded schemas/results, `/mcp`, safe failure isolation |
+| Installed plugin tools | Pi extensions and Grok/Codex plugins | explicit trusted opt-in via Python entry points; namespaced tools, bounded schemas/results, approval preservation, safe failure isolation |
 | Skills and project context | skills plus OpenCode/Codex/Claude rule files | scoped `SKILL.md`; bounded hierarchical `AGENTS.override.md`, `AGENTS.md`, `CLAUDE.md`, `CONTEXT.md`; compatible global fallbacks |
 | Runtime reload | `/reload` | `/reload` for tools and skills |
 | Shell and coding tools | read/write/edit/bash/grep/find/ls | read/list/search/navigate/apply-patch/shell/Python/native execution |
@@ -43,9 +44,9 @@ These are feature gaps, not presentation preferences:
 
 - **Interactive TUI steering.** Hosted runs accept follow-ups while active; the
   inline terminal still waits for the current response before reading input.
-- **Package/plugin runtime.** Pi extensions/packages and Grok/Codex plugins can
-  add commands, tools, events, and UI. Mojo Agent supports portable Agent Skills
-  but not arbitrary in-process plugins.
+- **Plugin commands, events, and UI.** Installed packages can now contribute
+  explicitly enabled, bounded tool functions. Pi extensions/packages and
+  Grok/Codex plugins can also add commands, event hooks, and UI components.
 - **Plan-mode UX and configurable keymaps.** Structured plan state is editable
   by the model and inspectable with `/plan`, but the inline composer does not
   yet provide Grok's dedicated Plan-mode toggle or user keybinding files.
@@ -55,7 +56,8 @@ The presentation boundary remains deliberate:
 - Pi's full-screen selectors, in-file branch tree, configurable theme engine,
   and TypeScript extension/package runtime remain Pi-specific presentation and
   plugin infrastructure. Mojo Agent uses an inline prompt-toolkit UI, one
-  append-only file per branch, and portable Agent Skills instead.
+  append-only file per branch, portable Agent Skills, and a deliberately small
+  tool-only Python plugin API instead.
 - Pi's manual lossy `/compact` is not imitated with a fake summary. Mojo Agent
   uses native Responses compaction automatically and retains the original
   append-only rollout for audit and export.

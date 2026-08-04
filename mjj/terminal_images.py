@@ -10,8 +10,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping, TextIO
 
-from PIL import Image, ImageOps
-
 from .media import ImageInputError, inspect_image
 
 
@@ -122,6 +120,14 @@ def _render_kitty(path: Path, out: TextIO) -> TerminalImageResult:
 
 def _render_ansi(path: Path, out: TextIO, columns: int) -> TerminalImageResult:
     columns = max(8, min(int(columns), ANSI_MAX_COLUMNS))
+    try:
+        from PIL import Image, ImageOps
+    except ImportError:
+        return TerminalImageResult(
+            False,
+            "ansi",
+            "ANSI previews require mojojojo-agent[vision]; Kitty icat works without it",
+        )
     try:
         with Image.open(path) as opened:
             image = ImageOps.exif_transpose(opened).convert("RGB")

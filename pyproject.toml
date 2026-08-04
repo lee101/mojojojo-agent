@@ -8,12 +8,13 @@ requires-python = ">=3.10"
 authors = [{ name = "Lee Penkman" }]
 keywords = ["agent", "coding-agent", "mojo", "llm", "openai"]
 dependencies = [
-  "pillow>=10.4",
-  "prompt-toolkit>=3.0.52",
   "tomli>=2; python_version < '3.11'",
 ]
 
 [project.optional-dependencies]
+full = ["pillow>=10.4", "prompt-toolkit>=3.0.52"]
+tui = ["prompt-toolkit>=3.0.52"]
+vision = ["pillow>=10.4"]
 server = ["uvicorn>=0.30", "starlette>=0.37"]
 accel = ["mojosub"]
 syntax = ["tree-sitter-language-pack>=0.9"]
@@ -27,7 +28,12 @@ Homepage = "https://mojojojo.app.nz"
 Source = "https://github.com/lee101/mojojojo-agent"
 
 [dependency-groups]
-dev = ["pytest>=8", "pytest-asyncio>=0.23"]
+dev = [
+  "pillow>=10.4",
+  "prompt-toolkit>=3.0.52",
+  "pytest>=8",
+  "pytest-asyncio>=0.23",
+]
 
 [tool.uv.sources]
 mojosub = { git = "https://github.com/lee101/mojosub" }

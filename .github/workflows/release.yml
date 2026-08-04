@@ -33,12 +33,17 @@ jobs:
           python-version: "3.12"
           cache: pip
       - name: Install freezer and package
-        run: python -m pip install --disable-pip-version-check . pyinstaller
+        run: python -m pip install --disable-pip-version-check ".[full]" pyinstaller
       - name: Build one-file executable
         run: >-
           python -m PyInstaller --noconfirm --clean --onefile --name mjj
           --collect-submodules mjj.tools --collect-data mjj
-          --copy-metadata mojojojo-agent mjj/__main__.py
+          --copy-metadata mojojojo-agent
+          --exclude-module colorama --exclude-module iniconfig
+          --exclude-module packaging --exclude-module pluggy
+          --exclude-module pygments --exclude-module pytest
+          --exclude-module pytest_asyncio --exclude-module setuptools
+          --exclude-module typing_extensions mjj/__main__.py
       - name: Smoke test executable
         shell: bash
         run: |

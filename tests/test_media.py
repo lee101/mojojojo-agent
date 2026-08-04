@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from PIL import Image
 
-from mjj.media import MAX_EDGE, inspect_image, prepare_image
+from mjj import media
+from mjj.media import MAX_EDGE, ImageInputError, inspect_image, prepare_image
 from mjj.agent import Agent
 from mjj.ledger import Ledger
 from mjj.tools.base import Registry
@@ -39,3 +40,45 @@ def test_image_metadata_inspection_does_not_encode_pixels(tmp_path):
 
     assert (info.width, info.height, info.format) == (20, 10, "PNG")
     assert info.bytes == source.stat().st_size
+
+
+def test_stdlib_image_path_reads_and_attaches_bounded_png(tmp_path, monkeypatch):
+    source = tmp_path / "small.png"
+    Image.new("RGB", (31, 17), "teal").save(source)
+    monkeypatch.setattr(media, "_pillow", lambda: None)
+
+    info = inspect_image(source)
+    attachment = prepare_image(source)
+
+    assert (info.width, info.height, info.format) == (31, 17, "PNG")
+    assert attachment.data_url.startswith("data:image/png;base64,")
+    assert attachment.encoded_bytes == source.stat().st_size
+    assert "PNG" in attachment.summary()
+
+
+def test_stdlib_header_reader_supports_model_image_formats(tmp_path, monkeypatch):
+    expected = {"JPEG": "JPEG", "GIF": "GIF", "WEBP": "WEBP"}
+    sources = []
+    formats = (("jpg", "JPEG"), ("gif", "GIF"), ("webp", "WEBP"))
+    for extension, image_format in formats:
+        source = tmp_path / f"small.{extension}"
+        Image.new("RGB", (37, 19), "orange").save(source, format=image_format)
+        sources.append((source, expected[image_format]))
+    monkeypatch.setattr(media, "_pillow", lambda: None)
+
+    for source, image_format in sources:
+        info = inspect_image(source)
+        assert (info.width, info.height, info.format) == (37, 19, image_format)
+
+
+def test_stdlib_image_path_rejects_input_that_needs_resizing(tmp_path, monkeypatch):
+    source = tmp_path / "large.png"
+    Image.new("RGB", (MAX_EDGE + 1, 2), "navy").save(source)
+    monkeypatch.setattr(media, "_pillow", lambda: None)
+
+    try:
+        prepare_image(source)
+    except ImageInputError as exc:
+        assert "[vision]" in str(exc)
+    else:
+        raise AssertionError("oversized dependency-free image was accepted")

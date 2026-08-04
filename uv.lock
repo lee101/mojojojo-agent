@@ -89,14 +89,16 @@ wheels = [
 name = "mojojojo-agent"
 source = { editable = "." }
 dependencies = [
-    { name = "pillow" },
-    { name = "prompt-toolkit" },
     { name = "tomli", marker = "python_full_version < '3.11'" },
 ]
 
 [package.optional-dependencies]
 accel = [
     { name = "mojosub" },
+]
+full = [
+    { name = "pillow" },
+    { name = "prompt-toolkit" },
 ]
 server = [
     { name = "starlette" },
@@ -105,9 +107,17 @@ server = [
 syntax = [
     { name = "tree-sitter-language-pack" },
 ]
+tui = [
+    { name = "prompt-toolkit" },
+]
+vision = [
+    { name = "pillow" },
+]
 
 [package.dev-dependencies]
 dev = [
+    { name = "pillow" },
+    { name = "prompt-toolkit" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
 ]
@@ -115,17 +125,21 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "mojosub", marker = "extra == 'accel'", git = "https://github.com/lee101/mojosub" },
-    { name = "pillow", specifier = ">=10.4" },
-    { name = "prompt-toolkit", specifier = ">=3.0.52" },
+    { name = "pillow", marker = "extra == 'full'", specifier = ">=10.4" },
+    { name = "pillow", marker = "extra == 'vision'", specifier = ">=10.4" },
+    { name = "prompt-toolkit", marker = "extra == 'full'", specifier = ">=3.0.52" },
+    { name = "prompt-toolkit", marker = "extra == 'tui'", specifier = ">=3.0.52" },
     { name = "starlette", marker = "extra == 'server'", specifier = ">=0.37" },
     { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=2" },
     { name = "tree-sitter-language-pack", marker = "extra == 'syntax'", specifier = ">=0.9" },
     { name = "uvicorn", marker = "extra == 'server'", specifier = ">=0.30" },
 ]
-provides-extras = ["accel", "server", "syntax"]
+provides-extras = ["accel", "full", "server", "syntax", "tui", "vision"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "pillow", specifier = ">=10.4" },
+    { name = "prompt-toolkit", specifier = ">=3.0.52" },
     { name = "pytest", specifier = ">=8" },
     { name = "pytest-asyncio", specifier = ">=0.23" },
 ]

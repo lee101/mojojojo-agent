@@ -31,6 +31,8 @@ same code that ships in the [public repository](https://github.com/lee101/mojojo
 - [LSP refactors and call hierarchy](lsp-refactors.md) — semantic navigation,
   safe atomic rename, checkpoints, and fallback boundaries.
 - [Execution](exec.md) — Mojo acceleration, local isolation, and remote fallback.
+- [Native runtime boundary](native-runtime.md) — zero-dependency base install,
+  optional UI/vision layers, dependency audit, and the Mojo migration boundary.
 - [Visualizers](visualizers.md) — native deterministic WebGL scaffolding,
   image transforms, and token/speed measurements.
 - [Reference harness audit](reference-harness-audit.md) — OpenCode, Hermes,

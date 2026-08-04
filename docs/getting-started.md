@@ -32,9 +32,16 @@ pass `-NoPathUpdate` or set `MJJ_NO_PATH_UPDATE=1` to opt out.
 
 The installers select your platform, download the latest release, verify its
 published SHA-256 checksum, and install in a user-owned directory. They do not
-require a system Python. You can instead install the Python package with
-`uv tool install mojojojo-agent` or download an archive from
+require a system Python. You can instead install the feature-complete Python
+package with `uv tool install 'mojojojo-agent[full]'`, install the zero-runtime-
+dependency base with `uv tool install mojojojo-agent` on Python 3.11+, or
+download an archive from
 [GitHub Releases](https://github.com/lee101/mojojojo-agent/releases).
+
+The lean base uses a normal line composer and accepts already-bounded common
+image formats. The `full` extra adds searchable completion, portable hotkeys,
+ANSI previews, orientation handling, resizing, and quality-85 WebP encoding.
+Kitty `icat` previews do not require the image extra.
 
 Confirm the installation:
 

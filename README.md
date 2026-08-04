@@ -39,16 +39,22 @@ artifacts are built on Ubuntu 22.04 for a stable glibc baseline. The complete
 test suite runs on native Windows and Linux; see the [platform tool
 matrix](docs/platforms.md) for command quoting and optional-backend fallbacks.
 
-The Python package remains available too:
+The Python package remains available too. Install `full` for the command
+palette, keyboard controls, ANSI image previews, and quality-85 WebP image
+normalization used by the standalone releases:
 
 ```bash
-uv tool install mojojojo-agent
+uv tool install 'mojojojo-agent[full]'
 ```
 
 From a checkout, `uv sync && uv run pytest -q` creates the development
-environment and verifies it. The base package uses Pillow for bounded vision
-inputs and prompt-toolkit for the cross-platform composer; `mojosub` and
-`mojo-embed` are guarded accelerators, not startup requirements.
+environment and verifies it. On Python 3.11+, the base package has no
+third-party runtime dependencies: `uv tool install mojojojo-agent` selects a
+stdlib composer and accepts already-bounded PNG, JPEG, GIF, and WebP inputs.
+Pillow and prompt-toolkit are lazy optional layers, while `mojosub` and
+`mojo-embed` are guarded accelerators rather than startup requirements. See the
+[native runtime boundary](docs/native-runtime.md) for the package audit and the
+remaining Python-to-Mojo migration boundary.
 
 New users should start with the [getting-started guide](docs/getting-started.md).
 The [documentation index](docs/README.md) links task-oriented guides, internals,
@@ -122,8 +128,10 @@ mjj exec --permission-mode read-only @src/router.py "review this file"
 mjj visualize signal-field --kind aurora --palette ultraviolet --seed 29
 ```
 
-Images are orientation-corrected, bounded to a 2048-pixel edge, precompressed
-in memory as WebP quality 85, and sent to model vision. Their source paths and
+With the `vision` or `full` extra, images are orientation-corrected, bounded to
+a 2048-pixel edge, precompressed in memory as WebP quality 85, and sent to model
+vision. The dependency-free path sends common formats unchanged only when they
+already fit that edge and the same byte/pixel limits. Their source paths and
 dimensions are also exposed to the coding tools, so the agent can copy or read
 the actual asset when building a project. See [`visualbench/`](visualbench/) for
 the shader gallery, deterministic browser captures, and screenshot health

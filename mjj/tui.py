@@ -1,30 +1,90 @@
 """Interactive terminal surface for ``mjj``.
 
 It deliberately stays inline instead of taking over the alternate screen: the
-terminal scrollback remains a useful, copyable session transcript. The composer
-is cross-platform prompt-toolkit, so Windows gets the same history, completion,
-multiline input and key bindings as Unix terminals.
+terminal scrollback remains a useful, copyable session transcript. The optional
+prompt-toolkit composer gives Windows and Unix the same history, completion,
+multiline input, and key bindings. A dependency-free line composer keeps the
+agent usable in minimal installations.
 """
 
 from __future__ import annotations
 
 import base64
+import getpass
 import html
 import json
+import os
 import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from prompt_toolkit import PromptSession, print_formatted_text
-from prompt_toolkit.completion import Completer, Completion
-from prompt_toolkit.formatted_text import ANSI, HTML
-from prompt_toolkit.history import FileHistory
-from prompt_toolkit.input import DummyInput
-from prompt_toolkit.key_binding import KeyBindings
-from prompt_toolkit.output import DummyOutput
-from prompt_toolkit.shortcuts import prompt as secure_prompt
+try:
+    if os.environ.get("MJJ_TUI", "").lower() == "basic":
+        raise ImportError("basic TUI requested")
+    from prompt_toolkit import PromptSession, print_formatted_text
+    from prompt_toolkit.completion import Completer, Completion
+    from prompt_toolkit.formatted_text import ANSI, HTML
+    from prompt_toolkit.history import FileHistory
+    from prompt_toolkit.input import DummyInput
+    from prompt_toolkit.key_binding import KeyBindings
+    from prompt_toolkit.output import DummyOutput
+    from prompt_toolkit.shortcuts import prompt as secure_prompt
+
+    RICH_TUI = True
+except ImportError:
+    RICH_TUI = False
+
+    class Completer:
+        pass
+
+    @dataclass(frozen=True)
+    class Completion:
+        text: str
+        start_position: int = 0
+        display_meta: str = ""
+
+    class _Text(str):
+        pass
+
+    ANSI = HTML = _Text
+
+    def print_formatted_text(value, *, end="\n") -> None:
+        print(str(value), end=end)
+
+    class _KeyBindings:
+        def __init__(self) -> None:
+            self.bindings = []
+
+        def add(self, *keys):
+            def register(function):
+                self.bindings.append(type("Binding", (), {"keys": keys})())
+                return function
+            return register
+
+    KeyBindings = _KeyBindings
+
+    class FileHistory:
+        def __init__(self, filename: str) -> None:
+            self.filename = filename
+
+    class DummyInput:
+        pass
+
+    class DummyOutput:
+        pass
+
+    class PromptSession:
+        def __init__(self, **kwargs) -> None:
+            self.history = kwargs.get("history")
+
+        def prompt(self, message) -> str:
+            rendered = re.sub(r"<[^>]+>", "", str(message))
+            return input(rendered)
+
+    def secure_prompt(message: str, *, is_password: bool = False) -> str:
+        return getpass.getpass(message) if is_password else input(message)
 
 from . import auth
 from .agent import Agent, Step, tool_progress
@@ -411,8 +471,13 @@ class InteractiveApp:
     def _welcome(self) -> None:
         model_hint = (
             "F2 model"
-            if len(MODEL_PRESETS.get(self.provider, ("auto",))) > 1
+            if RICH_TUI and len(MODEL_PRESETS.get(self.provider, ("auto",))) > 1
             else "/model chooses a model"
+        )
+        input_hint = (
+            "F3 reasoning · Alt+Enter newline"
+            if RICH_TUI
+            else "/reasoning changes effort"
         )
         print_formatted_text(
             ANSI(
@@ -420,9 +485,14 @@ class InteractiveApp:
                 f"\x1b[38;5;45m│\x1b[0m  {self.provider}/{self.agent.client.model}"
                 f"  ·  reasoning {self.agent.client.effort}\n"
                 f"\x1b[38;5;45m╰─\x1b[0m  / commands · {model_hint} · "
-                "F3 reasoning · Alt+Enter newline"
+                f"{input_hint}"
             )
         )
+        if not RICH_TUI:
+            print(
+                "\x1b[2mstdlib composer · install mojojojo-agent[full] "
+                "for completion and hotkeys\x1b[0m"
+            )
         warnings = self.agent.registry.warnings
         for warning in warnings[:5]:
             print_formatted_text(ANSI(f"\x1b[33mwarning: {warning}\x1b[0m"))

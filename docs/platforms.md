@@ -13,7 +13,7 @@ plan, and model-tool schemas remain identical.
 | `check` | Python/JSON/TOML and tree-sitter; PowerShell parser through installed `pwsh`/Windows PowerShell; project `.exe`/`.cmd` formatters | Python/JSON/TOML and tree-sitter; installed Unix compiler/formatter tools |
 | `py` | In-process timeout uses tracing because `SIGALRM` is unavailable; remote isolation remains available | `SIGALRM` timeout on the main thread; optional local `mojojail` and remote isolation |
 | `navigate` | Installed `.exe`/`.cmd` language servers; indexed fallback | Installed language servers; indexed fallback |
-| `display_image` | ANSI/ConPTY rendering, or Kitty when available | ANSI or Kitty rendering |
+| `display_image` | ANSI/ConPTY with `vision`, or dependency-free Kitty when available | ANSI with `vision`, or dependency-free Kitty |
 | `delegate` | Git for Windows worktrees | Git worktrees |
 | MCP | Direct configured argv, including `.exe`/`.cmd` servers | Direct configured argv |
 

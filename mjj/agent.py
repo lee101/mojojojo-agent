@@ -540,7 +540,8 @@ def _dedupe_images(images: tuple[ImageAttachment, ...]) -> tuple[ImageAttachment
 
 def _autonomous_prompt(next_steps: bool, next_idea: bool) -> str:
     instructions = [
-        "You are in AUTONOMOUS MODE. Do not ask for permission or confirmation."
+        "You are in AUTONOMOUS MODE. Continue without routine confirmation; the "
+        "active tool permission policy still applies."
     ]
     if next_steps:
         instructions.append(
@@ -550,7 +551,8 @@ def _autonomous_prompt(next_steps: bool, next_idea: bool) -> str:
     if next_idea:
         instructions.append(
             "When the current objective is genuinely complete, identify three useful "
-            "improvements, choose the highest-impact one, and begin implementing it."
+            "improvements not already completed or rejected in this transcript, choose "
+            "the highest-impact one, and begin implementing it."
         )
     if next_steps and next_idea:
         instructions.append("Repeat this cycle until a human interrupts you.")

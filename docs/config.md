@@ -50,6 +50,8 @@ comma-separated `MJJ_DISABLE_TOOLS`, and path-separator-delimited
 comma-separated list of installed plugin
 entry-point names. A zero project-doc budget disables `AGENTS.md` discovery.
 An autonomy turn limit of zero means unlimited continuation until interrupted.
+The concise CLI surface is `--loop steps|ideas|full|forever` plus
+`--loop-turns N`; interactive sessions use `/loop` with the same values.
 Credentials and executor endpoints keep their existing dedicated environment
 variables and never appear in `mjj config` output.
 
@@ -87,6 +89,7 @@ execution, shell interpretation, and commands outside the read-only allowlist,
 and `read-only` denies those operations. Read-only file and Git inspection stay
 available in every mode. The CLI flag is `--permission-mode` and the interactive
 equivalent is `/permissions`.
+Loop and goal modes never change this policy.
 
 Providers are `auto`, `openpaths`, `openrouter`, `openai`, and `custom`.
 `custom` reads `MJJ_BASE_URL`, `MJJ_API_KEY`, `MJJ_API_STYLE` (`responses` or

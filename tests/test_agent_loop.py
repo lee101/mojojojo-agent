@@ -216,6 +216,7 @@ def test_autonomous_steps_continue_with_a_bounded_synthetic_turn(monkeypatch):
     ]
     assert len(user_messages) == 2
     assert "AUTONOMOUS MODE" in user_messages[-1]["content"][0]["text"]
+    assert "permission policy still applies" in user_messages[-1]["content"][0]["text"]
     assert "next concrete steps" in user_messages[-1]["content"][0]["text"]
 
 
@@ -227,6 +228,7 @@ def test_autonomous_idea_prompt_selects_a_high_impact_improvement(monkeypatch):
     prompt = agent.items[-2]["content"][0]["text"]
     assert "identify three useful improvements" in prompt
     assert "highest-impact one" in prompt
+    assert "not already completed or rejected" in prompt
 
 
 def test_steering_arriving_during_a_response_runs_at_next_safe_boundary(

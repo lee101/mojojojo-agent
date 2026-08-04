@@ -19,11 +19,11 @@ still missing.
 | Direct shell | Pi `!`/`!!`; Codex `!` | `!` includes bounded output in context; `!!` stays local |
 | Permissions | Grok/Codex live permission modes | `/permissions` and `--permission-mode`: Auto, Ask, Read-only |
 | Repository controls | Codex `/init`, `/status`, `/review`, `/diff`; Grok code review | `/init`, `/status`, `/review [focus]`, `/diff` |
-| Session history | `/resume`, `/session`, `/name` | `/history`, `/resume`, `/session`, `/name`, `mjj sessions` |
+| Session history | `/resume`, `/session`, `/name`; Claude per-directory prompt recall | per-directory Up/Down and Ctrl+R prompt history; `/history`, `/resume`, `/session`, `/name`, `mjj sessions` |
 | Branch and clone | `/tree`, `/fork`, `/clone` | `/tree`, `/tree ITEM`, `/fork`, `/clone`, CLI `--fork` |
 | Portable transcripts | `/import`, `/export` | `/import`, `/export`, `mjj import`, `mjj export` |
 | Context compaction | automatic and manual | automatic Responses compaction with graceful backend fallback |
-| Continued autonomous work | Pi Infinity continuation flags | `--auto-next-steps`, `--auto-next-idea`, `/auto` |
+| Continued autonomous work | Pi Infinity continuation flags; Claude separates auto permissions from plans | `/loop steps|ideas|full|forever`, compatible `--auto-next-*` and `/auto`; permissions remain independent |
 | Persistent goals | Codex `/goal` and Grok background objectives | `/goal`, `mjj goal`, `--goal`; atomic workspace state, bounded checkpoints, evidence-backed completion |
 | Structured plans | Grok Plan mode; Codex plan updates | bounded `update_plan` state and `/plan` inspection |
 | Reviewer/worker subagents | Grok delegated workers and review agents | `delegate`: four concurrent bounded children, read-only review, isolated worker commits, deterministic merge |

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import base64
 import getpass
+import hashlib
 import html
 import json
 import os
@@ -68,6 +69,9 @@ except ImportError:
     class FileHistory:
         def __init__(self, filename: str) -> None:
             self.filename = filename
+
+        def append_string(self, string: str) -> None:
+            pass
 
     class DummyInput:
         pass
@@ -133,7 +137,8 @@ COMMANDS = {
     "/diff": "show the bounded current Git diff",
     "/undo": "restore the latest conflict-free patch checkpoint",
     "/checkpoints": "list recent automatic patch checkpoints",
-    "/auto": "set autonomy: off, steps, ideas, or full",
+    "/auto": "compatibility alias for /loop",
+    "/loop": "repeat steps or ideas; 'forever' runs until interrupted",
     "/goal": "inspect, set, pause, resume, complete, or clear a durable goal",
     "/plan": "show or clear the current structured task plan",
     "/mcp": "show configured MCP tools and startup warnings",
@@ -185,7 +190,8 @@ VALUE_CHOICES = {
     "/verbosity": VERBOSITIES,
     "/cache": CACHE_MODES,
     "/permissions": PERMISSION_MODES,
-    "/auto": ("off", "steps", "ideas", "full"),
+    "/auto": ("off", "steps", "ideas", "full", "forever"),
+    "/loop": ("off", "steps", "ideas", "full", "forever"),
     "/goal": ("pause", "resume", "complete", "blocked", "clear", "set"),
     "/login": ("chatgpt", "device", "openpaths", "openrouter", "openai", "custom"),
     "/logout": ("chatgpt", "openpaths", "openrouter", "openai", "custom"),
@@ -193,6 +199,46 @@ VALUE_CHOICES = {
 
 
 _AT_QUERY = re.compile(r"(?:^|\s)@([^\s]*)$")
+
+
+def _workspace_history_path(cwd: str | Path) -> Path:
+    """Return a private prompt-history file scoped to one resolved directory."""
+    resolved = Path(cwd).expanduser().resolve()
+    digest = hashlib.sha256(str(resolved).encode("utf-8")).hexdigest()[:20]
+    # Older releases used $MJJ_HOME/history as one global file. Keep it intact
+    # and use a new directory so upgrading cannot turn that file into an error.
+    directory = auth.mjj_home() / "prompt-history"
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    try:
+        directory.chmod(0o700)
+    except OSError:
+        pass
+    path = directory / f"{digest}.txt"
+    if not path.exists():
+        try:
+            descriptor = os.open(path, os.O_WRONLY | os.O_CREAT, 0o600)
+            os.close(descriptor)
+        except OSError:
+            pass
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass
+    return path
+
+
+class DistinctFileHistory(FileHistory):
+    """Avoid consecutive duplicate prompts without changing history format."""
+
+    def __init__(self, filename: str) -> None:
+        super().__init__(filename)
+        self._last_appended: str | None = None
+
+    def append_string(self, string: str) -> None:
+        if string == self._last_appended:
+            return
+        self._last_appended = string
+        super().append_string(string)
 
 
 def _model_choices(provider: str) -> tuple[str, ...]:
@@ -324,15 +370,14 @@ class InteractiveApp:
         self.agent.approve = self.permission_policy
         self.agent.ctx.approve = self.permission_policy
         self.bindings = self._bindings()
-        history = auth.mjj_home() / "history"
-        history.parent.mkdir(parents=True, exist_ok=True)
+        history = _workspace_history_path(self.agent.cwd)
         prompt_io = {}
         if not sys.stdin.isatty():
             prompt_io["input"] = DummyInput()
         if not sys.stdout.isatty():
             prompt_io["output"] = DummyOutput()
         self.session = PromptSession(
-            history=FileHistory(str(history)),
+            history=DistinctFileHistory(str(history)),
             completer=WorkspaceCompleter(
                 self.agent.cwd,
                 provider=lambda: self.provider,
@@ -429,7 +474,7 @@ class InteractiveApp:
         images = f" · {len(self.attachments)} image" if self.attachments else ""
         cwd = Path(self.agent.cwd).name or str(self.agent.cwd)
         autonomy = self._autonomy_label()
-        auto = f" · auto {autonomy}" if autonomy != "off" else ""
+        auto = f" · loop {autonomy}" if autonomy != "off" else ""
         goal = self.agent.current_goal()
         goal_label = f" · goal {goal.status}" if goal is not None else ""
         plan_state = self.agent.ctx.state.get("plan")
@@ -680,7 +725,7 @@ class InteractiveApp:
             self._checkpoint("undo", value)
         elif command == "/checkpoints":
             self._checkpoint("list", "")
-        elif command == "/auto":
+        elif command in ("/auto", "/loop"):
             self._set_autonomy(value)
         elif command == "/goal":
             self._goal(value)
@@ -910,6 +955,7 @@ class InteractiveApp:
             "Shift+↑/↓: model forward/back\n"
             "F3 or Alt+R: next reasoning · empty ←/→: reasoning back/forward\n"
             "F4 or Alt+V: next verbosity · Alt+Enter: newline · Ctrl+C: interrupt\n"
+            "↑/↓: prompts from this directory · Ctrl+R: search prompt history\n"
             "@file: attach context · !command: include output · !!command: local only"
         )
 
@@ -1000,8 +1046,11 @@ class InteractiveApp:
             )
             return
         mode, _, raw_limit = value.partition(" ")
+        if mode == "forever":
+            mode = "full"
+            raw_limit = "0"
         if mode not in ("off", "steps", "ideas", "full"):
-            print("usage: /auto off|steps|ideas|full [max-turns]")
+            print("usage: /loop off|steps|ideas|full|forever [max-turns]")
             return
         if raw_limit:
             try:

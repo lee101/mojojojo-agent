@@ -46,6 +46,20 @@ from .version import __version__
 from .visualize import KINDS, PALETTES, VisualizerError, generate_visualizer
 
 
+LOOP_MODES = ("off", "steps", "ideas", "full", "forever")
+
+
+def _apply_loop_mode(args) -> None:
+    mode = getattr(args, "loop", None)
+    if mode is None:
+        return
+    if mode == "forever":
+        mode = "full"
+        args.auto_max_turns = 0
+    args.auto_next_steps = mode in ("steps", "full")
+    args.auto_next_idea = mode in ("ideas", "full")
+
+
 def _agent(args) -> Agent:
     items: list[dict] = []
     cwd = Path(args.cwd).resolve()
@@ -529,6 +543,12 @@ def main(argv: list[str] | None = None) -> int:
         "--auto-next-idea", action="store_true", default=config.auto_next_idea
     )
     parser.add_argument("--auto-max-turns", type=int, default=config.auto_max_turns)
+    parser.add_argument(
+        "--loop",
+        choices=LOOP_MODES,
+        help="continue with steps/ideas; forever means full with no turn limit",
+    )
+    parser.add_argument("--loop-turns", dest="auto_max_turns", type=int)
     parser.add_argument("-C", "--cd", "--cwd", dest="cwd", default=known.cwd)
     parser.add_argument("--config")
     parser.add_argument(
@@ -554,6 +574,19 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--auto-next-steps", action="store_true", default=argparse.SUPPRESS)
     run.add_argument("--auto-next-idea", action="store_true", default=argparse.SUPPRESS)
     run.add_argument("--auto-max-turns", type=int, default=argparse.SUPPRESS)
+    run.add_argument(
+        "--loop",
+        choices=LOOP_MODES,
+        default=argparse.SUPPRESS,
+        help="continue with steps/ideas; forever runs until interrupted",
+    )
+    run.add_argument(
+        "--loop-turns",
+        dest="auto_max_turns",
+        type=int,
+        default=argparse.SUPPRESS,
+        help="continuation cap; zero is unlimited",
+    )
     run.add_argument(
         "--plugin",
         dest="command_plugins",
@@ -593,6 +626,19 @@ def main(argv: list[str] | None = None) -> int:
     chat.add_argument("--auto-next-steps", action="store_true", default=argparse.SUPPRESS)
     chat.add_argument("--auto-next-idea", action="store_true", default=argparse.SUPPRESS)
     chat.add_argument("--auto-max-turns", type=int, default=argparse.SUPPRESS)
+    chat.add_argument(
+        "--loop",
+        choices=LOOP_MODES,
+        default=argparse.SUPPRESS,
+        help="continue with steps/ideas; forever runs until interrupted",
+    )
+    chat.add_argument(
+        "--loop-turns",
+        dest="auto_max_turns",
+        type=int,
+        default=argparse.SUPPRESS,
+        help="continuation cap; zero is unlimited",
+    )
     chat.add_argument(
         "--plugin",
         dest="command_plugins",
@@ -697,6 +743,7 @@ def main(argv: list[str] | None = None) -> int:
     visual.set_defaults(func=cmd_visualize)
 
     args = parser.parse_args(argv)
+    _apply_loop_mode(args)
     args.plugins = list(
         dict.fromkeys([*args.plugins, *getattr(args, "command_plugins", [])])
     )

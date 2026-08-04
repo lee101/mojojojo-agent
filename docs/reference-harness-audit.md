@@ -6,8 +6,9 @@ has a useful fallback without a daemon, network service, or optional compiler.
 
 ## What to read
 
-These pins make comparisons reviewable instead of relying on changing feature
-pages. Read the narrow source named for the problem; do not vendor it.
+These pins, plus dated official product docs where source is unavailable, make
+comparisons reviewable. Read the narrow source named for the problem; do not
+vendor it.
 
 | harness and pin | useful source | consult it for |
 | --- | --- | --- |
@@ -16,6 +17,7 @@ pages. Read the narrow source named for the problem; do not vendor it.
 | [Codex Infinity `4c5ed16`](https://github.com/lee101/codex-infinity/tree/4c5ed168e5becf19bd89df95f8a0bec4e135edb8) | [`codex_thread.rs`](https://github.com/lee101/codex-infinity/blob/4c5ed168e5becf19bd89df95f8a0bec4e135edb8/codex-rs/core/src/codex_thread.rs), [`unified_exec`](https://github.com/lee101/codex-infinity/tree/4c5ed168e5becf19bd89df95f8a0bec4e135edb8/codex-rs/core/src/unified_exec), [`execpolicy`](https://github.com/lee101/codex-infinity/tree/4c5ed168e5becf19bd89df95f8a0bec4e135edb8/codex-rs/execpolicy) | steering, pollable processes, rollout safety, and command policy |
 | [Grok Infinity / Grok Build `a293fcd`](https://github.com/lee101/grok-infinity/tree/a293fcd5722d566a237a2e5ce26c827f0be390ef) | [plan mode](https://github.com/lee101/grok-infinity/blob/a293fcd5722d566a237a2e5ce26c827f0be390ef/crates/codegen/xai-grok-pager/docs/user-guide/19-plan-mode.md), [background tasks](https://github.com/lee101/grok-infinity/blob/a293fcd5722d566a237a2e5ce26c827f0be390ef/crates/codegen/xai-grok-pager/docs/user-guide/20-background-tasks.md), [`agent_view/queue.rs`](https://github.com/lee101/grok-infinity/blob/a293fcd5722d566a237a2e5ce26c827f0be390ef/crates/codegen/xai-grok-pager/src/app/agent_view/queue.rs) | plan approval, live prompt queues, workers, and background work |
 | [Hermes Agent `91937a6`](https://github.com/NousResearch/hermes-agent/tree/91937a6dc3ffbbe2f3be91a500f0ecf962c4cf53) | [`agent/`](https://github.com/NousResearch/hermes-agent/tree/91937a6dc3ffbbe2f3be91a500f0ecf962c4cf53/agent), [`tools/`](https://github.com/NousResearch/hermes-agent/tree/91937a6dc3ffbbe2f3be91a500f0ecf962c4cf53/tools) | bounded delegation, skills, tool loading, and compiler fallbacks |
+| Claude Code docs, audited 2026-08-04 | [interactive mode](https://code.claude.com/docs/en/interactive-mode), [permission modes](https://code.claude.com/docs/en/permission-modes), [checkpointing](https://code.claude.com/docs/en/checkpointing) | per-directory prompt history, plan/permission separation, suggestions, background work, and rewind UX |
 
 Local mirrors may be newer than these pins. Update a pin only after checking
 that the cited behavior and MJJ comparison still hold.
@@ -67,6 +69,9 @@ that do not improve the coding loop.
 3. **Plugin lifecycle hooks.** Add events or commands only when a concrete job
    cannot fit the current skills, MCP, or tool-entry-point boundaries without
    permanent prompt cost.
+4. **Prompt suggestions and side questions.** Claude generates cache-aware next
+   prompts and keeps `/btw` questions out of the main transcript. Evaluate both
+   against their extra request cost before adding a model-backed UI feature.
 
 ## Reproducible cost
 

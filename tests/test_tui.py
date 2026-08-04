@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from types import SimpleNamespace
 
 from PIL import Image
@@ -10,7 +11,12 @@ from mjj.model import ModelClient
 from mjj.tools import build_registry
 from mjj.tools.base import Registry
 from mjj.tools.shell import ShellTool
-from mjj.tui import InteractiveApp, WorkspaceCompleter
+from mjj.tui import (
+    DistinctFileHistory,
+    InteractiveApp,
+    WorkspaceCompleter,
+    _workspace_history_path,
+)
 
 
 def _args():
@@ -60,6 +66,46 @@ def test_auto_command_updates_live_autonomy_controls(tmp_path, monkeypatch, caps
     assert args.auto_next_idea is True
     assert args.auto_max_turns == 3
     assert "autonomy: full" in capsys.readouterr().out
+
+
+def test_loop_forever_is_an_unlimited_full_autonomy_alias(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setenv("MJJ_HOME", str(tmp_path / "home"))
+    agent = Agent(registry=Registry(), cwd=tmp_path, instructions="test")
+    args = _args()
+    args.auto_max_turns = 7
+    app = InteractiveApp(agent, args)
+
+    app.command("/loop forever")
+
+    assert args.auto_next_steps is True
+    assert args.auto_next_idea is True
+    assert args.auto_max_turns == 0
+    assert "autonomy: full" in capsys.readouterr().out
+
+
+def test_prompt_history_is_private_distinct_and_scoped_by_directory(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("MJJ_HOME", str(tmp_path / "home"))
+    (tmp_path / "home").mkdir()
+    legacy = tmp_path / "home" / "history"
+    legacy.write_text("old global prompt\n", encoding="utf-8")
+    first = _workspace_history_path(tmp_path / "one")
+    second = _workspace_history_path(tmp_path / "two")
+    history = DistinctFileHistory(str(first))
+
+    history.append_string("same prompt")
+    history.append_string("same prompt")
+    history.append_string("another prompt")
+
+    assert first != second
+    assert first.parent == second.parent == tmp_path / "home" / "prompt-history"
+    if os.name != "nt":
+        assert first.stat().st_mode & 0o777 == 0o600
+    assert first.read_text(encoding="utf-8").count("same prompt") == 1
+    assert legacy.read_text(encoding="utf-8") == "old global prompt\n"
 
 
 def test_cache_command_updates_policy_and_reports_telemetry(

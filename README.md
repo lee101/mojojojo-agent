@@ -129,15 +129,15 @@ hit in advance.
 
 ## Productive terminal workflow
 
-- Searchable slash commands, history, completion, multiline editing, and
+- Searchable slash commands, per-directory prompt history, completion, multiline editing, and
   portable model/reasoning hotkeys in the full build.
 - `@path` and `@path:START-END` attach bounded context; image mentions use the
   same vision path as `--image`.
 - `/permissions` switches between `auto`, `ask`, and `read-only`.
 - `/diff`, `/review`, `/status`, `/checkpoints`, and conflict-safe `/undo` keep
   repository control in the app.
-- `/goal`, `/plan`, resumable sessions, forks, HTML/JSONL export, and bounded
-  autonomous continuation support longer work.
+- `/loop`, `/goal`, `/plan`, resumable sessions, forks, HTML/JSONL export, and
+  bounded or explicitly unlimited autonomous continuation support longer work.
 - `AGENTS.md`, `CLAUDE.md`, nested instructions, skills, MCP servers, language
   servers, and explicitly trusted plugins are discovered automatically.
 - Kitty terminals display real images with `icat`; other full installations

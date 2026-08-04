@@ -7,6 +7,9 @@ forking a conversation does not silently replace the workspace objective.
 
 ## Interactive workflow
 
+For the distinction between continuation loops, durable stopping conditions,
+and tool permissions, start with [loops and goals](autonomy.md).
+
 Set a goal from the terminal app:
 
 ```text
@@ -35,10 +38,10 @@ Start and follow a goal in one command:
 
 ```bash
 mjj exec --goal "Implement PLAN.md and stop when pytest passes" \
-  --auto-max-turns 8
+  --loop-turns 8
 ```
 
-The existing `--auto-max-turns` budget also bounds goal continuations. Zero
+`--loop-turns` (alias `--auto-max-turns`) also bounds goal continuations. Zero
 means unlimited until the goal completes or the process is interrupted. When
 the limit is reached, the goal remains active for the next invocation rather
 than being discarded.

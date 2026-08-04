@@ -117,6 +117,23 @@ def test_exec_accepts_autonomy_and_session_controls_after_subcommand(monkeypatch
     }
 
 
+def test_exec_accepts_concise_loop_modes_after_subcommand(monkeypatch) -> None:
+    seen = []
+
+    def capture(args) -> int:
+        seen.append(
+            (args.auto_next_steps, args.auto_next_idea, args.auto_max_turns)
+        )
+        return 0
+
+    monkeypatch.setattr(cli, "cmd_exec", capture)
+
+    assert main(["exec", "--loop", "forever", "task"]) == 0
+    assert main(["exec", "--loop", "ideas", "--loop-turns", "4", "task"]) == 0
+    assert main(["exec", "task"]) == 0
+    assert seen == [(True, True, 0), (False, True, 4), (False, False, 0)]
+
+
 def test_exec_accepts_repeatable_opt_in_plugins_after_subcommand(
     tmp_path, monkeypatch
 ) -> None:

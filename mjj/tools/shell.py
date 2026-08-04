@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import os
-import shlex
 import subprocess
 import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..platforms import command_name, display_command, split_command
 from .base import ToolContext, ToolResult
 
 _SAFE_COMMANDS = {
@@ -104,7 +104,7 @@ def _result(
 def _safe(command: list[str], use_shell: bool) -> bool:
     if use_shell or not command:
         return False
-    executable = Path(command[0]).name
+    executable = command_name(command[0])
     if executable in _SAFE_COMMANDS:
         if executable == "rg":
             return not any(
@@ -137,14 +137,14 @@ def _safe(command: list[str], use_shell: bool) -> bool:
 def _display(command: str | list[str]) -> str:
     if isinstance(command, str):
         return command
-    return shlex.join(command)
+    return display_command(command)
 
 
 class ShellTool:
     name = "shell"
     description = (
         "Run or queue argv with merged output, timeout, exit code, and optional cwd. "
-        "Strings are shlex-split, not shell code; use shell=true for &&, pipes or redirects."
+        "Strings use host argv rules, not shell code; use shell=true for &&, pipes or redirects."
     )
     parameters = {
         "type": "object",
@@ -203,7 +203,7 @@ class ShellTool:
                 policy_argv = [command]
             else:
                 try:
-                    policy_argv = shlex.split(command)
+                    policy_argv = split_command(command)
                 except ValueError as exc:
                     return _result(ctx, f"cannot parse command: {exc}", ok=False)
                 if not policy_argv:

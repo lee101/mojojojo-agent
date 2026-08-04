@@ -174,3 +174,25 @@ def test_formatter_discovery_prefers_project_local_ruff(tmp_path: Path) -> None:
     commands = check_module._formatter_commands(tmp_path, [path])
 
     assert commands == [("ruff", [str(binary), "format", str(path)])]
+
+
+def test_compiler_discovery_checks_powershell_without_a_shell(
+    tmp_path: Path, monkeypatch
+) -> None:
+    script = tmp_path / "build.ps1"
+    script.write_text("Write-Output 'ok'\n")
+    executable = r"C:\Program Files\PowerShell\7\pwsh.exe"
+    monkeypatch.setattr(
+        check_module.shutil,
+        "which",
+        lambda name: executable if name == "pwsh" else None,
+    )
+
+    commands = check_module._compiler_commands(tmp_path, [script])
+
+    assert len(commands) == 1
+    label, argv, _environment = commands[0]
+    assert label == "powershell"
+    assert argv[0] == executable
+    assert argv[-1] == str(script)
+    assert "ParseFile" in argv[-2]

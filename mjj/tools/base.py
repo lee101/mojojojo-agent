@@ -10,12 +10,12 @@ from __future__ import annotations
 
 import json
 import re
-import shlex
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Protocol
 
 from ..ledger import Ledger
+from ..platforms import split_command
 from ..project_docs import ProjectInstructions, ScopedProjectDocs
 
 
@@ -186,7 +186,7 @@ def _argument_paths(args: dict, cwd: Path) -> list[Path]:
         tokens = [value for value in command if isinstance(value, str)]
     elif isinstance(command, str):
         try:
-            tokens = shlex.split(command)
+            tokens = split_command(command)
         except ValueError:
             tokens = command.split()
     else:

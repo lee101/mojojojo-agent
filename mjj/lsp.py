@@ -5,13 +5,14 @@ from __future__ import annotations
 import json
 import os
 import queue
-import shlex
 import shutil
 import subprocess
 import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
+
+from .platforms import split_command
 
 
 class LspError(RuntimeError):
@@ -61,7 +62,7 @@ def server_for(path: Path) -> LspServer | None:
     family = "typescript" if language_id.startswith("typescript") else language_id
     override = os.environ.get(f"MJJ_LSP_{family.upper()}")
     if override:
-        command = tuple(shlex.split(override))
+        command = tuple(split_command(override))
         if command:
             return LspServer(language_id, Path(command[0]).name, command)
     for candidate in _SERVERS.get(family, ()):

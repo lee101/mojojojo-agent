@@ -12,6 +12,8 @@ same code that ships in the [public repository](https://github.com/lee101/mojojo
 - [Project and user instructions](project-instructions.md) — automatic
   `AGENTS.md`, `CLAUDE.md`, global rules, precedence, and bounded nested scope.
 - [Tools](tools.md) — bounded file, patch, shell, Python, terminal-image, and skill tools.
+- [Windows and Linux support](platforms.md) — process quoting, timeouts,
+  executable discovery, fallbacks, and the cross-platform tool matrix.
 - [MCP tool servers](mcp.md) — bounded stdio discovery, namespaced calls,
   permissions, configuration, and failure isolation.
 - [Skills](skills.md) — discover and load `SKILL.md` workflows without permanent

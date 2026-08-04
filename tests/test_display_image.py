@@ -35,7 +35,10 @@ def test_display_image_rejects_workspace_escape_symlink_and_corrupt_file(tmp_pat
     outside = tmp_path.parent / "outside-display.png"
     Image.new("RGB", (4, 4), "red").save(outside)
     linked = tmp_path / "linked.png"
-    linked.symlink_to(outside)
+    try:
+        linked.symlink_to(outside)
+    except OSError:
+        linked = None
     corrupt = tmp_path / "broken.png"
     corrupt.write_bytes(b"not an image")
     registry = build_registry(only=["display"])
@@ -44,15 +47,18 @@ def test_display_image_rejects_workspace_escape_symlink_and_corrupt_file(tmp_pat
     escaped = registry.dispatch(
         "display_image", json.dumps({"path": str(outside)}), ctx
     )
-    symlink = registry.dispatch(
-        "display_image", json.dumps({"path": "linked.png"}), ctx
+    symlink = (
+        registry.dispatch("display_image", json.dumps({"path": "linked.png"}), ctx)
+        if linked is not None
+        else None
     )
     broken = registry.dispatch(
         "display_image", json.dumps({"path": "broken.png"}), ctx
     )
 
     assert not escaped.ok and "workspace" in escaped.output
-    assert not symlink.ok and "symlink" in symlink.output
+    if symlink is not None:
+        assert not symlink.ok and "symlink" in symlink.output
     assert not broken.ok and "corrupt" in broken.output
 
 

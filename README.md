@@ -35,7 +35,9 @@ SHA-256 checksum, and install into a user-owned directory. Set
 release. The binaries need no system Python. Mojo acceleration remains a
 guarded optional backend, so the agent and hybrid search still work when a
 compatible Mojo toolchain or `mojo-embed` library is not installed. Linux
-artifacts are built on Ubuntu 22.04 for a stable glibc baseline.
+artifacts are built on Ubuntu 22.04 for a stable glibc baseline. The complete
+test suite runs on native Windows and Linux; see the [platform tool
+matrix](docs/platforms.md) for command quoting and optional-backend fallbacks.
 
 The Python package remains available too:
 

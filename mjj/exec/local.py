@@ -9,7 +9,6 @@ import io
 import linecache
 import math
 import os
-import shlex
 import shutil
 import signal
 import subprocess
@@ -20,6 +19,7 @@ import traceback
 import uuid
 from pathlib import Path
 
+from ..platforms import split_command
 from . import ExecutionResult
 from .policy import acceleratable_functions
 
@@ -79,7 +79,7 @@ def _deadline(seconds: float):
     def expired(*_args):
         raise _ExecutionTimedOut()
 
-    if threading.current_thread() is threading.main_thread():
+    if _signal_deadline_available():
         old_handler = signal.getsignal(signal.SIGALRM)
         signal.signal(signal.SIGALRM, expired)
         timer_started = time.monotonic()
@@ -111,6 +111,15 @@ def _deadline(seconds: float):
         yield
     finally:
         sys.settrace(previous)
+
+
+def _signal_deadline_available() -> bool:
+    return (
+        threading.current_thread() is threading.main_thread()
+        and hasattr(signal, "SIGALRM")
+        and hasattr(signal, "ITIMER_REAL")
+        and hasattr(signal, "setitimer")
+    )
 
 
 def _run_current(
@@ -281,7 +290,7 @@ def _configure_mojo_environment() -> Path | None:
     binary: Path | None = None
     override = os.environ.get("MOJOSUB_MOJO", "")
     if override:
-        argv = shlex.split(override)
+        argv = split_command(override)
         if len(argv) == 1:
             found = shutil.which(argv[0])
             if found:
@@ -297,8 +306,13 @@ def _configure_mojo_environment() -> Path | None:
             if project_value
             else Path(__file__).resolve().parents[3] / "mojosub"
         )
-        candidate = project / ".pixi" / "envs" / "default" / "bin" / "mojo"
-        if candidate.is_file():
+        candidates = (
+            project / ".pixi" / "envs" / "default" / "bin" / "mojo",
+            project / ".pixi" / "envs" / "default" / "Scripts" / "mojo.exe",
+            project / ".pixi" / "envs" / "default" / "Library" / "bin" / "mojo.exe",
+        )
+        candidate = next((path for path in candidates if path.is_file()), None)
+        if candidate is not None:
             binary = candidate.resolve()
             os.environ.setdefault("MOJOSUB_PIXI_PROJECT", str(project))
             os.environ.setdefault("MOJOSUB_MOJO", str(binary))
@@ -306,10 +320,21 @@ def _configure_mojo_environment() -> Path | None:
         # Mojo's binary lives at <env>/bin/mojo, while MODULAR_HOME is the Max
         # package root at <env>/share/max. Pointing at <env> itself starts the
         # compiler but makes every build fail with "unable to locate std".
-        os.environ["MODULAR_HOME"] = str(
-            binary.parent.parent / "share" / "max"
-        )
+        os.environ["MODULAR_HOME"] = str(_modular_home(binary))
     return binary
+
+
+def _modular_home(binary: Path) -> Path:
+    parent = binary.parent
+    if parent.name.casefold() == "bin" and parent.parent.name.casefold() == "library":
+        prefix = parent.parent.parent
+    else:
+        prefix = parent.parent
+    candidates = (prefix / "share" / "max", prefix / "Library" / "share" / "max")
+    existing = next((path for path in candidates if path.is_dir()), None)
+    if existing is not None:
+        return existing
+    return candidates[1] if binary.suffix.casefold() == ".exe" else candidates[0]
 
 
 def run_sandbox(

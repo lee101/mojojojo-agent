@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 
 from mjj.ledger import CHARS_PER_TOKEN, Budget, Ledger, estimate_tokens
@@ -58,7 +59,8 @@ def test_clipped_output_is_spilled_with_a_retrieval_address(tmp_path):
     assert match is not None
     spilled = tmp_path / match.group(0)
     assert spilled.read_text() == original
-    assert spilled.stat().st_mode & 0o777 == 0o600
+    if os.name != "nt":
+        assert spilled.stat().st_mode & 0o777 == 0o600
 
 
 def test_single_line_spill_address_survives_blob_clipping(tmp_path):

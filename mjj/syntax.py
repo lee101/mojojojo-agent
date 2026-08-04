@@ -29,6 +29,7 @@ _TREE_SITTER_LANGUAGES = {
     ".lua": "lua",
     ".mojo": "mojo",
     ".php": "php",
+    ".ps1": "powershell",
     ".rb": "ruby",
     ".rs": "rust",
     ".sh": "bash",

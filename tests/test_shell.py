@@ -1,4 +1,5 @@
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -67,12 +68,14 @@ def test_safe_command_does_not_request_approval(tmp_path):
     def reject_call(_name, _args):
         raise AssertionError("approval should not be requested")
 
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
     result = ShellTool().run(
-        {"command": ["echo", "hello"]}, context(tmp_path, reject_call)
+        {"command": ["git", "status", "--short"]},
+        context(tmp_path, reject_call),
     )
 
     assert result.ok
-    assert result.output == "hello\nexit code: 0"
+    assert result.output == "exit code: 0"
 
 
 def test_unsafe_command_uses_approval_and_can_be_denied(tmp_path):
@@ -96,25 +99,31 @@ def test_unsafe_command_uses_approval_and_can_be_denied(tmp_path):
 def test_string_command_is_not_interpolated_without_shell_true(tmp_path, monkeypatch):
     monkeypatch.setenv("MJJ_SHELL_SENTINEL", "expanded")
 
-    direct = ShellTool().run(
-        {"command": "echo '$MJJ_SHELL_SENTINEL'"}, context(tmp_path)
-    )
+    if os.name == "nt":
+        direct_command = (
+            f'"{sys.executable}" -c "print(\'%MJJ_SHELL_SENTINEL%\')"'
+        )
+        expanded_command = "echo %MJJ_SHELL_SENTINEL%"
+        literal = "%MJJ_SHELL_SENTINEL%"
+    else:
+        direct_command = "echo '$MJJ_SHELL_SENTINEL'"
+        expanded_command = 'echo "$MJJ_SHELL_SENTINEL"'
+        literal = "$MJJ_SHELL_SENTINEL"
+    direct = ShellTool().run({"command": direct_command}, context(tmp_path))
     expanded = ShellTool().run(
-        {"command": "echo \"$MJJ_SHELL_SENTINEL\"", "shell": True},
-        context(tmp_path),
+        {"command": expanded_command, "shell": True}, context(tmp_path)
     )
 
-    assert "$MJJ_SHELL_SENTINEL" in direct.output
+    assert literal in direct.output
     assert "expanded" in expanded.output
 
 
 def test_compound_string_is_rejected_instead_of_turning_operators_into_arguments(tmp_path):
     result = ShellTool().run(
-        {"command": "mkdir -p output && cp source output"}, context(tmp_path)
+        {"command": "python -c pass && python -c pass"}, context(tmp_path)
     )
     assert not result.ok
     assert "shell=false" in result.output
-    assert not (tmp_path / "output").exists()
 
 
 def test_shell_merges_stderr_reports_exit_and_honours_cwd(tmp_path):

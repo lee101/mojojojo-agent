@@ -50,14 +50,16 @@ def test_patch_checkpoint_restores_add_update_delete_and_mode(
     assert changed.ok and changed.meta["checkpoint"]
     assert restored.ok
     assert editable.read_text() == "old\n"
-    assert os.stat(editable).st_mode & 0o777 == 0o755
+    if os.name != "nt":
+        assert os.stat(editable).st_mode & 0o777 == 0o755
     assert deleted.read_text() == "restore me\n"
     assert not (workspace / "added.txt").exists()
     assert checkpoint_root.resolve() not in workspace.resolve().parents
     store = CheckpointStore(workspace)
     checkpoint_dir = store.root / changed.meta["checkpoint"]
-    assert checkpoint_dir.stat().st_mode & 0o777 == 0o700
-    assert (checkpoint_dir / "manifest.json").stat().st_mode & 0o777 == 0o600
+    if os.name != "nt":
+        assert checkpoint_dir.stat().st_mode & 0o777 == 0o700
+        assert (checkpoint_dir / "manifest.json").stat().st_mode & 0o777 == 0o600
 
 
 def test_checkpoint_refuses_to_overwrite_later_user_changes(tmp_path, monkeypatch) -> None:

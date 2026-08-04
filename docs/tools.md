@@ -44,10 +44,11 @@ a symbol address.
 ## `shell`
 
 `shell` accepts `command` as either an argv array or a string. Strings are
-split into argv by default; no expansion, redirection, pipelines, or command
-substitution occurs. Set `"shell": true` explicitly to request system-shell
-interpretation. `cwd` is resolved from the agent workspace, and `timeout`
-defaults to 120 seconds.
+split with native Windows or POSIX argv rules by default; no expansion,
+redirection, pipelines, or command substitution occurs. Set `"shell": true`
+explicitly to request system-shell interpretation. `cwd` is resolved from the
+agent workspace, and `timeout` defaults to 120 seconds. Arrays are the most
+portable form because no quoting step is needed.
 
 Stdout and stderr are merged in process order. The bounded result ends with an
 exit code; timeouts use exit code 124.
@@ -171,14 +172,16 @@ Set `"format": true` to explicitly run a discovered formatter before checking.
 MJJ prefers project-local Ruff/Black and Prettier, then already-installed
 `gofmt`, `rustfmt`, or `clang-format`. Formatting passes through approval,
 checkpoints every target first, and restores those files when a formatter
-fails.
+fails. On Windows, an installed `pwsh` or Windows PowerShell parser provides
+compiler checks for `.ps1` files, and project `.exe`/`.cmd` tools are detected.
 
 ## `py`
 
 `py` routes safe pure computation through current-interpreter execution and
 mojosub's non-blocking tiered JIT. Code requiring isolation uses the local jail
 or worker. Missing acceleration and sandbox backends degrade visibly according
-to the selected policy. See [exec.md](exec.md).
+to the selected policy. Windows uses a trace deadline where POSIX `SIGALRM` is
+unavailable. See [exec.md](exec.md) and [platform support](platforms.md).
 
 ## `skill`
 

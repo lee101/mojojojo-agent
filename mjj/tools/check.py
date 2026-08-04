@@ -316,6 +316,32 @@ def _compiler_commands(
         item = executable_by_suffix.get(path.suffix.lower())
         if item and shutil.which(item[0]):
             commands.append((item[0], [*item[1], str(path)], environment))
+    powershell = shutil.which("pwsh") or shutil.which("powershell")
+    if powershell:
+        parser = (
+            "$tokens=$null;$errors=$null;"
+            "[System.Management.Automation.Language.Parser]::ParseFile("
+            "$args[0],[ref]$tokens,[ref]$errors)>$null;"
+            "if($errors.Count){$errors|ForEach-Object{"
+            "[Console]::Error.WriteLine($_.Message)};exit 1}"
+        )
+        for path in paths:
+            if path.suffix.casefold() == ".ps1":
+                commands.append(
+                    (
+                        "powershell",
+                        [
+                            powershell,
+                            "-NoLogo",
+                            "-NoProfile",
+                            "-NonInteractive",
+                            "-Command",
+                            parser,
+                            str(path),
+                        ],
+                        environment,
+                    )
+                )
     return commands
 
 

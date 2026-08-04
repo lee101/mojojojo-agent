@@ -27,7 +27,7 @@ def test_read_only_denies_patches_and_unsafe_shell_but_allows_inspection(tmp_pat
         ),
         context,
     )
-    inspection = registry.dispatch("shell", '{"command":["pwd"]}', context)
+    inspection = registry.dispatch("shell", '{"command":["whoami"]}', context)
     mutation = registry.dispatch(
         "shell", '{"command":"touch made.txt","shell":true}', context
     )

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import stat
 from types import SimpleNamespace
 
@@ -74,8 +75,9 @@ def test_goal_store_is_workspace_scoped_atomic_and_bounded(tmp_path, monkeypatch
     assert loaded.session_id == "session-1"
     assert len(loaded.progress) == MAX_PROGRESS_ENTRIES
     assert loaded.progress[0]["message"] == "checkpoint 5"
-    assert stat.S_IMODE(store.path.stat().st_mode) == 0o600
-    assert stat.S_IMODE(store.path.parent.stat().st_mode) == 0o700
+    if os.name != "nt":
+        assert stat.S_IMODE(store.path.stat().st_mode) == 0o600
+        assert stat.S_IMODE(store.path.parent.stat().st_mode) == 0o700
 
 
 def test_loaded_goal_progress_is_rebounded_and_sanitized(tmp_path, monkeypatch):

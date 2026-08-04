@@ -41,6 +41,18 @@ def test_inproc_has_a_hard_timeout(tmp_path):
     assert time.perf_counter() - started < 1.0
 
 
+def test_inproc_timeout_uses_trace_fallback_without_posix_alarms(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(local, "_signal_deadline_available", lambda: False)
+
+    result = local.run_inproc(
+        "while True:\n    pass", timeout=0.02, cwd=tmp_path
+    )
+
+    assert result.timed_out and result.exit_code == 124
+
+
 def test_traceback_is_at_the_tail_and_survives_ledger_clipping(tmp_path, monkeypatch):
     monkeypatch.setenv("MJJ_EXEC", "inproc")
     ledger = Ledger(budget=Budget(py=80))
@@ -147,6 +159,19 @@ def test_modular_home_matches_the_resolved_mojo_binary(tmp_path, monkeypatch):
     assert local.os.environ["MODULAR_HOME"] == str(
         binary.resolve().parent.parent / "share" / "max"
     )
+
+
+def test_modular_home_supports_windows_pixi_layout(tmp_path, monkeypatch):
+    binary = tmp_path / "env" / "Scripts" / "mojo.exe"
+    modular_home = tmp_path / "env" / "Library" / "share" / "max"
+    binary.parent.mkdir(parents=True)
+    modular_home.mkdir(parents=True)
+    binary.write_text("", encoding="utf-8")
+    monkeypatch.setenv("MOJOSUB_MOJO", f'"{binary}"')
+    monkeypatch.setattr(local.shutil, "which", lambda value: str(binary))
+
+    assert local._configure_mojo_environment() == binary.resolve()
+    assert local.os.environ["MODULAR_HOME"] == str(modular_home)
 
 
 def test_no_jail_and_no_worker_degrades_to_inproc(tmp_path, monkeypatch):

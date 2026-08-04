@@ -1,0 +1,41 @@
+from mjj.platforms import command_name, display_command, split_command
+
+
+def test_windows_command_split_preserves_drive_paths_and_escaped_quotes() -> None:
+    command = r'"C:\Program Files\Python\python.exe" -c "print(\"ok\")" ""'
+
+    assert split_command(command, windows=True) == [
+        r"C:\Program Files\Python\python.exe",
+        "-c",
+        'print("ok")',
+        "",
+    ]
+
+
+def test_windows_command_split_rejects_unclosed_quotes() -> None:
+    try:
+        split_command('python "unterminated', windows=True)
+    except ValueError as exc:
+        assert "closing quotation" in str(exc)
+    else:
+        raise AssertionError("unterminated Windows command should fail")
+
+
+def test_windows_command_split_keeps_backslash_only_arguments() -> None:
+    assert split_command("python \\", windows=True) == ["python", "\\"]
+
+
+def test_command_policy_name_accepts_windows_executable_paths() -> None:
+    assert command_name(r"C:\Tools\RG.EXE") == "rg"
+    assert command_name(r"C:\Program Files\Git\bin\git.cmd") == "git"
+    assert command_name("/usr/bin/git") == "git"
+
+
+def test_command_display_uses_host_specific_quoting() -> None:
+    argv = [r"C:\Program Files\Python\python.exe", "-c", "print('ok')"]
+
+    windows = display_command(argv, windows=True)
+    posix = display_command(argv, windows=False)
+
+    assert windows.startswith('"C:\\Program Files\\Python\\python.exe"')
+    assert posix.startswith("'C:\\Program Files\\Python\\python.exe'")

@@ -28,7 +28,7 @@ still missing.
 | Structured plans | Grok Plan mode; Codex plan updates | bounded `update_plan` state and `/plan` inspection |
 | Reviewer/worker subagents | Grok delegated workers and review agents | `delegate`: four concurrent bounded children, read-only review, isolated worker commits, deterministic merge |
 | External tools | Grok/Codex MCP | configured local stdio MCP, namespaced tools, bounded schemas/results, `/mcp`, safe failure isolation |
-| Skills and project context | skills and context files | scoped `SKILL.md` plus bounded hierarchical `AGENTS.md` |
+| Skills and project context | skills plus OpenCode/Codex/Claude rule files | scoped `SKILL.md`; bounded hierarchical `AGENTS.override.md`, `AGENTS.md`, `CLAUDE.md`, `CONTEXT.md`; compatible global fallbacks |
 | Runtime reload | `/reload` | `/reload` for tools and skills |
 | Shell and coding tools | read/write/edit/bash/grep/find/ls | read/list/search/navigate/apply-patch/shell/Python/native execution |
 | Semantic navigation/refactors | LSP-backed code intelligence | definition/references/hover/symbols/call hierarchy; approval-gated atomic rename with checkpoint undo |

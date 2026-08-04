@@ -9,6 +9,8 @@ same code that ships in the [public repository](https://github.com/lee101/mojojo
 - [Getting started](getting-started.md) — install, authenticate, run the first
   task, select providers, and recover a session.
 - [Configuration](config.md) — user, project, environment, and CLI precedence.
+- [Project and user instructions](project-instructions.md) — automatic
+  `AGENTS.md`, `CLAUDE.md`, global rules, precedence, and bounded nested scope.
 - [Tools](tools.md) — bounded file, patch, shell, Python, terminal-image, and skill tools.
 - [MCP tool servers](mcp.md) — bounded stdio discovery, namespaced calls,
   permissions, configuration, and failure isolation.

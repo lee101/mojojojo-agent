@@ -1,14 +1,16 @@
-"""Bounded Codex-compatible ``AGENTS.md`` instruction discovery."""
+"""Bounded Codex/OpenCode-compatible project instruction discovery."""
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Mapping
 
 
 DEFAULT_MAX_BYTES = 32 * 1024
-FILENAMES = ("AGENTS.override.md", "AGENTS.md")
+GLOBAL_MAX_BYTES = 8 * 1024
+FILENAMES = ("AGENTS.override.md", "AGENTS.md", "CLAUDE.md", "CONTEXT.md")
 
 
 @dataclass(frozen=True)
@@ -19,16 +21,26 @@ class ProjectInstructions:
     truncated: bool = False
 
 
-def load(cwd: str | Path, max_bytes: int = DEFAULT_MAX_BYTES) -> ProjectInstructions:
+def load(
+    cwd: str | Path,
+    max_bytes: int = DEFAULT_MAX_BYTES,
+    *,
+    include_user: bool = False,
+    environ: Mapping[str, str] | None = None,
+) -> ProjectInstructions:
     """Read one instruction file per directory, from repository root to cwd.
 
-    A local ``AGENTS.override.md`` wins over ``AGENTS.md`` in the same
-    directory. The byte budget applies across every file and decoding is
-    loss-tolerant so project guidance can never prevent the agent starting.
+    A local ``AGENTS.override.md`` wins over ``AGENTS.md``; ``CLAUDE.md`` and
+    deprecated ``CONTEXT.md`` are compatibility fallbacks. Project files keep
+    root-to-CWD semantics. Optional user rules are prepended but consume only
+    budget left by project rules, so personal context cannot starve the repo's
+    contract. Decoding is loss-tolerant and I/O failures are ignored.
     """
     if max_bytes <= 0:
         return ProjectInstructions()
     working = Path(cwd).expanduser().resolve()
+    env = os.environ if environ is None else environ
+    filenames = _filenames(env)
     root = _project_root(working)
     directories = _directories(root, working)
     remaining = max_bytes
@@ -36,7 +48,7 @@ def load(cwd: str | Path, max_bytes: int = DEFAULT_MAX_BYTES) -> ProjectInstruct
     sources: list[Path] = []
     truncated = False
     for directory in directories:
-        path = next((directory / name for name in FILENAMES if (directory / name).is_file()), None)
+        path = _find_instruction(directory, filenames)
         if path is None:
             continue
         try:
@@ -54,9 +66,28 @@ def load(cwd: str | Path, max_bytes: int = DEFAULT_MAX_BYTES) -> ProjectInstruct
             remaining -= len(data)
         if remaining == 0:
             break
+    user_parts: list[str] = []
+    user_sources: list[Path] = []
+    if include_user and remaining > 0:
+        user_path = _user_instruction(env, filenames)
+        if user_path is not None:
+            allowance = min(remaining, GLOBAL_MAX_BYTES)
+            try:
+                with user_path.open("rb") as handle:
+                    data = handle.read(allowance + 1)
+            except OSError:
+                data = b""
+            if len(data) > allowance:
+                data = data[:allowance]
+                truncated = True
+            text = data.decode("utf-8", errors="replace")
+            if text.strip():
+                user_parts.append(text)
+                user_sources.append(user_path.resolve())
+                remaining -= len(data)
     return ProjectInstructions(
-        text="\n\n".join(parts),
-        sources=tuple(sources),
+        text="\n\n".join([*user_parts, *parts]),
+        sources=tuple([*user_sources, *sources]),
         bytes_read=max_bytes - remaining,
         truncated=truncated,
     )
@@ -100,11 +131,13 @@ class ScopedProjectDocs:
         *,
         max_bytes: int = DEFAULT_MAX_BYTES,
         per_discovery_bytes: int = 8 * 1024,
+        environ: Mapping[str, str] | None = None,
     ) -> None:
         self.cwd = Path(cwd).expanduser().resolve()
         self.root = _project_root(self.cwd)
         self.remaining = max(0, max_bytes)
         self.per_discovery_bytes = max(0, per_discovery_bytes)
+        self.filenames = _filenames(os.environ if environ is None else environ)
         self.scanned = set(_directories(self.root, self.cwd))
 
     def discover(self, paths: Iterable[Path]) -> ProjectInstructions:
@@ -131,14 +164,7 @@ class ScopedProjectDocs:
             if directory in self.scanned:
                 continue
             self.scanned.add(directory)
-            source = next(
-                (
-                    directory / name
-                    for name in FILENAMES
-                    if (directory / name).is_file()
-                ),
-                None,
-            )
+            source = _find_instruction(directory, self.filenames)
             if source is None:
                 continue
             available = allowance - bytes_read
@@ -170,8 +196,61 @@ class ScopedProjectDocs:
         )
 
 
+def _find_instruction(directory: Path, filenames: tuple[str, ...]) -> Path | None:
+    return next(
+        (
+            directory / name
+            for name in filenames
+            if (directory / name).is_file()
+        ),
+        None,
+    )
+
+
+def _filenames(environ: Mapping[str, str]) -> tuple[str, ...]:
+    if _claude_prompt_disabled(environ):
+        return ("AGENTS.override.md", "AGENTS.md", "CONTEXT.md")
+    return FILENAMES
+
+
+def _user_instruction(
+    environ: Mapping[str, str],
+    filenames: tuple[str, ...],
+) -> Path | None:
+    raw_home = environ.get("HOME") or environ.get("USERPROFILE")
+    home = Path(raw_home).expanduser() if raw_home else Path.home()
+    mjj_home = Path(environ.get("MJJ_HOME") or "~/.mjj").expanduser()
+    primary = mjj_home / "AGENTS.md"
+    if primary.is_file():
+        return primary
+    xdg_config = Path(environ.get("XDG_CONFIG_HOME") or home / ".config").expanduser()
+    opencode = xdg_config / "opencode" / "AGENTS.md"
+    if opencode.is_file():
+        return opencode
+    if "CLAUDE.md" not in filenames:
+        return None
+    fallback = home / ".claude" / "CLAUDE.md"
+    return fallback if fallback.is_file() else None
+
+
+def _claude_prompt_disabled(environ: Mapping[str, str]) -> bool:
+    return any(
+        _truthy(environ.get(name, ""))
+        for name in (
+            "MJJ_DISABLE_CLAUDE_CODE",
+            "MJJ_DISABLE_CLAUDE_CODE_PROMPT",
+        )
+    )
+
+
+def _truthy(value: str) -> bool:
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 __all__ = [
     "DEFAULT_MAX_BYTES",
+    "FILENAMES",
+    "GLOBAL_MAX_BYTES",
     "ProjectInstructions",
     "ScopedProjectDocs",
     "compose",

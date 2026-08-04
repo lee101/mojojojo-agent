@@ -67,6 +67,20 @@ def test_hosted_mode_does_not_discover_user_skills(tmp_path: Path, monkeypatch):
     ]
 
 
+def test_claude_skill_compatibility_can_be_disabled(tmp_path: Path, monkeypatch):
+    (tmp_path / ".git").mkdir()
+    write_skill(tmp_path / ".claude" / "skills", "claude-workflow")
+    assert "claude-workflow" in [
+        skill.name for skill in discover(tmp_path, include_user=False)
+    ]
+
+    monkeypatch.setenv("MJJ_DISABLE_CLAUDE_CODE_SKILLS", "1")
+
+    assert "claude-workflow" not in [
+        skill.name for skill in discover(tmp_path, include_user=False)
+    ]
+
+
 def test_duplicate_short_names_require_qualification(tmp_path: Path):
     (tmp_path / ".git").mkdir()
     write_skill(tmp_path / ".mjj" / "skills", "same")

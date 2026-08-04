@@ -694,6 +694,7 @@ class AgentService:
             ledger=Ledger(),
             session=state.session,
             approve=lambda _name, _request: False,
+            include_user_instructions=False,
         )
         agent.items = state.items
         agent.steering = state.steering

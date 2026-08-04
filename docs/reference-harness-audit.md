@@ -16,7 +16,7 @@ network service, or optional compiler.
 | Reference idea | MJJ implementation | Context cost |
 | --- | --- | ---: |
 | OpenCode retains full truncated tool output at an address | Every clipped MJJ result is saved mode `0600` under `.mjj/tool-results/`; the bounded result contains a path usable by `read` or `search` | 0 schema tokens |
-| Hermes discovers nested project hints as tools enter subdirectories | `AGENTS.override.md` / `AGENTS.md` is injected once, on first access to that subtree, with an 8 KiB per-discovery and 32 KiB session ceiling | 0 schema tokens |
+| Hermes/OpenCode discover compatible project hints | `AGENTS.override.md`, `AGENTS.md`, `CLAUDE.md`, and `CONTEXT.md` use bounded root-to-CWD plus lazy nested scope; local runs reuse one MJJ/OpenCode/Claude global rule | 0 schema tokens |
 | Aider ranks tree-sitter tags by cross-file references and mentioned identifiers | `list` with `symbols=true` ranks indexed declarations by cross-file term references and an optional task query, then pre-fits complete file blocks to the list budget | 43 schema tokens |
 | OpenCode and Hermes protect edits with external snapshots | Every successful patch stores a secure, bounded checkpoint outside the worktree; undo verifies post-edit hashes and modes before restoring | 79 schema tokens |
 | OpenCode exposes installed language servers and semantic edits | `navigate` provides definition, references, hover, symbols, call hierarchy, and checkpointed atomic rename; safe reads keep the hybrid-index fallback | 126 schema tokens |

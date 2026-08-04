@@ -47,6 +47,13 @@ An autonomy turn limit of zero means unlimited continuation until interrupted.
 Credentials and executor endpoints keep their existing dedicated environment
 variables and never appear in `mjj config` output.
 
+Project-doc discovery includes `AGENTS.override.md`, `AGENTS.md`, `CLAUDE.md`,
+and deprecated `CONTEXT.md`, plus one bounded user rule. Set
+`MJJ_DISABLE_CLAUDE_CODE_PROMPT=1` to disable `CLAUDE.md` compatibility,
+`MJJ_DISABLE_CLAUDE_CODE_SKILLS=1` to disable automatic `.claude/skills`
+discovery, or `MJJ_DISABLE_CLAUDE_CODE=1` to disable both. See [project and user
+instructions](project-instructions.md) for exact precedence and hosted scope.
+
 MCP servers use explicit local stdio commands. Their `cwd` is relative to the
 configuration file; `startup_timeout`, `tool_timeout`, and `max_tools` are
 bounded. `env_vars` forwards selected environment variables, while `env` adds

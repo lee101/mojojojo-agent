@@ -52,6 +52,7 @@ class Agent:
     session: Session | None = None
     instructions: str | None = None
     project_doc_max_bytes: int = DEFAULT_MAX_BYTES
+    include_user_instructions: bool = True
     project_instructions: ProjectInstructions = field(
         init=False, default_factory=ProjectInstructions
     )
@@ -66,7 +67,9 @@ class Agent:
     def __post_init__(self) -> None:
         if self.instructions is None:
             self.project_instructions = load_project_docs(
-                self.cwd, self.project_doc_max_bytes
+                self.cwd,
+                self.project_doc_max_bytes,
+                include_user=self.include_user_instructions,
             )
             self.instructions = compose(SYSTEM_PROMPT, self.project_instructions)
         self.ctx = ToolContext(cwd=self.cwd, ledger=self.ledger, approve=self.approve)

@@ -148,9 +148,12 @@ In the terminal app, `/goal OBJECTIVE` starts immediately. `/goal pause`,
 
 ## Project instructions and skills
 
-Mojo Agent loads bounded `AGENTS.md` instructions from the Git root toward the
-working directory. Put reusable, on-demand workflows in `.agents/skills/` or
-`.mjj/skills/`, then inspect discovery with `mjj skills`.
+Mojo Agent loads bounded `AGENTS.override.md`, `AGENTS.md`, `CLAUDE.md`, and
+legacy `CONTEXT.md` instructions from the Git root toward the working directory.
+It can also reuse a personal MJJ, OpenCode, or Claude rule file. Put reusable,
+on-demand workflows in `.agents/skills/` or `.mjj/skills/`, then inspect skill
+discovery with `mjj skills`. See [project and user
+instructions](project-instructions.md) for precedence and opt-outs.
 
 See [configuration](config.md) and [skills](skills.md) for precedence and scope.
 

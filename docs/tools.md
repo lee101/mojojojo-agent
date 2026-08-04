@@ -223,9 +223,11 @@ transcript in request order. See [reviewer and worker subagents](subagents.md).
 
 ## Scoped project instructions
 
-Startup loads bounded `AGENTS.md` files from repository root to the working
-directory. When a tool first reads, searches, checks, patches, or runs a command
-in a deeper subtree, MJJ discovers the applicable nested `AGENTS.override.md`
-or `AGENTS.md` and attaches it once to that tool result. This supplies local
-rules when they matter without changing the system prompt or invalidating its
-cache.
+Startup loads bounded user rules plus project files from repository root to the
+working directory. Each directory prefers `AGENTS.override.md`, then
+`AGENTS.md`, `CLAUDE.md`, and deprecated `CONTEXT.md`. When a tool first reads,
+searches, checks, patches, or runs a command in a deeper subtree, MJJ discovers
+the applicable nested file and attaches it once to that tool result. This
+supplies local rules when they matter without changing the system prompt or
+invalidating its cache. See [project and user
+instructions](project-instructions.md).

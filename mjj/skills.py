@@ -64,11 +64,22 @@ def discover(
     roots.extend(("extra", Path(path).expanduser().resolve()) for path in extra_paths)
     roots.append(("builtin", BUILTIN_DIR))
     project = _project_root(working)
-    roots.extend(("project", project / relative) for relative in PROJECT_DIRS)
+    claude_disabled = _truthy(os.environ.get("MJJ_DISABLE_CLAUDE_CODE", "")) or _truthy(
+        os.environ.get("MJJ_DISABLE_CLAUDE_CODE_SKILLS", "")
+    )
+    roots.extend(
+        ("project", project / relative)
+        for relative in PROJECT_DIRS
+        if not (claude_disabled and relative.startswith(".claude/"))
+    )
     if include_user:
         mjj_home = Path(os.environ.get("MJJ_HOME") or "~/.mjj").expanduser()
         roots.append(("user", mjj_home / USER_DIRS[0]))
-        roots.extend(("user", Path(path).expanduser()) for path in USER_DIRS[1:])
+        roots.extend(
+            ("user", Path(path).expanduser())
+            for path in USER_DIRS[1:]
+            if not (claude_disabled and "/.claude/" in path)
+        )
 
     skills: list[Skill] = []
     seen_paths: set[Path] = set()
@@ -162,6 +173,10 @@ def _frontmatter(text: str) -> tuple[str, str, str]:
         if separator and key.strip() in {"name", "description"}:
             metadata[key.strip()] = value.strip().strip("\"'")
     return metadata.get("name", ""), metadata.get("description", ""), "\n".join(lines[end + 1 :])
+
+
+def _truthy(value: str) -> bool:
+    return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 __all__ = ["Skill", "discover", "find"]

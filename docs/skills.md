@@ -24,6 +24,9 @@ root:
 Local CLI sessions also check `$MJJ_HOME/skills`, `~/.agents/skills`,
 `~/.codex/skills`, and `~/.claude/skills`. Hosted sessions intentionally skip
 all user directories. Symlinked skill roots and bundled files are not followed.
+Set `MJJ_DISABLE_CLAUDE_CODE_SKILLS=1` (or the broader
+`MJJ_DISABLE_CLAUDE_CODE=1`) to skip automatic `.claude/skills` discovery;
+explicit paths in `skills.paths` still load.
 
 ```bash
 mjj skills

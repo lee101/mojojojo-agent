@@ -287,10 +287,12 @@ bounded `skill` tool loads a workflow only when needed, so full domain manuals
 do not tax every turn. Hosted sessions only see workspace skills. See
 [docs/skills.md](docs/skills.md).
 
-Like Codex, every run loads at most 32 KiB total from `AGENTS.md` files between
-the Git root and working directory. Deeper files apply later, and
-`AGENTS.override.md` replaces `AGENTS.md` in the same directory. Configure or
-disable the cap with `agent.project_doc_max_bytes`.
+Like Codex and OpenCode, local runs automatically load bounded instruction
+files. Project directories prefer `AGENTS.override.md`, `AGENTS.md`,
+`CLAUDE.md`, then deprecated `CONTEXT.md`; deeper files apply later. MJJ also
+reuses the first personal rule from MJJ, OpenCode, or Claude config. Hosted
+tenants never inherit service-account rules. Configure or disable the 32 KiB
+cap with `agent.project_doc_max_bytes`; see [the instruction guide](docs/project-instructions.md).
 
 ## Served, with app.nz sign-in
 

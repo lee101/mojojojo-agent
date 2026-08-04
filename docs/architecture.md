@@ -55,9 +55,11 @@ Responses server-side compaction replaces the live model window with an opaque
 compaction item. The original rollout remains on disk. Backends that do not
 support the compaction request are retried without it.
 
-Project context is bounded separately. `AGENTS.md` files are loaded from Git
-root to working directory up to the configured byte cap. Skills expose metadata
-first and load their full instructions only through the bounded skill tool.
+Project context is bounded separately. Compatible `AGENTS.md`, `CLAUDE.md`, and
+fallback files are loaded from Git root to working directory up to the
+configured byte cap. Local runs may prepend one bounded user rule; hosted runs
+disable that scope. Skills expose metadata first and load their full
+instructions only through the bounded skill tool.
 
 Durable goals live outside the transcript in a workspace-keyed, atomic JSON
 record. Active goals inject a bounded execution contract and install the goal

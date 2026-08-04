@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from PIL import Image
 from prompt_toolkit.document import Document
 
-from mjj.agent import Agent
+from mjj.agent import Agent, Step
 from mjj.model import ModelClient
 from mjj.tools import build_registry
 from mjj.tools.base import Registry
@@ -95,6 +96,19 @@ def test_workspace_completer_offers_slash_commands_and_fuzzy_files(tmp_path) -> 
 
     assert [item.text for item in slash] == ["/permissions"]
     assert [item.text for item in files] == ["src/water_shader.py"]
+
+
+def test_workspace_completer_offers_images_for_preview_commands(tmp_path) -> None:
+    (tmp_path / "art").mkdir()
+    (tmp_path / "art" / "water result.webp").write_bytes(b"")
+    (tmp_path / "art" / "notes.txt").write_text("")
+    completer = WorkspaceCompleter(tmp_path)
+
+    matches = list(
+        completer.get_completions(Document("/preview water"), None)
+    )
+
+    assert [item.text for item in matches] == ['"art/water result.webp"']
 
 
 def test_shell_shortcuts_control_whether_output_enters_context(
@@ -191,3 +205,78 @@ def test_undo_slash_command_restores_latest_patch(tmp_path, monkeypatch, capsys)
 
     assert target.read_text() == "one\n"
     assert "restored" in capsys.readouterr().out
+
+
+def test_image_command_previews_and_queues_attachment(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    monkeypatch.setenv("MJJ_HOME", str(tmp_path / "home"))
+    source = tmp_path / "reference.png"
+    Image.new("RGB", (12, 8), "purple").save(source)
+    agent = Agent(registry=Registry(), cwd=tmp_path, instructions="test")
+    app = InteractiveApp(agent, _args())
+    rendered = []
+    monkeypatch.setattr(
+        "mjj.tui.render_terminal_image", lambda path: rendered.append(path)
+    )
+
+    app.command("/image reference.png")
+
+    assert len(app.attachments) == 1
+    assert rendered == [source]
+    assert "attached reference.png" in capsys.readouterr().out
+
+
+def test_tool_image_event_renders_in_response_chain(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("MJJ_HOME", str(tmp_path / "home"))
+    source = tmp_path / "result.webp"
+    source.write_bytes(b"placeholder")
+    agent = Agent(registry=Registry(), cwd=tmp_path, instructions="test")
+    app = InteractiveApp(agent, _args())
+    rendered = []
+    monkeypatch.setattr(
+        "mjj.tui.render_terminal_image",
+        lambda path: rendered.append(path) or SimpleNamespace(ok=True),
+    )
+    monkeypatch.setattr("mjj.tui.print_formatted_text", lambda *args, **kwargs: None)
+
+    app._render(
+        [
+            Step("tool_call", name="display_image", text='{"path":"result.webp"}'),
+            Step(
+                "tool_result",
+                name="display_image",
+                text="result.webp · 10×10",
+                meta={"ok": True, "terminal_image": "result.webp"},
+            ),
+            Step("text", text="Done."),
+        ]
+    )
+
+    assert rendered == [source]
+
+
+def test_successful_mutating_tool_result_gets_compact_confirmation(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    monkeypatch.setenv("MJJ_HOME", str(tmp_path / "home"))
+    agent = Agent(registry=Registry(), cwd=tmp_path, instructions="test")
+    app = InteractiveApp(agent, _args())
+    monkeypatch.setattr(
+        "mjj.tui.print_formatted_text",
+        lambda value, **kwargs: print(value.value, end=kwargs.get("end", "\n")),
+    )
+
+    app._render(
+        [
+            Step(
+                "tool_result",
+                name="check",
+                text="all checks passed\nmore",
+                meta={"ok": True},
+            )
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert "✓ all checks passed more" in output

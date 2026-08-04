@@ -9,7 +9,7 @@ same code that ships in the [public repository](https://github.com/lee101/mojojo
 - [Getting started](getting-started.md) — install, authenticate, run the first
   task, select providers, and recover a session.
 - [Configuration](config.md) — user, project, environment, and CLI precedence.
-- [Tools](tools.md) — bounded file, patch, shell, Python, and skill tools.
+- [Tools](tools.md) — bounded file, patch, shell, Python, terminal-image, and skill tools.
 - [Skills](skills.md) — discover and load `SKILL.md` workflows without permanent
   prompt overhead.
 

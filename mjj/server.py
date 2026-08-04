@@ -314,9 +314,13 @@ class _WorkspaceTool:
         )
 
     def _validate(self, args: dict, ctx: ToolContext) -> str:
-        if self.name in ("read", "list", "search", "navigate") and args.get(
-            "path"
-        ) is not None:
+        if self.name in (
+            "read",
+            "list",
+            "search",
+            "navigate",
+            "display_image",
+        ) and args.get("path") is not None:
             if not self._inside(ctx, args["path"]):
                 return "path must stay inside the user workspace"
         if self.name != "shell":

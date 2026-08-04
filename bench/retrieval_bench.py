@@ -108,6 +108,9 @@ def benchmark(iterations: int = 20) -> dict:
         navigate_schema_tokens = estimate_tokens(
             json.dumps(schemas["navigate"], separators=(",", ":"))
         )
+        display_image_schema_tokens = estimate_tokens(
+            json.dumps(schemas["display_image"], separators=(",", ":"))
+        )
         shell_job_parameter_tokens = estimate_tokens(
             json.dumps(
                 {
@@ -164,6 +167,7 @@ def benchmark(iterations: int = 20) -> dict:
                 "map_parameters_schema": map_parameter_tokens,
                 "checkpoint_tool_schema": checkpoint_schema_tokens,
                 "navigate_tool_schema": navigate_schema_tokens,
+                "display_image_tool_schema": display_image_schema_tokens,
                 "shell_job_parameters_schema": shell_job_parameter_tokens,
                 "format_parameter_schema": format_parameter_tokens,
                 "raw_symbol_listing": estimate_tokens(raw_symbols),

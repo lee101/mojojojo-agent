@@ -25,7 +25,7 @@ from prompt_toolkit.shortcuts import prompt as secure_prompt
 from . import auth
 from .agent import Agent, Step, tool_progress
 from .config import EFFORTS, PROVIDERS, VERBOSITIES
-from .context_files import discover_project_files
+from .context_files import IMAGE_SUFFIXES, discover_project_files
 from .media import ImageAttachment, ImageInputError, prepare_image
 from .permissions import PermissionPolicy
 from .session import (
@@ -37,6 +37,7 @@ from .session import (
     list_sessions,
     resume,
 )
+from .terminal_images import render_terminal_image, terminal_image_protocol
 from .tools import build_registry
 
 
@@ -48,6 +49,7 @@ COMMANDS = {
     "/verbosity": "show or set response verbosity",
     "/image": "attach an image to the next prompt",
     "/images": "show queued image attachments",
+    "/preview": "show an image in the terminal without attaching it",
     "/login": "sign in with ChatGPT or save a provider API key",
     "/logout": "remove a saved provider API key",
     "/auth": "show credential status without secrets",
@@ -106,6 +108,29 @@ class WorkspaceCompleter(Completer):
                         start_position=-len(text),
                         display_meta=description,
                     )
+            return
+        if text.startswith(("/image ", "/preview ")):
+            raw = text.partition(" ")[2]
+            query = raw.strip("\"'").lower()
+            matches = [
+                path
+                for path in self.files
+                if Path(path).suffix.lower() in IMAGE_SUFFIXES and query in path.lower()
+            ]
+            matches.sort(
+                key=lambda path: (
+                    not path.lower().startswith(query),
+                    len(path),
+                    path,
+                )
+            )
+            for path in matches[:50]:
+                rendered = f'"{path}"' if " " in path else path
+                yield Completion(
+                    rendered,
+                    start_position=-len(raw),
+                    display_meta="image",
+                )
             return
         match = _AT_QUERY.search(text)
         if not match:
@@ -280,8 +305,17 @@ class InteractiveApp:
                     text_open = False
                 label = _tool_label(step)
                 print_formatted_text(ANSI(f"\x1b[2m  ↳ {label}\x1b[0m"))
-            elif step.kind == "tool_result" and not step.meta.get("ok", True):
-                print_formatted_text(ANSI(f"\x1b[31m    {step.text}\x1b[0m"))
+            elif step.kind == "tool_result":
+                if text_open:
+                    print()
+                    text_open = False
+                if not step.meta.get("ok", True):
+                    print_formatted_text(ANSI(f"\x1b[31m    {step.text}\x1b[0m"))
+                elif step.meta.get("terminal_image"):
+                    self._render_image_event(step)
+                elif step.name in {"apply_patch", "checkpoint", "check"}:
+                    summary = _compact_result(step.text)
+                    print_formatted_text(ANSI(f"\x1b[2m    ✓ {summary}\x1b[0m"))
             elif step.kind == "autonomous":
                 if text_open:
                     print()
@@ -333,6 +367,8 @@ class InteractiveApp:
             self._attach(value)
         elif command == "/images":
             print("\n".join(image.summary() for image in self.attachments) or "no queued images")
+        elif command == "/preview":
+            self._preview(value)
         elif command == "/login":
             self._login(value or (self.provider if self.provider != "auto" else "chatgpt"))
         elif command == "/logout":
@@ -363,6 +399,7 @@ class InteractiveApp:
                         "permission_mode": self.permission_policy.mode,
                         "autonomy": self._autonomy_label(),
                         "auto_max_turns": self.args.auto_max_turns,
+                        "terminal_images": terminal_image_protocol(),
                     },
                     indent=2,
                 )
@@ -470,6 +507,7 @@ class InteractiveApp:
             "verbosity": self.agent.client.verbosity,
             "permissions": self.permission_policy.mode,
             "autonomy": self._autonomy_label(),
+            "terminal_images": terminal_image_protocol(),
             "session": session.id if session else "ephemeral",
             "transcript_items": len(self.agent.items),
             "tools": sorted(self.agent.registry.tools),
@@ -530,6 +568,7 @@ class InteractiveApp:
         if not value:
             print("usage: /image PATH")
             return
+        value = _path_argument(value)
         try:
             image = prepare_image(Path(self.agent.cwd) / value)
         except ImageInputError as exc:
@@ -537,6 +576,31 @@ class InteractiveApp:
             return
         self.attachments.append(image)
         print("attached", image.summary())
+        render_terminal_image(image.path)
+
+    def _preview(self, value: str) -> None:
+        if not value:
+            print("usage: /preview PATH")
+            return
+        value = _path_argument(value)
+        path = Path(value).expanduser()
+        if not path.is_absolute():
+            path = Path(self.agent.cwd) / path
+        result = render_terminal_image(path)
+        if not result.ok:
+            print(f"preview: {result.detail}")
+
+    def _render_image_event(self, step: Step) -> None:
+        relative = str(step.meta.get("terminal_image") or "")
+        path = (Path(self.agent.cwd) / relative).resolve()
+        try:
+            path.relative_to(Path(self.agent.cwd).resolve())
+        except ValueError:
+            print_formatted_text(ANSI("\x1b[31m    image path left workspace\x1b[0m"))
+            return
+        result = render_terminal_image(path)
+        if not result.ok:
+            print_formatted_text(ANSI(f"\x1b[2m    {step.text} · {result.detail}\x1b[0m"))
 
     def _login(self, provider: str) -> None:
         if provider in ("chatgpt", "device"):
@@ -729,6 +793,17 @@ class InteractiveApp:
 
 def _tool_label(step: Step) -> str:
     return tool_progress(step)
+
+
+def _compact_result(text: str, limit: int = 160) -> str:
+    line = " ".join(text.split())
+    return line if len(line) <= limit else line[: limit - 1] + "…"
+
+
+def _path_argument(value: str) -> str:
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+        return value[1:-1]
+    return value
 
 
 def _message_text(item: dict) -> str:

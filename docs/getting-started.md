@@ -97,6 +97,13 @@ Images are orientation-corrected, bounded to a 2048-pixel edge, and encoded in
 memory as WebP quality 85 before they are sent to model vision. Repeat
 `--image` to attach more than one.
 
+In the interactive app, `/image PATH` also previews the queued image and
+`/preview PATH` displays it without spending model context. When the agent uses
+`display_image`, the result is rendered inline between tool progress and the
+next assistant text. Kitty uses `kitten icat`; other color terminals get a
+bounded ANSI preview. Pipes, logs, `mjj exec`, and non-TTY output receive no
+graphics control sequences.
+
 ## Sessions and autonomous work
 
 Runs are saved as append-only JSONL unless `--ephemeral` is used:

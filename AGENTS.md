@@ -39,6 +39,7 @@ instead of being paid for in context.
 | `mjj/repo_map.py` | reference-ranked, budget-fitted repository symbol map |
 | `mjj/checkpoints.py` | secure external patch snapshots and conflict-safe undo |
 | `mjj/lsp.py` | stdio client for already-installed language servers |
+| `mjj/terminal_images.py` | TTY-safe Kitty/ANSI image presentation boundary |
 | `mjj/kernels/` | mojosub `@jit` hot paths with CPython fallbacks |
 | `mjj/server.py` | SSE agent backend with app.nz SSO + credit billing |
 | `mjj/cli.py` | `mjj`, `mjj exec` (headless, scriptable) |

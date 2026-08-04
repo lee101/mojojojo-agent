@@ -65,6 +65,13 @@ and autonomy can all be controlled without leaving the session. `/help` and
 `/hotkeys` show the complete live command surface. Long headless turns emit a
 heartbeat on stderr while preserving the final answer alone on stdout.
 
+`/image PATH` now previews the attachment as well as queueing it; `/preview PATH`
+displays without attaching. The model can call `display_image` after creating or
+transforming an asset, so the image appears at that exact point in the response
+chain. Kitty terminals use native `kitten icat`; other color terminals receive a
+small true-color half-block preview. Redirected and headless output never
+contains terminal graphics escapes or image bytes.
+
 Type `@` to fuzzy-complete a repository file; text is attached within a strict
 64 KiB total budget, `@path:10-40` selects a line range, and image mentions use
 the same quality-85 WebP vision path as `--image`. `!command` runs a local shell
@@ -103,6 +110,10 @@ the actual asset when building a project. See [`visualbench/`](visualbench/) for
 the shader gallery, deterministic browser captures, and screenshot health
 scores used to test this workflow.
 
+Set `MJJ_IMAGE_PROTOCOL=auto|kitty|ansi|off` to override terminal image
+detection. `auto` is TTY-safe and is the default; forcing `kitty` is useful in
+other terminals that implement the Kitty graphics protocol.
+
 `mjj visualize` expands a short command into a standalone deterministic WebGL
 experience with procedural and image-transform modes. It is an on-demand CLI
 primitive used through the existing shell tool, so it adds **zero always-on
@@ -117,6 +128,7 @@ agent the compact workflow only when visual work calls for it. See the
 | find code | dump files into context | ranked `path:line` hits from a native int8 index |
 | understand a repository | read every file | reference-ranked symbol map, fitted to budget |
 | navigate symbols | require a fixed IDE stack | installed LSP when available, hybrid-index fallback otherwise |
+| display generated images | base64 in text or external viewer | metadata-only event; native Kitty or bounded ANSI UI |
 | run code | shell out to CPython | subset-compiled to Mojo, cached by content hash |
 | edit code | rewrite the file | atomic `apply_patch`, syntax gate, checkpoint, `+n/-n` summary |
 | validate code | run every build inline | parser checks now, optional formatter, compiler jobs in background |

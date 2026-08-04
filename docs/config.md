@@ -42,8 +42,11 @@ Credentials and executor endpoints keep their existing dedicated environment
 variables and never appear in `mjj config` output.
 
 Operational tool overrides are also intentionally separate from model
-configuration. `MJJ_CHECKPOINT_ROOT` relocates the secure external snapshot
-store. `MJJ_LSP_PYTHON`, `MJJ_LSP_TYPESCRIPT`, `MJJ_LSP_RUST`, `MJJ_LSP_GO`,
+configuration. `MJJ_IMAGE_PROTOCOL` accepts `auto`, `kitty`, `ansi`, or `off`;
+automatic mode uses Kitty only in a detected Kitty TTY, uses a small ANSI
+preview in other color TTYs, and emits nothing when redirected.
+`MJJ_CHECKPOINT_ROOT` relocates the secure external snapshot store.
+`MJJ_LSP_PYTHON`, `MJJ_LSP_TYPESCRIPT`, `MJJ_LSP_RUST`, `MJJ_LSP_GO`,
 `MJJ_LSP_CPP`, and `MJJ_LSP_RUBY` may name an already-installed language-server
 argv; otherwise MJJ discovers the standard executable on `PATH`. These values
 never trigger downloads.

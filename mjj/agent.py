@@ -409,6 +409,8 @@ def tool_progress(step: Step, *, verbose: bool = False) -> str:
         if args.get("job"):
             return f"polling check job {args['job']}"
         return "formatting and checking" if args.get("format") else "checking files"
+    if step.name == "display_image":
+        return f"displaying {args.get('path', '')}".rstrip()
     rendered = step.text if verbose else step.text[:120]
     suffix = "…" if len(step.text) > len(rendered) else ""
     return f"{step.name} {rendered}{suffix}".rstrip()

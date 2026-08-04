@@ -136,6 +136,22 @@ executable.
 {"action":"definition","path":"mjj/agent.py","line":151,"column":20}
 ```
 
+## `display_image`
+
+`display_image` emits a terminal presentation event for a regular image inside
+the workspace. Its model-visible result contains only the relative path,
+dimensions, format, byte count, and optional frame count—not base64 or pixels.
+The interactive renderer consumes that event in response order using native
+Kitty graphics or a bounded ANSI preview. Headless and hosted renderers keep the
+metadata but never emit terminal escape sequences.
+
+Images are limited to 32 MiB and 64 megapixels, decoded defensively, and may not
+be symlinks or leave the workspace.
+
+```json
+{"path":"visualbench/results/water.webp"}
+```
+
 ## `check`
 
 `check` validates explicitly named files, files changed through `apply_patch`,

@@ -19,6 +19,7 @@ MODULES = (
     "search",
     "navigate",
     "check",
+    "display",
     "py_exec",
     "skills",
 )

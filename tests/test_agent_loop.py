@@ -301,3 +301,24 @@ def test_exec_jsonl_is_parseable_and_returns_final_text() -> None:
         "usage",
     ]
     assert err.getvalue() == ""
+
+
+def test_exec_image_event_never_emits_terminal_control_sequences() -> None:
+    out, err = StringIO(), StringIO()
+    steps = iter(
+        [
+            Step(
+                "tool_result",
+                name="display_image",
+                text="art.webp · 20×10 · WEBP",
+                meta={"ok": True, "terminal_image": "art.webp"},
+            ),
+            Step("text", text="done"),
+            Step("usage", text="used"),
+        ]
+    )
+
+    code, final = render_exec(steps, out, err)
+
+    assert code == 0 and final == "done"
+    assert "\x1b" not in out.getvalue() + err.getvalue()

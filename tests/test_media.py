@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from PIL import Image
 
-from mjj.media import MAX_EDGE, prepare_image
+from mjj.media import MAX_EDGE, inspect_image, prepare_image
 from mjj.agent import Agent
 from mjj.ledger import Ledger
 from mjj.tools.base import Registry
@@ -29,3 +29,13 @@ def test_agent_turn_exposes_attachment_path_without_putting_bytes_in_text(tmp_pa
     assert "width=12 height=8" in text
     assert "base64" not in text
     assert agent.items[0]["content"][1]["image_url"].startswith("data:image/webp")
+
+
+def test_image_metadata_inspection_does_not_encode_pixels(tmp_path):
+    source = tmp_path / "reference.png"
+    Image.new("RGBA", (20, 10), "orange").save(source)
+
+    info = inspect_image(source)
+
+    assert (info.width, info.height, info.format) == (20, 10, "PNG")
+    assert info.bytes == source.stat().st_size

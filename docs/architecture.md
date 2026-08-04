@@ -38,6 +38,11 @@ The transcript sent to a provider and the transcript stored on disk share the
 same Responses-style item shape. Chat-completions providers are translated in
 `mjj/model.py`, outside the loop.
 
+Terminal images follow the same event boundary. `display_image` appends a small
+relative-path metadata result; only `mjj/tui.py` resolves and paints it. Native
+Kitty graphics and ANSI preview bytes therefore never enter model context,
+rollout text, headless stdout, or a hosted shell response.
+
 ## Context and sessions
 
 Each local session is an append-only JSONL file under `$MJJ_HOME/sessions`.
@@ -87,6 +92,7 @@ See [hosted server](server.md) for the HTTP and billing contract, and
 | --- | --- |
 | `mjj/cli.py` | CLI parsing, headless rendering, and terminal entrypoints |
 | `mjj/tui.py` | Interactive composer, hotkeys, slash commands, and rendering |
+| `mjj/terminal_images.py` | TTY-safe Kitty and bounded ANSI image presentation |
 | `mjj/agent.py` | Append-only turn loop and tool dispatch |
 | `mjj/model.py` | Provider requests, streaming translation, retries, usage |
 | `mjj/session.py` | JSONL persistence, resume, branch, import, and export |

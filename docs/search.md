@@ -165,7 +165,7 @@ directly from the mmap with no NumPy or row copies. If the library is missing
 or its buffers cannot be bound, the same exact dot-product ranking runs using
 stdlib Python arrays. Search continues; only latency changes.
 
-`mjj/search/embed.mojo` supplies an optional `mjj_search_i8_mmap` wrapper for a
+`mjj/search/embed.mojo` supplies the optional `mjj_search_i8_mmap` implementation for a
 repository-specific build. It is never compiled in the agent loop, and the
 prebuilt upstream ABI already has every entry point normal installs need.
 

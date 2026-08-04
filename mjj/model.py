@@ -22,7 +22,9 @@ from dataclasses import dataclass, field
 from typing import Any, Iterator
 
 from .auth import AuthError, Credential, CredentialResolver
+from .model_routes import resolve_model
 from .prompt import for_model as prompt_for_model
+from .prompt_cache import CACHE_MODES, PromptCacheOptimizer
 
 DEFAULT_MODEL = os.environ.get("MJJ_MODEL", "gpt-5.6-sol")
 DEFAULT_EFFORT = os.environ.get("MJJ_EFFORT", "high")
@@ -31,6 +33,9 @@ DEFAULT_VERBOSITY = os.environ.get("MJJ_VERBOSITY", "low")
 # has to outlast that or we kill our own reasoning.
 READ_TIMEOUT = float(os.environ.get("MJJ_READ_TIMEOUT", "900"))
 COMPACT_THRESHOLD = int(os.environ.get("MJJ_COMPACT_THRESHOLD", "200000"))
+DEFAULT_CACHE_MODE = os.environ.get("MJJ_CACHE_MODE", "auto").strip().lower()
+if DEFAULT_CACHE_MODE not in CACHE_MODES:
+    DEFAULT_CACHE_MODE = "auto"
 
 
 class ModelError(RuntimeError):
@@ -118,7 +123,17 @@ class ModelClient:
     # side of the bill is the largest number in this file.
     cache_key: str = ""
     max_output_tokens: int = 0
+    cache_mode: str = DEFAULT_CACHE_MODE
+    cache_optimizer: PromptCacheOptimizer = field(
+        default_factory=PromptCacheOptimizer
+    )
     _compaction_disabled: bool = field(default=False, init=False, repr=False)
+    _cache_controls_disabled: bool = field(default=False, init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        if self.cache_mode not in CACHE_MODES:
+            self.cache_mode = "auto"
+        self.cache_optimizer.mode = self.cache_mode
 
     def request_body(
         self,
@@ -126,22 +141,46 @@ class ModelClient:
         instructions: str,
         tools: list[dict],
         credential: Credential,
+        *,
+        observe_cache: bool = True,
     ) -> dict:
         model = self.effective_model(credential)
+        rendered_instructions = prompt_for_model(instructions, model)
         body: dict[str, Any] = {
             "model": model,
-            "instructions": prompt_for_model(instructions, model),
+            "instructions": rendered_instructions,
             "input": input_items,
             "tools": tools,
             "tool_choice": "auto",
             "parallel_tool_calls": False,
             "stream": True,
             "store": False,
-            "reasoning": {"effort": self.effort, "summary": self.summary},
+            "reasoning": {
+                "effort": self.effective_effort(),
+                "summary": self.summary,
+            },
         }
         if self.verbosity:
             body["text"] = {"verbosity": self.verbosity}
-        if self.cache_key:
+        if (
+            not self._cache_controls_disabled
+            and _supports_explicit_openai_cache(model, credential)
+        ):
+            plan = self.cache_optimizer.openai_plan(
+                model,
+                rendered_instructions,
+                tools,
+                observe=observe_cache,
+            )
+            body["prompt_cache_options"] = {"mode": plan.mode}
+            if plan.ttl:
+                body["prompt_cache_options"]["ttl"] = plan.ttl
+            if plan.mode == "implicit":
+                body["prompt_cache_key"] = plan.key
+            if plan.breakpoint:
+                body["input"] = [_openai_cache_boundary(), *input_items]
+                body["prompt_cache_key"] = plan.key
+        elif self.cache_mode != "off" and self.cache_key:
             body["prompt_cache_key"] = self.cache_key
         if self.max_output_tokens > 0:
             body["max_output_tokens"] = self.max_output_tokens
@@ -158,7 +197,22 @@ class ModelClient:
         return body
 
     def effective_model(self, credential: Credential) -> str:
-        return credential.default_model if self.model == "auto" else self.model
+        return resolve_model(self.model, credential.provider, credential.default_model)
+
+    def effective_effort(self) -> str:
+        return self.effort
+
+    def cache_status(self) -> dict:
+        status = self.cache_optimizer.status()
+        status["mode"] = self.cache_mode
+        return status
+
+    def set_cache_mode(self, mode: str) -> None:
+        normalized = mode.strip().lower()
+        if normalized not in CACHE_MODES:
+            raise ValueError(f"cache mode must be one of: {', '.join(CACHE_MODES)}")
+        self.cache_mode = normalized
+        self.cache_optimizer.mode = normalized
 
     def chat_request_body(
         self,
@@ -166,22 +220,44 @@ class ModelClient:
         instructions: str,
         tools: list[dict],
         credential: Credential,
+        *,
+        observe_cache: bool = True,
     ) -> dict:
         model = self.effective_model(credential)
+        rendered_instructions = prompt_for_model(instructions, model)
         body: dict[str, Any] = {
             "model": model,
             "messages": _chat_messages(
                 input_items,
-                prompt_for_model(instructions, model),
+                rendered_instructions,
             ),
             "tools": [_chat_tool(tool) for tool in tools],
             "tool_choice": "auto" if tools else None,
             "stream": True,
         }
         if credential.provider == "openrouter":
-            body["reasoning"] = {"effort": self.effort}
+            body["reasoning"] = {"effort": self.effective_effort()}
         else:
-            body["reasoning_effort"] = self.effort
+            body["reasoning_effort"] = self.effective_effort()
+        if (
+            not self._cache_controls_disabled
+            and credential.provider in {"openpaths", "openrouter"}
+            and _is_anthropic_model(model)
+        ):
+            plan = self.cache_optimizer.anthropic_plan(
+                model,
+                rendered_instructions,
+                tools,
+                observe=observe_cache,
+            )
+            if plan.breakpoint:
+                body["messages"][0]["content"] = [
+                    {
+                        "type": "text",
+                        "text": rendered_instructions,
+                        "cache_control": {"type": "ephemeral", "ttl": plan.ttl},
+                    }
+                ]
         if self.max_output_tokens > 0:
             body["max_tokens"] = self.max_output_tokens
         return {key: value for key, value in body.items() if value is not None}
@@ -201,9 +277,21 @@ class ModelClient:
                 fallback=auth_failures > 1,
             )
             body = (
-                self.chat_request_body(input_items, instructions, tools, credential)
+                self.chat_request_body(
+                    input_items,
+                    instructions,
+                    tools,
+                    credential,
+                    observe_cache=attempt == 0,
+                )
                 if credential.api_style == "chat_completions"
-                else self.request_body(input_items, instructions, tools, credential)
+                else self.request_body(
+                    input_items,
+                    instructions,
+                    tools,
+                    credential,
+                    observe_cache=attempt == 0,
+                )
             )
             try:
                 yield from self._stream_once(credential, body)
@@ -215,6 +303,9 @@ class ModelClient:
                     # Responses API. Compaction is an optimisation, not a
                     # reason to lose the run.
                     self._compaction_disabled = True
+                    continue
+                if _cache_controls_unsupported(exc, body):
+                    self._cache_controls_disabled = True
                     continue
                 if exc.status == 401:
                     auth_failures += 1
@@ -252,6 +343,7 @@ class ModelClient:
                 if event.type in ("response.completed", "response.incomplete"):
                     usage = (event.data.get("response") or {}).get("usage") or {}
                     self.usage.add(usage)
+                    self._record_cache_usage(usage)
                 if event.type in ("response.failed", "error"):
                     err = event.data.get("error") or event.data
                     message = err.get("message") if isinstance(err, dict) else str(err)
@@ -368,7 +460,15 @@ class ModelClient:
             )
         normalized_usage = _chat_usage(usage)
         self.usage.add(normalized_usage)
+        self._record_cache_usage(normalized_usage)
         yield Event("response.completed", {"response": {"usage": normalized_usage}})
+
+    def _record_cache_usage(self, usage: dict) -> None:
+        details = usage.get("input_tokens_details") or {}
+        self.cache_optimizer.record(
+            read_tokens=details.get("cached_tokens", 0),
+            write_tokens=details.get("cache_write_tokens", 0),
+        )
 
 
 def _retryable_message(message: str) -> bool:
@@ -389,11 +489,52 @@ def _chat_usage(usage: dict) -> dict:
             "output_tokens", usage.get("completion_tokens", 0)
         ),
         "input_tokens_details": {
-            "cached_tokens": prompt_details.get("cached_tokens", 0),
+            "cached_tokens": prompt_details.get(
+                "cached_tokens",
+                usage.get(
+                    "cache_read_input_tokens",
+                    usage.get("cache_read_tokens", 0),
+                ),
+            ),
+            "cache_write_tokens": prompt_details.get(
+                "cache_write_tokens",
+                usage.get(
+                    "cache_creation_input_tokens",
+                    usage.get("cache_write_tokens", 0),
+                ),
+            ),
         },
         "output_tokens_details": {
             "reasoning_tokens": completion_details.get("reasoning_tokens", 0),
         },
+    }
+
+
+def _supports_explicit_openai_cache(model: str, credential: Credential) -> bool:
+    normalized = model.lower().split("/")[-1]
+    return (
+        credential.provider == "openai"
+        and credential.kind == "api_key"
+        and normalized.startswith("gpt-5.6")
+    )
+
+
+def _is_anthropic_model(model: str) -> bool:
+    lowered = model.lower()
+    return "claude" in lowered or lowered.startswith("anthropic/")
+
+
+def _openai_cache_boundary() -> dict:
+    return {
+        "type": "message",
+        "role": "developer",
+        "content": [
+            {
+                "type": "input_text",
+                "text": "Stable MJJ instructions and tool contract boundary.",
+                "prompt_cache_breakpoint": {"mode": "explicit"},
+            }
+        ],
     }
 
 
@@ -402,6 +543,19 @@ def _compaction_unsupported(exc: ModelError, body: dict) -> bool:
         return False
     detail = str(exc).lower()
     return "context_management" in detail or "compact" in detail
+
+
+def _cache_controls_unsupported(exc: ModelError, body: dict) -> bool:
+    if exc.status != 400:
+        return False
+    encoded = json.dumps(body, separators=(",", ":"))
+    if not any(
+        field in encoded
+        for field in ("prompt_cache_options", "prompt_cache_breakpoint", "cache_control")
+    ):
+        return False
+    detail = str(exc).lower()
+    return any(token in detail for token in ("cache", "breakpoint", "ttl"))
 
 
 def _decode_sse(stream) -> Iterator[Event]:

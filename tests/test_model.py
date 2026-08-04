@@ -87,6 +87,31 @@ def test_unsupported_compaction_degrades_to_plain_request(monkeypatch):
     assert "context_management" not in bodies[1]
 
 
+def test_unsupported_cache_controls_degrade_to_compatible_request(monkeypatch):
+    client = ModelClient(
+        resolver=Resolver(),
+        model="gpt-5.6-terra",
+        cache_mode="explicit",
+        max_retries=1,
+    )
+    bodies = []
+
+    def once(_credential, body):
+        bodies.append(body)
+        if len(bodies) == 1:
+            raise ModelError(
+                "HTTP 400: unknown prompt_cache_options field",
+                status=400,
+            )
+        yield Event("response.completed", {"response": {"usage": {}}})
+
+    monkeypatch.setattr(client, "_stream_once", once)
+    list(client.stream([], "stable " * 1000))
+
+    assert "prompt_cache_options" in bodies[0]
+    assert "prompt_cache_options" not in bodies[1]
+
+
 def test_transient_retry_does_not_refresh_credentials(monkeypatch):
     resolver = Resolver()
     client = ModelClient(resolver=resolver, max_retries=1)
@@ -139,6 +164,131 @@ def test_usage_tracks_cache_reads_and_writes():
     assert usage.cache_write_tokens == 30
     assert "60% cached" in usage.summary()
     assert "30 cache write" in usage.summary()
+
+
+def test_openai_56_cache_policy_marks_only_a_reused_stable_prefix():
+    instructions = "stable instructions " * 300
+    tools = [{"type": "function", "name": "read", "description": "read"}]
+    client = ModelClient(model="gpt-5.6-terra", cache_mode="auto")
+
+    cold = client.request_body([], instructions, tools, API_CREDENTIAL)
+    warm = client.request_body([], instructions, tools, API_CREDENTIAL)
+
+    assert cold["prompt_cache_options"] == {"mode": "explicit"}
+    assert cold["input"] == []
+    assert warm["prompt_cache_options"] == {"mode": "explicit", "ttl": "30m"}
+    assert warm["input"][0]["role"] == "developer"
+    assert warm["input"][0]["content"][0]["prompt_cache_breakpoint"] == {
+        "mode": "explicit"
+    }
+    assert warm["prompt_cache_key"].startswith("mjj:")
+
+
+def test_openai_56_implicit_cache_keeps_a_stable_routing_key():
+    client = ModelClient(model="gpt-5.6-terra", cache_mode="implicit")
+
+    body = client.request_body([], "stable instructions " * 300, [], API_CREDENTIAL)
+
+    assert body["prompt_cache_options"] == {"mode": "implicit"}
+    assert body["prompt_cache_key"].startswith("mjj:")
+
+
+def test_cache_off_disables_writes_without_a_breakpoint_or_session_key():
+    client = ModelClient(
+        model="gpt-5.6-terra",
+        cache_mode="off",
+        cache_key="configured-session-key",
+    )
+
+    body = client.request_body(
+        [],
+        "stable instructions " * 300,
+        [],
+        API_CREDENTIAL,
+    )
+
+    # GPT-5.6 needs explicit mode with no breakpoint to opt out of its
+    # implicit write. The empty input proves no cache boundary was inserted.
+    assert body["prompt_cache_options"] == {"mode": "explicit"}
+    assert "prompt_cache_key" not in body
+    assert body["input"] == []
+
+
+def test_transport_retry_does_not_look_like_prefix_reuse(monkeypatch):
+    resolver = Resolver()
+    client = ModelClient(
+        model="gpt-5.6-terra",
+        cache_mode="auto",
+        resolver=resolver,
+        max_retries=1,
+    )
+    bodies = []
+
+    def retry_once(_credential, body):
+        bodies.append(body)
+        if len(bodies) == 1:
+            raise ModelError("HTTP 429", status=429, retryable=True)
+        yield Event("response.completed", {"response": {"usage": {}}})
+
+    monkeypatch.setattr(client, "_stream_once", retry_once)
+    monkeypatch.setattr("mjj.model.time.sleep", lambda _seconds: None)
+
+    list(client.stream([], "stable instructions " * 300))
+
+    assert len(bodies) == 2
+    assert all("prompt_cache_key" not in body for body in bodies)
+
+
+def test_anthropic_chat_request_gets_adaptive_cache_control():
+    credential = Credential(
+        "api_key",
+        "op-test",
+        "https://example.test/v1",
+        provider="openpaths",
+        api_style="chat_completions",
+    )
+    client = ModelClient(model="claude-sonnet-4-6", cache_mode="auto")
+    instructions = "stable instructions " * 300
+
+    body = client.chat_request_body([], instructions, [], credential)
+
+    system = body["messages"][0]["content"][0]
+    assert system["cache_control"] == {"type": "ephemeral", "ttl": "5m"}
+
+
+def test_custom_chat_gateway_does_not_receive_anthropic_cache_extensions():
+    credential = Credential(
+        "api_key",
+        "custom-test",
+        "https://example.test/v1",
+        provider="custom",
+        api_style="chat_completions",
+    )
+    client = ModelClient(model="claude-compatible", cache_mode="explicit")
+
+    body = client.chat_request_body(
+        [], "stable instructions " * 300, [], credential
+    )
+
+    assert isinstance(body["messages"][0]["content"], str)
+
+
+def test_chat_usage_normalizes_anthropic_cache_token_names():
+    from mjj.model import _chat_usage
+
+    normalized = _chat_usage(
+        {
+            "prompt_tokens": 100,
+            "completion_tokens": 12,
+            "cache_read_input_tokens": 70,
+            "cache_creation_input_tokens": 20,
+        }
+    )
+
+    assert normalized["input_tokens_details"] == {
+        "cached_tokens": 70,
+        "cache_write_tokens": 20,
+    }
 
 
 def test_sse_decoder_handles_multiline_records_and_eof():

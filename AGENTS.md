@@ -26,6 +26,8 @@ instead of being paid for in context.
 | --- | --- |
 | `mjj/auth.py` | OpenAI Max Plan (ChatGPT OAuth) + API key credentials |
 | `mjj/model.py` | Responses API streaming client, usage ledger |
+| `mjj/model_routes.py` | provider-aware coding model intent aliases |
+| `mjj/prompt_cache.py` | adaptive OpenAI/Anthropic prompt-cache policy |
 | `mjj/agent.py` | the turn loop, tool dispatch, interrupts |
 | `mjj/session.py` | rollout JSONL, resume, fork |
 | `mjj/ledger.py` | token accounting + output truncation policy |
@@ -105,6 +107,7 @@ uv run mjj exec "..."                # headless run
 uv run mjj search QUERY [PATH]        # hybrid disk search
 uv run mjj index                      # build or refresh a repo index
 uv run mjj visualize demo --kind cells # scaffold standalone WebGL
+pixi run mojo-check                   # compile and ABI-smoke native search
 bench/run.sh                         # all benchmarks under a lock
 ```
 

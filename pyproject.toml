@@ -7,6 +7,14 @@ license = { file = "LICENSE" }
 requires-python = ">=3.10"
 authors = [{ name = "Lee Penkman" }]
 keywords = ["agent", "coding-agent", "mojo", "llm", "openai"]
+classifiers = [
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+]
 dependencies = [
   "tomli>=2; python_version < '3.11'",
 ]
@@ -24,8 +32,10 @@ mjj = "mjj.cli:main"
 mjj-search = "mjj.search.cli:main"
 
 [project.urls]
-Homepage = "https://mojojojo.app.nz"
+Homepage = "https://mojojojo.cc/agent"
+Documentation = "https://github.com/lee101/mojojojo-agent/tree/main/docs"
 Source = "https://github.com/lee101/mojojojo-agent"
+Issues = "https://github.com/lee101/mojojojo-agent/issues"
 
 [dependency-groups]
 dev = [

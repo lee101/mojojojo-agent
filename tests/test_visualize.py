@@ -60,6 +60,27 @@ def test_committed_visualbench_fixture_matches_generator() -> None:
     assert image_fixture.read_text(encoding="utf-8") == transformed
 
 
+def test_readme_showcase_is_real_webp_with_strong_80_20_hierarchy() -> None:
+    root = Path(__file__).resolve().parents[1]
+    path = root / "docs" / "assets" / "visualbench-signal-forge.webp"
+
+    with Image.open(path) as image:
+        assert image.format == "WEBP"
+        assert image.size == (1280, 800)
+        sample = image.convert("RGB").resize((160, 100))
+        luminance = [
+            _relative_luminance(sample.getpixel((x, y)))
+            for y in range(sample.height)
+            for x in range(sample.width)
+        ]
+        dark_fraction = sum(value < 0.2 for value in luminance) / len(luminance)
+        corner = _relative_luminance(sample.getpixel((1, 1)))
+
+    assert path.stat().st_size < 100_000
+    assert 0.78 <= dark_fraction <= 0.90
+    assert 1.05 / (corner + 0.05) >= 7.0
+
+
 def test_title_is_escaped_and_output_cannot_escape_workspace(tmp_path: Path) -> None:
     rendered = render_visualizer(title='<script>alert("x")</script>')
 
@@ -133,3 +154,15 @@ def test_budget_benchmark_reports_zero_schema_tax_and_real_expansion() -> None:
     assert tokens["generated_source"] > tokens["first_use_total"]
     assert tokens["repeat_use_amplification"] > tokens["first_use_amplification"]
     assert tokens["minimum_lossless_result_budget"] == 24
+
+
+def _relative_luminance(rgb: tuple[int, int, int]) -> float:
+    linear = []
+    for channel in rgb:
+        value = channel / 255
+        linear.append(
+            value / 12.92
+            if value <= 0.04045
+            else ((value + 0.055) / 1.055) ** 2.4
+        )
+    return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]

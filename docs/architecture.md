@@ -45,6 +45,14 @@ sentence; neutral and auto-routed models receive none. The hint is inserted
 before project instructions, preserving repository-rule precedence, and is
 recomputed after a live `/model` switch without rewriting transcript history.
 
+Intent aliases resolve at the same request boundary. Gateway-native aliases
+remain live routes, while `auto-openai*` aliases constrain the model lab without
+changing the selected credential or transport. The prompt-cache optimizer then
+fingerprints the stable instructions and tool schema. It adds provider-specific
+breakpoints only when the prefix is large and its observed reuse makes a write
+reasonable; response usage feeds cache read/write telemetry back into the
+client.
+
 Terminal images follow the same event boundary. `display_image` appends a small
 relative-path metadata result; only `mjj/tui.py` resolves and paints it. Native
 Kitty graphics and ANSI preview bytes therefore never enter model context,

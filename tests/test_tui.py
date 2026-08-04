@@ -62,6 +62,27 @@ def test_auto_command_updates_live_autonomy_controls(tmp_path, monkeypatch, caps
     assert "autonomy: full" in capsys.readouterr().out
 
 
+def test_cache_command_updates_policy_and_reports_telemetry(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setenv("MJJ_HOME", str(tmp_path / "home"))
+    agent = Agent(
+        registry=Registry(),
+        client=ModelClient(cache_mode="auto"),
+        cwd=tmp_path,
+        instructions="test",
+    )
+    app = InteractiveApp(agent, _args())
+
+    app.command("/cache off")
+    app.command("/cache auto")
+
+    assert agent.client.cache_mode == "auto"
+    output = capsys.readouterr().out
+    assert '"mode": "off"' in output
+    assert '"cache_read_tokens": 0' in output
+
+
 def test_tree_command_lists_branch_points(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("MJJ_HOME", str(tmp_path / "home"))
     agent = Agent(
@@ -135,6 +156,7 @@ def test_workspace_completer_offers_live_command_values(tmp_path) -> None:
     described = list(
         completer.get_completions(Document("/sign"), None)
     )
+    cache = list(completer.get_completions(Document("/cache exp"), None))
 
     assert [item.text for item in model] == ["gpt-5.6-terra"]
     assert [item.text for item in grok] == ["grok-4.5"]
@@ -144,6 +166,7 @@ def test_workspace_completer_offers_live_command_values(tmp_path) -> None:
     assert [item.text for item in permissions] == ["read-only"]
     assert [item.text for item in auto_model] == ["gpt-5.6-sol"]
     assert [item.text for item in described] == ["/login"]
+    assert [item.text for item in cache] == ["explicit"]
 
 
 def test_model_selection_accepts_number_substring_and_relative_change(

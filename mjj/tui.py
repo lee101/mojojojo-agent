@@ -92,7 +92,9 @@ from .config import EFFORTS, PROVIDERS, VERBOSITIES
 from .context_files import IMAGE_SUFFIXES, discover_project_files
 from .goals import GoalStore
 from .media import ImageAttachment, ImageInputError, prepare_image
+from .model_routes import AUTO_MODEL_IDS, describe_model
 from .permissions import PERMISSION_MODES, PermissionPolicy
+from .prompt_cache import CACHE_MODES
 from .session import (
     Session,
     export_session,
@@ -121,6 +123,7 @@ COMMANDS = {
     "/logout": "remove a saved provider API key",
     "/auth": "show credential status without secrets",
     "/usage": "show model and tool token usage",
+    "/cache": "show or set automatic prompt caching",
     "/models": "show models available for the active provider",
     "/settings": "show current provider, model, reasoning, and autonomy",
     "/status": "show model, permissions, session, tools, and Git status",
@@ -161,6 +164,7 @@ MODEL_PRESETS = {
         "gpt-5.6-terra",
         "gpt-5.6-luna",
         "gpt-5.3-codex",
+        *AUTO_MODEL_IDS,
     ),
     "openpaths": (
         "auto",
@@ -168,8 +172,9 @@ MODEL_PRESETS = {
         "openpaths/auto-code",
         "openpaths/auto",
         "openpaths/auto-hard",
+        *AUTO_MODEL_IDS,
     ),
-    "openrouter": ("auto", "x-ai/grok-4.5", "openrouter/auto"),
+    "openrouter": ("auto", "x-ai/grok-4.5", "openrouter/auto", *AUTO_MODEL_IDS),
     "custom": ("auto",),
 }
 
@@ -178,6 +183,7 @@ VALUE_CHOICES = {
     "/effort": EFFORTS,
     "/reasoning": EFFORTS,
     "/verbosity": VERBOSITIES,
+    "/cache": CACHE_MODES,
     "/permissions": PERMISSION_MODES,
     "/auto": ("off", "steps", "ideas", "full"),
     "/goal": ("pause", "resume", "complete", "blocked", "clear", "set"),
@@ -615,6 +621,14 @@ class InteractiveApp:
             print(json.dumps(auth.describe(), indent=2))
         elif command == "/usage":
             print(self.agent.client.usage.summary(), "·", self.agent.ledger.summary())
+        elif command == "/cache":
+            if value:
+                try:
+                    self.agent.client.set_cache_mode(value)
+                except ValueError as exc:
+                    print(exc)
+                    return
+            print(json.dumps(self.agent.client.cache_status(), indent=2))
         elif command == "/models":
             self._show_models()
         elif command == "/settings":
@@ -625,6 +639,7 @@ class InteractiveApp:
                         "model": self.agent.client.model,
                         "effort": self.agent.client.effort,
                         "verbosity": self.agent.client.verbosity,
+                        "cache": self.agent.client.cache_status(),
                         "permission_mode": self.permission_policy.mode,
                         "autonomy": self._autonomy_label(),
                         "auto_max_turns": self.args.auto_max_turns,
@@ -757,6 +772,7 @@ class InteractiveApp:
             "model": self.agent.client.model,
             "effort": self.agent.client.effort,
             "verbosity": self.agent.client.verbosity,
+            "cache": self.agent.client.cache_status(),
             "permissions": self.permission_policy.mode,
             "autonomy": self._autonomy_label(),
             "goal": (
@@ -872,7 +888,9 @@ class InteractiveApp:
         print(f"model shortcuts for {self.provider}:")
         for index, model in enumerate(models, 1):
             marker = "*" if model == self.agent.client.model else " "
-            print(f" {marker} {index}. {model}")
+            purpose = describe_model(model)
+            suffix = f" — {purpose}" if purpose else ""
+            print(f" {marker} {index}. {model}{suffix}")
         if self.agent.client.model not in models:
             print(f" * custom: {self.agent.client.model}")
         if self.provider == "auto":

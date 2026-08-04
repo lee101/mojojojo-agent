@@ -37,6 +37,12 @@ derives the matching Max package root. If Mojo, ripgrep, a language server, or
 a local sandbox is absent, the documented Python/index/remote fallback remains
 available instead of suppressing the tool.
 
+The Python fallback matrix remains the portable correctness gate. A separate
+Linux Mojo workflow pins the compiler with Pixi, builds
+`mjj/search/embed.mojo` as a shared library, and calls its exported top-k ABI
+with known vectors. Windows continues to exercise the guarded fallback because
+the current Mojo distribution is not a reliable native Windows CI target.
+
 Every push runs the complete test suite and package build on Ubuntu and native
 `windows-latest`. Release CI separately builds and smoke-tests the standalone
 Windows executable and Linux binaries.

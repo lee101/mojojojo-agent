@@ -45,7 +45,9 @@ Supported environment equivalents are `MJJ_PROVIDER`, `MJJ_MODEL`, `MJJ_EFFORT`,
 `MJJ_VERBOSITY`, `MJJ_PERMISSION_MODE`, `MJJ_TOOL_BUDGET`, `MJJ_PROJECT_DOC_MAX_BYTES`,
 `MJJ_AUTO_NEXT_STEPS`, `MJJ_AUTO_NEXT_IDEA`, `MJJ_AUTO_MAX_TURNS`,
 comma-separated `MJJ_DISABLE_TOOLS`, and path-separator-delimited
-`MJJ_SKILL_PATHS`. `MJJ_PLUGINS` is a comma-separated list of installed plugin
+`MJJ_SKILL_PATHS`. `MJJ_CACHE_MODE` accepts `auto`, `off`, `implicit`, or
+`explicit`; the live interactive control is `/cache`. `MJJ_PLUGINS` is a
+comma-separated list of installed plugin
 entry-point names. A zero project-doc budget disables `AGENTS.md` discovery.
 An autonomy turn limit of zero means unlimited continuation until interrupted.
 Credentials and executor endpoints keep their existing dedicated environment
@@ -90,7 +92,10 @@ Providers are `auto`, `openpaths`, `openrouter`, `openai`, and `custom`.
 `custom` reads `MJJ_BASE_URL`, `MJJ_API_KEY`, `MJJ_API_STYLE` (`responses` or
 `chat_completions`), and an optional `MJJ_DEFAULT_MODEL`.
 
-Model IDs remain open-ended. The built-in picker includes `grok-4.5` for
+Model IDs remain open-ended. Stable coding intents include `auto-code`,
+`auto-fast`, `auto-cheap`, `auto-best`, and provider-constrained
+`auto-openai*` aliases. The built-in picker also includes `grok-4.5` for
 OpenPaths, `x-ai/grok-4.5` for OpenRouter, and current Codex choices for OpenAI.
 Concrete Codex and Grok IDs receive one short request-time prompt hint; unknown
-and auto-routed IDs receive no extra prompt text.
+and auto-routed IDs receive no extra prompt text. See [models and prompt
+caching](models-and-cache.md) for the current route map and cache policy.

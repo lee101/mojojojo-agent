@@ -1,0 +1,23 @@
+[workspace]
+authors = ["Lee Penkman <leepenkman@gmail.com>"]
+channels = ["https://conda.modular.com/max-nightly", "conda-forge"]
+name = "mojojojo-agent-native"
+platforms = ["linux-64"]
+version = "0.1.0"
+
+[tasks.mojo-prepare]
+cmd = "python -c \"from pathlib import Path; Path('build').mkdir(exist_ok=True)\""
+
+[tasks.mojo-build]
+cmd = "mojo build --emit shared-lib mjj/search/embed.mojo -o build/libmjj_search.so"
+depends-on = ["mojo-prepare"]
+
+[tasks.mojo-smoke]
+cmd = "python tests/native_search_smoke.py build/libmjj_search.so"
+depends-on = ["mojo-build"]
+
+[tasks.mojo-check]
+depends-on = ["mojo-smoke"]
+
+[dependencies]
+mojo = "==1.0.0b3.dev2026072406"

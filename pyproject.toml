@@ -55,6 +55,18 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["mjj"]
 
+[tool.hatch.build.targets.sdist]
+exclude = [
+  "/.mjj",
+  "/.pytest_cache",
+  "/build",
+  "/dist",
+  "/visualbench/node_modules",
+  "/visualbench/output",
+  "**/__pycache__",
+  "**/*.py[co]",
+]
+
 [tool.hatch.version]
 path = "mjj/version.py"
 

@@ -70,3 +70,17 @@ def test_base_wheel_declares_no_third_party_dependency_on_modern_python() -> Non
         "pillow>=10.4",
         "prompt-toolkit>=3.0.52",
     }
+
+
+def test_sdist_explicitly_excludes_generated_and_vendored_files() -> None:
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    excluded = set(project["tool"]["hatch"]["build"]["targets"]["sdist"]["exclude"])
+
+    assert {
+        "/build",
+        "/dist",
+        "/visualbench/node_modules",
+        "/visualbench/output",
+        "**/__pycache__",
+        "**/*.py[co]",
+    } <= excluded

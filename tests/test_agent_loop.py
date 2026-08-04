@@ -196,6 +196,39 @@ def test_empty_model_completion_is_an_error(monkeypatch):
     assert "without an assistant message" in steps[-1].text
 
 
+def test_autonomous_steps_continue_with_a_bounded_synthetic_turn(monkeypatch):
+    agent = build(monkeypatch, [message("first")], [message("second")])
+
+    steps = list(
+        agent.run("go", auto_next_steps=True, max_autonomous_turns=1)
+    )
+
+    autonomous = [step for step in steps if step.kind == "autonomous"]
+    assert len(autonomous) == 1
+    assert autonomous[0].meta == {"turn": 1}
+    assert [step.text for step in steps if step.kind == "text"] == [
+        "first",
+        "second",
+    ]
+    user_messages = [
+        item for item in agent.items
+        if item.get("type") == "message" and item.get("role") == "user"
+    ]
+    assert len(user_messages) == 2
+    assert "AUTONOMOUS MODE" in user_messages[-1]["content"][0]["text"]
+    assert "next concrete steps" in user_messages[-1]["content"][0]["text"]
+
+
+def test_autonomous_idea_prompt_selects_a_high_impact_improvement(monkeypatch):
+    agent = build(monkeypatch, [message("done")], [message("improved")])
+
+    list(agent.run("go", auto_next_idea=True, max_autonomous_turns=1))
+
+    prompt = agent.items[-2]["content"][0]["text"]
+    assert "identify three useful improvements" in prompt
+    assert "highest-impact one" in prompt
+
+
 def test_exec_renderer_keeps_progress_off_stdout() -> None:
     out, err = StringIO(), StringIO()
     steps = iter(
@@ -203,6 +236,7 @@ def test_exec_renderer_keeps_progress_off_stdout() -> None:
             Step("text", text="working"),
             Step("tool_call", name="echo", text='{"text":"hi"}'),
             Step("usage", text="first usage"),
+            Step("autonomous", text="continue", meta={"turn": 1}),
             Step("tool_result", name="echo", text="hi"),
             Step("text", text="done"),
             Step("usage", text="final usage"),
@@ -215,6 +249,7 @@ def test_exec_renderer_keeps_progress_off_stdout() -> None:
     assert final == "done"
     assert out.getvalue() == "done\n"
     assert "· echo" in err.getvalue()
+    assert "autonomous continuation 1" in err.getvalue()
     assert "working" not in out.getvalue()
 
 

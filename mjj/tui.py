@@ -8,6 +8,7 @@ multiline input and key bindings as Unix terminals.
 
 from __future__ import annotations
 
+import base64
 import html
 import json
 from dataclasses import dataclass, field
@@ -24,7 +25,16 @@ from . import auth
 from .agent import Agent, Step, tool_progress
 from .config import EFFORTS, PROVIDERS, VERBOSITIES
 from .media import ImageAttachment, ImageInputError, prepare_image
-from .session import Session
+from .session import (
+    Session,
+    export_session,
+    fork_session,
+    import_session,
+    inspect_session,
+    list_sessions,
+    resume,
+)
+from .tools import build_registry
 
 
 COMMANDS = {
@@ -39,9 +49,25 @@ COMMANDS = {
     "/logout": "remove a saved provider API key",
     "/auth": "show credential status without secrets",
     "/usage": "show model and tool token usage",
+    "/models": "show models available for the active provider",
+    "/settings": "show current provider, model, reasoning, and autonomy",
+    "/auto": "set autonomy: off, steps, ideas, or full",
+    "/session": "show current session information",
+    "/history": "list recent sessions",
+    "/resume": "resume a saved session by id or path",
+    "/fork": "fork the current or a saved session",
+    "/clone": "duplicate the current session into a new session",
+    "/tree": "show conversation points or branch from an item number",
+    "/name": "set the current session display name",
+    "/export": "export the session to HTML or JSONL",
+    "/import": "import and resume a JSONL session",
+    "/copy": "copy the last assistant response with OSC 52",
+    "/reload": "reload tools and discovered skills",
+    "/hotkeys": "show keyboard shortcuts",
     "/clear": "clear the terminal",
     "/new": "start a fresh conversation",
     "/exit": "leave mjj",
+    "/quit": "leave mjj",
 }
 
 MODEL_PRESETS = {
@@ -142,10 +168,12 @@ class InteractiveApp:
     def _toolbar(self):
         images = f" · {len(self.attachments)} image" if self.attachments else ""
         cwd = Path(self.agent.cwd).name or str(self.agent.cwd)
+        autonomy = self._autonomy_label()
+        auto = f" · auto {autonomy}" if autonomy != "off" else ""
         return HTML(
             " <b>mjj</b> · "
             f"{html.escape(self.provider)}/{html.escape(self.agent.client.model)} · "
-            f"reasoning <b>{html.escape(self.agent.client.effort)}</b>{images} · "
+            f"reasoning <b>{html.escape(self.agent.client.effort)}</b>{auto}{images} · "
             f"{html.escape(cwd)}   ←/→ effort · ⇧↑/↓ model · / commands "
         )
 
@@ -184,7 +212,15 @@ class InteractiveApp:
         self.attachments.clear()
         print_formatted_text(ANSI("\x1b[2m◆ working · ctrl-c interrupts\x1b[0m"))
         try:
-            self._render(self.agent.run(text, images=images))
+            self._render(
+                self.agent.run(
+                    text,
+                    images=images,
+                    auto_next_steps=self.args.auto_next_steps,
+                    auto_next_idea=self.args.auto_next_idea,
+                    max_autonomous_turns=self.args.auto_max_turns,
+                )
+            )
         except KeyboardInterrupt:
             print_formatted_text(ANSI("\x1b[33m■ interrupted\x1b[0m"))
 
@@ -204,6 +240,16 @@ class InteractiveApp:
                 print_formatted_text(ANSI(f"\x1b[2m  ↳ {label}\x1b[0m"))
             elif step.kind == "tool_result" and not step.meta.get("ok", True):
                 print_formatted_text(ANSI(f"\x1b[31m    {step.text}\x1b[0m"))
+            elif step.kind == "autonomous":
+                if text_open:
+                    print()
+                    text_open = False
+                print_formatted_text(
+                    ANSI(
+                        f"\x1b[38;5;45m  ↻ autonomous continuation "
+                        f"{step.meta.get('turn', 0)}\x1b[0m"
+                    )
+                )
             elif step.kind == "error":
                 if text_open:
                     print()
@@ -257,6 +303,52 @@ class InteractiveApp:
             print(json.dumps(auth.describe(), indent=2))
         elif command == "/usage":
             print(self.agent.client.usage.summary(), "·", self.agent.ledger.summary())
+        elif command == "/models":
+            print("\n".join(MODEL_PRESETS.get(self.provider, ("auto",))))
+        elif command == "/settings":
+            print(
+                json.dumps(
+                    {
+                        "provider": self.provider,
+                        "model": self.agent.client.model,
+                        "effort": self.agent.client.effort,
+                        "verbosity": self.agent.client.verbosity,
+                        "autonomy": self._autonomy_label(),
+                        "auto_max_turns": self.args.auto_max_turns,
+                    },
+                    indent=2,
+                )
+            )
+        elif command == "/auto":
+            self._set_autonomy(value)
+        elif command == "/session":
+            self._show_session()
+        elif command == "/history":
+            self._show_history()
+        elif command == "/resume":
+            self._resume(value)
+        elif command == "/fork":
+            self._fork(value)
+        elif command == "/clone":
+            self._fork("")
+        elif command == "/tree":
+            self._tree(value)
+        elif command == "/name":
+            self._name(value)
+        elif command == "/export":
+            self._export(value)
+        elif command == "/import":
+            self._import(value)
+        elif command == "/copy":
+            self._copy_last()
+        elif command == "/reload":
+            self.agent.registry = build_registry(
+                disabled=self.args.disabled_tools,
+                skill_paths=self.args.skill_paths,
+            )
+            print("reloaded tools and skills")
+        elif command == "/hotkeys":
+            print("←/→ effort · Shift+↑/↓ model · Alt+Enter newline · Ctrl+C interrupt")
         elif command == "/clear":
             print("\x1b[2J\x1b[H", end="")
         elif command == "/new":
@@ -312,14 +404,186 @@ class InteractiveApp:
     def _new_session(self) -> None:
         if self.agent.session:
             self.agent.session.close()
-        self.agent.session = Session()
+        self.agent.session = Session(meta={"cwd": str(self.agent.cwd)})
         self.agent.items.clear()
         self.agent.client.cache_key = f"mjj-{self.agent.session.id}"
         print(f"new session {self.agent.session.id}")
 
+    def _autonomy_label(self) -> str:
+        if self.args.auto_next_steps and self.args.auto_next_idea:
+            return "full"
+        if self.args.auto_next_steps:
+            return "steps"
+        if self.args.auto_next_idea:
+            return "ideas"
+        return "off"
+
+    def _set_autonomy(self, value: str) -> None:
+        if not value:
+            print(
+                f"autonomy: {self._autonomy_label()} · max turns: "
+                f"{self.args.auto_max_turns or 'unlimited'}"
+            )
+            return
+        mode, _, raw_limit = value.partition(" ")
+        if mode not in ("off", "steps", "ideas", "full"):
+            print("usage: /auto off|steps|ideas|full [max-turns]")
+            return
+        if raw_limit:
+            try:
+                limit = int(raw_limit)
+            except ValueError:
+                print("max-turns must be a non-negative integer")
+                return
+            if limit < 0:
+                print("max-turns must be a non-negative integer")
+                return
+            self.args.auto_max_turns = limit
+        self.args.auto_next_steps = mode in ("steps", "full")
+        self.args.auto_next_idea = mode in ("ideas", "full")
+        print(f"autonomy: {self._autonomy_label()}")
+
+    def _show_session(self) -> None:
+        if not self.agent.session:
+            print("ephemeral session")
+            return
+        info = inspect_session(self.agent.session.path)
+        print(
+            json.dumps(
+                {
+                    "id": info.id,
+                    "name": info.name or None,
+                    "path": str(info.path),
+                    "cwd": info.cwd,
+                    "items": info.items,
+                },
+                indent=2,
+            )
+        )
+
+    def _show_history(self) -> None:
+        sessions = list_sessions(limit=20)
+        print("\n".join(session.summary() for session in sessions) or "no sessions")
+
+    def _resume(self, value: str) -> None:
+        if not value:
+            self._show_history()
+            print("usage: /resume ID|PATH")
+            return
+        try:
+            session, items = resume(value)
+        except (OSError, ValueError) as exc:
+            print(f"resume: {exc}")
+            return
+        self._switch_session(session, items)
+        print(f"resumed session {session.id}")
+
+    def _fork(self, value: str) -> None:
+        source = value or (str(self.agent.session.path) if self.agent.session else None)
+        try:
+            session, items = fork_session(source)
+        except (OSError, ValueError) as exc:
+            print(f"fork: {exc}")
+            return
+        self._switch_session(session, items)
+        print(f"forked session {session.id}")
+
+    def _tree(self, value: str) -> None:
+        points = [
+            (index + 1, item)
+            for index, item in enumerate(self.agent.items)
+            if item.get("type") == "message"
+        ]
+        if not value:
+            if not points:
+                print("empty session")
+                return
+            for index, item in points:
+                role = str(item.get("role") or "message")
+                preview = _message_text(item).replace("\n", " ")[:80]
+                print(f"{index:4} {role:9} {preview}")
+            print("use /tree ITEM to branch after that transcript item")
+            return
+        if not self.agent.session:
+            print("ephemeral session cannot be branched")
+            return
+        try:
+            through = int(value)
+            session, items = fork_session(self.agent.session.path, through=through)
+        except (OSError, ValueError) as exc:
+            print(f"tree: {exc}")
+            return
+        self._switch_session(session, items)
+        print(f"branched at item {through} into session {session.id}")
+
+    def _switch_session(self, session: Session, items: list[dict]) -> None:
+        if self.agent.session:
+            self.agent.session.close()
+        self.agent.session = session
+        self.agent.items = items
+        self.agent.client.cache_key = f"mjj-{session.id}"
+
+    def _name(self, value: str) -> None:
+        if not self.agent.session:
+            print("ephemeral session cannot be named")
+            return
+        if not value:
+            print("usage: /name DISPLAY NAME")
+            return
+        self.agent.session.note(name=value)
+        print(f"session name: {value}")
+
+    def _export(self, value: str) -> None:
+        if not self.agent.session:
+            print("ephemeral session cannot be exported")
+            return
+        destination = value or str(self.agent.cwd / f"mjj-{self.agent.session.id}.html")
+        try:
+            path = export_session(self.agent.session.path, destination)
+        except OSError as exc:
+            print(f"export: {exc}")
+            return
+        print(f"exported {path}")
+
+    def _import(self, value: str) -> None:
+        if not value:
+            print("usage: /import PATH.jsonl")
+            return
+        try:
+            session, items = import_session(Path(self.agent.cwd) / value)
+        except (OSError, ValueError) as exc:
+            print(f"import: {exc}")
+            return
+        self._switch_session(session, items)
+        print(f"imported {len(items)} items as session {session.id}")
+
+    def _copy_last(self) -> None:
+        text = _last_assistant_text(self.agent.items)
+        if not text:
+            print("no assistant response to copy")
+            return
+        encoded = base64.b64encode(text[:100_000].encode("utf-8")).decode("ascii")
+        print(f"\x1b]52;c;{encoded}\x07", end="")
+        print("copied last assistant response")
+
 
 def _tool_label(step: Step) -> str:
     return tool_progress(step)
+
+
+def _message_text(item: dict) -> str:
+    return "".join(
+        str(part.get("text") or "[image]")
+        for part in item.get("content") or []
+        if isinstance(part, dict)
+    )
+
+
+def _last_assistant_text(items: list[dict]) -> str:
+    for item in reversed(items):
+        if item.get("type") == "message" and item.get("role") == "assistant":
+            return _message_text(item)
+    return ""
 
 
 def run(agent: Agent, args) -> int:

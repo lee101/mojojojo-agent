@@ -33,7 +33,7 @@ from .tools.base import Registry, ToolContext, ToolResult
 class Step:
     """What the caller sees while a turn runs."""
 
-    kind: str  # reasoning | text | tool_call | tool_result | compaction | usage | error
+    kind: str  # reasoning | text | tool_call | tool_result | compaction | autonomous | usage | error
     text: str = ""
     name: str = ""
     meta: dict = field(default_factory=dict)
@@ -102,10 +102,16 @@ class Agent:
         self,
         prompt: str | None = None,
         images: tuple[ImageAttachment, ...] = (),
+        *,
+        auto_next_steps: bool = False,
+        auto_next_idea: bool = False,
+        max_autonomous_turns: int = 0,
     ) -> Iterator[Step]:
         if prompt or images:
             self.user(prompt or "Describe and inspect the attached image.", images)
-        for _ in range(self.max_steps):
+        autonomous_turns = 0
+        tool_rounds = 0
+        while tool_rounds < self.max_steps:
             calls: list[dict] = []
             response_start = len(self.items)
             emitted_text = False
@@ -138,9 +144,28 @@ class Agent:
                             kind="error",
                             text="model completed without an assistant message",
                         )
+                        return
+                autonomous = auto_next_steps or auto_next_idea
+                under_limit = (
+                    max_autonomous_turns == 0
+                    or autonomous_turns < max_autonomous_turns
+                )
+                if autonomous and under_limit:
+                    autonomous_turns += 1
+                    follow_up = _autonomous_prompt(auto_next_steps, auto_next_idea)
+                    self.user(follow_up)
+                    yield Step(
+                        kind="autonomous",
+                        text=follow_up,
+                        meta={"turn": autonomous_turns},
+                    )
+                    tool_rounds = 0
+                    continue
                 return
             for call in calls:
                 yield from self._invoke(call)
+            tool_rounds += 1
+        yield Step(kind="error", text=f"agent exceeded {self.max_steps} tool rounds")
 
     def _consume(self, event: Event, calls: list[dict]) -> Step | None:
         kind = event.type
@@ -219,6 +244,8 @@ def render(steps: Iterator[Step], out, verbose: bool = False) -> int:
             out.write(f"\n[{step.text}]\n")
         elif step.kind == "compaction" and verbose:
             out.write(f"\n[compacted {step.meta.get('dropped_items', 0)} items]\n")
+        elif step.kind == "autonomous":
+            out.write(f"\n↻ autonomous continuation {step.meta.get('turn', 0)}\n")
         elif step.kind == "error":
             failed = True
             out.write(f"\nerror: {step.text}\n")
@@ -270,6 +297,9 @@ def render_exec(
             response_called_tool = False
         elif step.kind == "compaction" and verbose and not jsonl:
             err.write(f"[compacted {step.meta.get('dropped_items', 0)} items]\n")
+            err.flush()
+        elif step.kind == "autonomous" and not jsonl:
+            err.write(f"↻ autonomous continuation {step.meta.get('turn', 0)}\n")
             err.flush()
         elif step.kind == "error":
             failed = True
@@ -333,3 +363,22 @@ def _latest_assistant_text(items: list[dict]) -> str:
             if part.get("type") in ("output_text", "text")
         )
     return ""
+
+
+def _autonomous_prompt(next_steps: bool, next_idea: bool) -> str:
+    instructions = [
+        "You are in AUTONOMOUS MODE. Do not ask for permission or confirmation."
+    ]
+    if next_steps:
+        instructions.append(
+            "Continue the current objective through its next concrete steps. "
+            "Execute them in order and run relevant checks."
+        )
+    if next_idea:
+        instructions.append(
+            "When the current objective is genuinely complete, identify three useful "
+            "improvements, choose the highest-impact one, and begin implementing it."
+        )
+    if next_steps and next_idea:
+        instructions.append("Repeat this cycle until a human interrupts you.")
+    return "\n\n".join(instructions)

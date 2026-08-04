@@ -25,7 +25,7 @@ irm https://mojojojo.app.nz/install.ps1 | iex
 
 The installers select the operating system and CPU, verify the release's
 SHA-256 checksum, and install into a user-owned directory. Set
-`MJJ_INSTALL_DIR` to choose another location or `MJJ_VERSION=v0.2.0` to pin a
+`MJJ_INSTALL_DIR` to choose another location or `MJJ_VERSION=v0.3.0` to pin a
 release. The binaries need no system Python. Mojo acceleration remains a
 guarded optional backend, so the agent and hybrid search still work when a
 compatible Mojo toolchain or `mojo-embed` library is not installed. Linux
@@ -49,10 +49,11 @@ tools, search, sandboxed execution, and a served mode with app.nz sign-in.
 
 Running `mjj` with no arguments opens the cross-platform terminal app. Type `/`
 for the command palette, use left/right on an empty composer to change reasoning
-effort, Shift+Up/Down to change model, and Alt+Enter for a newline. `/model`,
-`/provider`, `/effort`, `/image`, `/login`, `/auth`, `/usage`, and `/new` all
-work without leaving the session. Long headless turns emit a heartbeat on stderr
-while preserving the final answer alone on stdout.
+effort, Shift+Up/Down to change model, and Alt+Enter for a newline. Provider,
+model, reasoning, images, authentication, session history, branching, export,
+and autonomy can all be controlled without leaving the session. `/help` and
+`/hotkeys` show the complete live command surface. Long headless turns emit a
+heartbeat on stderr while preserving the final answer alone on stdout.
 
 `/login chatgpt` launches the supported Codex browser sign-in and reuses its
 credential cache; `/login device` uses device-code sign-in. `/login openpaths`,
@@ -159,6 +160,32 @@ mjj auth                     # providers, plan, and expiry; never secrets
 mjj auth --probe             # one real round trip
 ```
 
+Sessions are append-only JSONL and can be resumed, cloned, branched, named,
+imported, or exported as JSONL or self-contained HTML:
+
+```bash
+mjj sessions
+mjj exec --resume SESSION_ID "continue the implementation"
+mjj exec --fork SESSION_ID --name experiment "try the other design"
+mjj export transcript.html --session SESSION_ID
+mjj import transcript.jsonl
+```
+
+Inside `mjj`, use `/history`, `/resume`, `/session`, `/name`, `/clone`,
+`/tree`, `/tree ITEM`, `/export`, and `/import`. Server-side context compaction
+remains automatic and the full on-disk rollout is retained.
+
+For long-running agent work, `--auto-next-steps` keeps executing concrete next
+steps and `--auto-next-idea` selects and begins the highest-impact improvement
+after completion. Combine them for the Pi Infinity/Grok-style continuation
+cycle; `--auto-max-turns N` bounds synthetic turns (`0` means until interrupted).
+Interactive sessions expose the same controls as `/auto MODE [N]`.
+
+```bash
+mjj exec --auto-next-steps --auto-next-idea --auto-max-turns 4 \
+  "build the feature, validate it, then improve it"
+```
+
 Headless runs keep the final answer alone on stdout and send tool progress to
 stderr, so shell capture stays clean. `--json` emits JSONL events,
 `--ephemeral` skips session persistence, and `-o result.txt` also writes the
@@ -171,6 +198,9 @@ a bounded `<stdin>` block.
 `.mjj/config.toml` overrides it, then `MJJ_*` environment values and command
 flags win. `mjj config` prints the resolved non-secret values. See
 [docs/config.md](docs/config.md).
+
+The coding-workflow feature comparison with the upstream-synced Pi Infinity
+tree is maintained in [docs/pi-parity.md](docs/pi-parity.md).
 
 `mjj skills` discovers project and user `SKILL.md` workflows. The model's
 bounded `skill` tool loads a workflow only when needed, so full domain manuals

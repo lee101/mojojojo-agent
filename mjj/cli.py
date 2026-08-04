@@ -22,7 +22,14 @@ from .model import ModelClient, probe
 from .media import ImageInputError, prepare_image
 from .search.cli import main as search_main
 from .search.index import build_index
-from .session import Session, resume
+from .session import (
+    Session,
+    export_session,
+    fork_session,
+    import_session,
+    list_sessions,
+    resume,
+)
 from .skills import discover
 from .tools import build_registry
 from .version import __version__
@@ -30,12 +37,15 @@ from .version import __version__
 
 def _agent(args) -> Agent:
     items: list[dict] = []
-    if getattr(args, "resume", None) is not None:
+    cwd = Path(args.cwd).resolve()
+    if getattr(args, "fork", None) is not None:
+        session, items = fork_session(args.fork or None)
+    elif getattr(args, "resume", None) is not None:
         session, items = resume(args.resume or None)
     elif getattr(args, "ephemeral", False):
         session = None
     else:
-        session = Session()
+        session = Session(meta={"cwd": str(cwd)})
     client = ModelClient(
         model=args.model,
         provider=args.provider,
@@ -49,17 +59,24 @@ def _agent(args) -> Agent:
             skill_paths=args.skill_paths,
         ),
         client=client,
-        cwd=Path(args.cwd).resolve(),
+        cwd=cwd,
         ledger=Ledger(Budget(default=args.tool_budget)),
         session=session,
         project_doc_max_bytes=args.resolved_config.project_doc_max_bytes,
     )
     agent.items = items
+    name = getattr(args, "name", None)
+    if name and session:
+        session.note(name=name)
     return agent
 
 
 def cmd_exec(args) -> int:
-    agent = _agent(args)
+    try:
+        agent = _agent(args)
+    except (OSError, ValueError) as exc:
+        print(f"mjj exec: {exc}", file=sys.stderr)
+        return 2
     prompt = _exec_prompt(args.prompt)
     try:
         images = tuple(prepare_image(path) for path in args.images)
@@ -73,7 +90,13 @@ def cmd_exec(args) -> int:
     try:
         heartbeat.start()
         code, final_text = render_exec(
-            agent.run(prompt, images=images),
+            agent.run(
+                prompt,
+                images=images,
+                auto_next_steps=args.auto_next_steps,
+                auto_next_idea=args.auto_next_idea,
+                max_autonomous_turns=args.auto_max_turns,
+            ),
             sys.stdout,
             sys.stderr,
             verbose=args.verbose,
@@ -151,7 +174,12 @@ def _exec_prompt(positional: str | None, max_stdin_chars: int = 1_048_576) -> st
 def cmd_repl(args) -> int:
     from .tui import run
 
-    return run(_agent(args), args)
+    try:
+        agent = _agent(args)
+    except (OSError, ValueError) as exc:
+        print(f"mjj: {exc}", file=sys.stderr)
+        return 2
+    return run(agent, args)
 
 
 def cmd_auth(args) -> int:
@@ -278,6 +306,52 @@ def cmd_config(args) -> int:
     return 0
 
 
+def cmd_sessions(args) -> int:
+    sessions = list_sessions(limit=args.limit)
+    if args.json:
+        print(
+            json.dumps(
+                [
+                    {
+                        "id": session.id,
+                        "name": session.name or None,
+                        "path": str(session.path),
+                        "cwd": session.cwd,
+                        "items": session.items,
+                        "modified": session.modified,
+                    }
+                    for session in sessions
+                ],
+                indent=2,
+            )
+        )
+    else:
+        for session in sessions:
+            print(session.summary())
+    return 0
+
+
+def cmd_export(args) -> int:
+    try:
+        path = export_session(args.session, args.output)
+    except OSError as exc:
+        print(f"mjj export: {exc}", file=sys.stderr)
+        return 2
+    print(path)
+    return 0
+
+
+def cmd_import(args) -> int:
+    try:
+        session, items = import_session(args.input)
+    except (OSError, ValueError) as exc:
+        print(f"mjj import: {exc}", file=sys.stderr)
+        return 2
+    session.close()
+    print(f"imported {len(items)} items as session {session.id}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     bootstrap = argparse.ArgumentParser(add_help=False)
@@ -297,6 +371,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--effort", default=config.effort, choices=EFFORTS)
     parser.add_argument("--verbosity", default=config.verbosity, choices=VERBOSITIES)
     parser.add_argument("--tool-budget", type=int, default=config.tool_budget)
+    parser.add_argument(
+        "--auto-next-steps", action="store_true", default=config.auto_next_steps
+    )
+    parser.add_argument(
+        "--auto-next-idea", action="store_true", default=config.auto_next_idea
+    )
+    parser.add_argument("--auto-max-turns", type=int, default=config.auto_max_turns)
     parser.add_argument("-C", "--cd", "--cwd", dest="cwd", default=known.cwd)
     parser.add_argument("--config")
     parser.add_argument("-v", "--verbose", action="store_true")
@@ -308,6 +389,9 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--model", default=argparse.SUPPRESS)
     run.add_argument("--effort", choices=EFFORTS, default=argparse.SUPPRESS)
     run.add_argument("--verbosity", choices=VERBOSITIES, default=argparse.SUPPRESS)
+    run.add_argument("--auto-next-steps", action="store_true", default=argparse.SUPPRESS)
+    run.add_argument("--auto-next-idea", action="store_true", default=argparse.SUPPRESS)
+    run.add_argument("--auto-max-turns", type=int, default=argparse.SUPPRESS)
     run.add_argument(
         "-i", "--image", dest="images", action="append", default=[], metavar="PATH",
         help="attach an image (repeatable; sent as quality-85 WebP)",
@@ -317,7 +401,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     persistence = run.add_mutually_exclusive_group()
     persistence.add_argument("--resume", nargs="?", const="", default=None)
+    persistence.add_argument("--fork", nargs="?", const="", default=None)
     persistence.add_argument("--ephemeral", action="store_true")
+    run.add_argument("--name", help="set the session display name")
     run.add_argument("--json", action="store_true", help="emit JSONL events")
     run.add_argument(
         "-o", "--output-last-message", metavar="PATH", help="write final text to PATH"
@@ -328,7 +414,13 @@ def main(argv: list[str] | None = None) -> int:
     chat.add_argument("--provider", choices=PROVIDERS, default=argparse.SUPPRESS)
     chat.add_argument("--model", default=argparse.SUPPRESS)
     chat.add_argument("--effort", choices=EFFORTS, default=argparse.SUPPRESS)
-    chat.add_argument("--resume", nargs="?", const="", default=None)
+    chat.add_argument("--auto-next-steps", action="store_true", default=argparse.SUPPRESS)
+    chat.add_argument("--auto-next-idea", action="store_true", default=argparse.SUPPRESS)
+    chat.add_argument("--auto-max-turns", type=int, default=argparse.SUPPRESS)
+    chat_persistence = chat.add_mutually_exclusive_group()
+    chat_persistence.add_argument("--resume", nargs="?", const="", default=None)
+    chat_persistence.add_argument("--fork", nargs="?", const="", default=None)
+    chat.add_argument("--name")
     chat.set_defaults(func=cmd_repl)
 
     who = sub.add_parser("auth", help="credential status")
@@ -378,7 +470,23 @@ def main(argv: list[str] | None = None) -> int:
     config_command = sub.add_parser("config", help="show resolved non-secret config")
     config_command.set_defaults(func=cmd_config)
 
+    sessions = sub.add_parser("sessions", help="list saved sessions")
+    sessions.add_argument("--limit", type=int, default=20)
+    sessions.add_argument("--json", action="store_true")
+    sessions.set_defaults(func=cmd_sessions)
+
+    exporting = sub.add_parser("export", help="export a session to HTML or JSONL")
+    exporting.add_argument("output")
+    exporting.add_argument("--session")
+    exporting.set_defaults(func=cmd_export)
+
+    importing = sub.add_parser("import", help="import a JSONL session")
+    importing.add_argument("input")
+    importing.set_defaults(func=cmd_import)
+
     args = parser.parse_args(argv)
+    if args.auto_max_turns < 0:
+        parser.error("--auto-max-turns must be non-negative")
     args.disabled_tools = config.disabled_tools
     args.skill_paths = config.skill_paths
     args.resolved_config = config

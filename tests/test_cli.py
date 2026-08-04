@@ -69,6 +69,34 @@ def test_exec_accepts_provider_model_effort_and_images_after_subcommand(monkeypa
     }
 
 
+def test_exec_accepts_autonomy_and_session_controls_after_subcommand(monkeypatch) -> None:
+    seen = {}
+
+    def capture(args) -> int:
+        seen.update(
+            steps=args.auto_next_steps,
+            ideas=args.auto_next_idea,
+            turns=args.auto_max_turns,
+            fork=args.fork,
+            name=args.name,
+        )
+        return 0
+
+    monkeypatch.setattr(cli, "cmd_exec", capture)
+    assert main([
+        "exec", "--auto-next-steps", "--auto-next-idea",
+        "--auto-max-turns", "3", "--fork", "abc123", "--name", "experiment",
+        "task",
+    ]) == 0
+    assert seen == {
+        "steps": True,
+        "ideas": True,
+        "turns": 3,
+        "fork": "abc123",
+        "name": "experiment",
+    }
+
+
 def test_login_defaults_to_chatgpt(monkeypatch) -> None:
     seen = {}
 
@@ -79,6 +107,18 @@ def test_login_defaults_to_chatgpt(monkeypatch) -> None:
     monkeypatch.setattr(cli, "cmd_login", capture)
     assert main(["login"]) == 0
     assert seen == {"provider": "chatgpt"}
+
+
+def test_import_subcommand_accepts_a_jsonl_path(monkeypatch) -> None:
+    seen = {}
+
+    def capture(args) -> int:
+        seen["input"] = args.input
+        return 0
+
+    monkeypatch.setattr(cli, "cmd_import", capture)
+    assert main(["import", "transcript.jsonl"]) == 0
+    assert seen == {"input": "transcript.jsonl"}
 
 
 def test_headless_heartbeat_keeps_long_reasoning_visibly_alive() -> None:

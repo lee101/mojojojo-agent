@@ -30,6 +30,9 @@ class Config:
     verbosity: str = "low"
     tool_budget: int = 1600
     project_doc_max_bytes: int = 32 * 1024
+    auto_next_steps: bool = False
+    auto_next_idea: bool = False
+    auto_max_turns: int = 0
     disabled_tools: tuple[str, ...] = ()
     skill_paths: tuple[Path, ...] = ()
     files: tuple[Path, ...] = field(default=(), repr=False)
@@ -81,10 +84,17 @@ def load(
         "MJJ_VERBOSITY": "verbosity",
         "MJJ_TOOL_BUDGET": "tool_budget",
         "MJJ_PROJECT_DOC_MAX_BYTES": "project_doc_max_bytes",
+        "MJJ_AUTO_MAX_TURNS": "auto_max_turns",
     }
     for variable, key in env_keys.items():
         if env.get(variable, "").strip():
             values[key] = env[variable].strip()
+    for variable, key in (
+        ("MJJ_AUTO_NEXT_STEPS", "auto_next_steps"),
+        ("MJJ_AUTO_NEXT_IDEA", "auto_next_idea"),
+    ):
+        if variable in env:
+            values[key] = _boolean(env[variable], variable)
     if "MJJ_DISABLE_TOOLS" in env:
         values["disabled_tools"] = tuple(
             part.strip()
@@ -118,7 +128,16 @@ def _merge_document(values: dict[str, Any], document: dict, path: Path) -> None:
     for section, name in ((agent, "agent"), (tools, "tools"), (skills, "skills")):
         if not isinstance(section, dict):
             raise ConfigError(f"[{name}] in {path} must be a table")
-    for key in ("provider", "model", "effort", "verbosity", "project_doc_max_bytes"):
+    for key in (
+        "provider",
+        "model",
+        "effort",
+        "verbosity",
+        "project_doc_max_bytes",
+        "auto_next_steps",
+        "auto_next_idea",
+        "auto_max_turns",
+    ):
         if key in agent:
             values[key] = agent[key]
     if "budget" in tools:
@@ -147,6 +166,9 @@ def _validated(values: Mapping[str, Any]) -> Config:
     project_doc_max_bytes = values.get(
         "project_doc_max_bytes", Config.project_doc_max_bytes
     )
+    auto_next_steps = values.get("auto_next_steps", Config.auto_next_steps)
+    auto_next_idea = values.get("auto_next_idea", Config.auto_next_idea)
+    auto_max_turns = values.get("auto_max_turns", Config.auto_max_turns)
     disabled = values.get("disabled_tools", ())
     skill_paths = values.get("skill_paths", ())
     if provider not in PROVIDERS:
@@ -177,6 +199,16 @@ def _validated(values: Mapping[str, Any]) -> Config:
         ) from exc
     if project_doc_max_bytes < 0:
         raise ConfigError("agent.project_doc_max_bytes must be a non-negative integer")
+    if not isinstance(auto_next_steps, bool) or not isinstance(auto_next_idea, bool):
+        raise ConfigError("agent.auto_next_steps and auto_next_idea must be booleans")
+    if isinstance(auto_max_turns, bool):
+        raise ConfigError("agent.auto_max_turns must be a non-negative integer")
+    try:
+        auto_max_turns = int(auto_max_turns)
+    except (TypeError, ValueError) as exc:
+        raise ConfigError("agent.auto_max_turns must be a non-negative integer") from exc
+    if auto_max_turns < 0:
+        raise ConfigError("agent.auto_max_turns must be a non-negative integer")
     if not isinstance(disabled, (list, tuple)) or any(
         not isinstance(item, str) or not item.strip() for item in disabled
     ):
@@ -190,7 +222,19 @@ def _validated(values: Mapping[str, Any]) -> Config:
         verbosity=verbosity,
         tool_budget=budget,
         project_doc_max_bytes=project_doc_max_bytes,
+        auto_next_steps=auto_next_steps,
+        auto_next_idea=auto_next_idea,
+        auto_max_turns=auto_max_turns,
         disabled_tools=tuple(dict.fromkeys(item.strip() for item in disabled)),
         skill_paths=tuple(Path(item).expanduser().resolve() for item in skill_paths),
         files=tuple(values.get("files", ())),
     )
+
+
+def _boolean(value: str, variable: str) -> bool:
+    normalized = value.strip().lower()
+    if normalized in ("1", "true", "yes", "on"):
+        return True
+    if normalized in ("0", "false", "no", "off"):
+        return False
+    raise ConfigError(f"{variable} must be true or false")

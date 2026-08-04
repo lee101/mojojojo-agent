@@ -69,6 +69,8 @@ COMMANDS = {
     "/checkpoints": "list recent automatic patch checkpoints",
     "/auto": "set autonomy: off, steps, ideas, or full",
     "/goal": "inspect, set, pause, resume, complete, or clear a durable goal",
+    "/plan": "show or clear the current structured task plan",
+    "/mcp": "show configured MCP tools and startup warnings",
     "/session": "show current session information",
     "/history": "list recent sessions",
     "/resume": "resume a saved session by id or path",
@@ -343,6 +345,14 @@ class InteractiveApp:
         auto = f" · auto {autonomy}" if autonomy != "off" else ""
         goal = self.agent.current_goal()
         goal_label = f" · goal {goal.status}" if goal is not None else ""
+        plan_state = self.agent.ctx.state.get("plan")
+        plan_items = plan_state.get("plan", []) if isinstance(plan_state, dict) else []
+        completed = sum(
+            item.get("status") == "completed"
+            for item in plan_items
+            if isinstance(item, dict)
+        )
+        plan_label = f" · plan {completed}/{len(plan_items)}" if plan_items else ""
         model_key = (
             "F2 model"
             if len(MODEL_PRESETS.get(self.provider, ("auto",))) > 1
@@ -352,7 +362,7 @@ class InteractiveApp:
             " <b>mjj</b> · "
             f"{html.escape(self.provider)}/{html.escape(self.agent.client.model)} · "
             f"reasoning <b>{html.escape(self.agent.client.effort)}</b>"
-            f"{auto}{goal_label}{images} · "
+            f"{auto}{goal_label}{plan_label}{images} · "
             f"{html.escape(cwd)}   {model_key} · F3 effort · / commands "
         )
 
@@ -375,8 +385,6 @@ class InteractiveApp:
                 self._shell(line)
                 continue
             self.turn(line)
-        if self.agent.session:
-            self.agent.session.close()
         return 0
 
     def _welcome(self) -> None:
@@ -394,6 +402,11 @@ class InteractiveApp:
                 "F3 reasoning · Alt+Enter newline"
             )
         )
+        warnings = self.agent.registry.warnings
+        for warning in warnings[:5]:
+            print_formatted_text(ANSI(f"\x1b[33mwarning: {warning}\x1b[0m"))
+        if len(warnings) > 5:
+            print_formatted_text(ANSI(f"\x1b[33m… {len(warnings) - 5} more warnings; /mcp\x1b[0m"))
 
     def turn(self, text: str) -> None:
         images = tuple(self.attachments)
@@ -434,6 +447,9 @@ class InteractiveApp:
                     print_formatted_text(ANSI(f"\x1b[31m    {step.text}\x1b[0m"))
                 elif step.meta.get("terminal_image"):
                     self._render_image_event(step)
+                elif step.name == "update_plan":
+                    summary = _plan_summary(step)
+                    print_formatted_text(ANSI(f"\x1b[2m    ✓ {summary}\x1b[0m"))
                 elif step.name in {"apply_patch", "checkpoint", "check"}:
                     summary = _compact_result(step.text)
                     print_formatted_text(ANSI(f"\x1b[2m    ✓ {summary}\x1b[0m"))
@@ -562,6 +578,20 @@ class InteractiveApp:
             self._set_autonomy(value)
         elif command == "/goal":
             self._goal(value)
+        elif command == "/plan":
+            if value == "clear":
+                self.agent.ctx.state.pop("plan", None)
+                print("structured plan cleared")
+            else:
+                plan = self.agent.ctx.state.get("plan")
+                print(json.dumps(plan, indent=2) if plan else "no structured plan yet")
+        elif command == "/mcp":
+            tools = sorted(
+                name for name in self.agent.registry.tools if name.startswith("mcp__")
+            )
+            for warning in self.agent.registry.warnings:
+                print(f"warning: {warning}")
+            print("\n".join(tools) if tools else "no MCP tools available")
         elif command == "/session":
             self._show_session()
         elif command == "/history":
@@ -583,9 +613,11 @@ class InteractiveApp:
         elif command == "/copy":
             self._copy_last()
         elif command == "/reload":
+            self.agent.registry.close()
             self.agent.registry = build_registry(
                 disabled=self.args.disabled_tools,
                 skill_paths=self.args.skill_paths,
+                mcp_servers=self.args.resolved_config.mcp_servers,
             )
             if self.agent.goal_store is not None:
                 self.agent.bind_goal_store(self.agent.goal_store)
@@ -644,6 +676,7 @@ class InteractiveApp:
             "session": session.id if session else "ephemeral",
             "transcript_items": len(self.agent.items),
             "tools": sorted(self.agent.registry.tools),
+            "tool_warnings": list(self.agent.registry.warnings),
             "project_docs": [
                 str(path) for path in self.agent.project_instructions.sources
             ],
@@ -836,6 +869,7 @@ class InteractiveApp:
             self.agent.session.close()
         self.agent.session = Session(meta={"cwd": str(self.agent.cwd)})
         self.agent.items.clear()
+        self.agent.ctx.state.pop("plan", None)
         self.agent.client.cache_key = f"mjj-{self.agent.session.id}"
         print(f"new session {self.agent.session.id}")
 
@@ -1001,6 +1035,7 @@ class InteractiveApp:
             self.agent.session.close()
         self.agent.session = session
         self.agent.items = items
+        self.agent.ctx.state.pop("plan", None)
         self.agent.client.cache_key = f"mjj-{session.id}"
 
     def _name(self, value: str) -> None:
@@ -1054,6 +1089,24 @@ def _tool_label(step: Step) -> str:
 def _compact_result(text: str, limit: int = 160) -> str:
     line = " ".join(text.split())
     return line if len(line) <= limit else line[: limit - 1] + "…"
+
+
+def _plan_summary(step: Step) -> str:
+    state = step.meta.get("plan")
+    items = state.get("plan", []) if isinstance(state, dict) else []
+    completed = sum(
+        item.get("status") == "completed" for item in items if isinstance(item, dict)
+    )
+    active = next(
+        (
+            str(item.get("step") or "")
+            for item in items
+            if isinstance(item, dict) and item.get("status") == "in_progress"
+        ),
+        "",
+    )
+    summary = f"plan {completed}/{len(items)} complete"
+    return f"{summary} · {active[:100]}" if active else summary
 
 
 def _path_argument(value: str) -> str:
@@ -1117,4 +1170,9 @@ def _last_assistant_text(items: list[dict]) -> str:
 
 
 def run(agent: Agent, args) -> int:
-    return InteractiveApp(agent, args).run()
+    try:
+        return InteractiveApp(agent, args).run()
+    finally:
+        if agent.session:
+            agent.session.close()
+        agent.registry.close()

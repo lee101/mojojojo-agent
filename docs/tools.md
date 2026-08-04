@@ -124,13 +124,15 @@ See [search.md](search.md) for grounding, persistence, and measurements.
 
 ## `navigate`
 
-`navigate` provides `definition`, `references`, `hover`, and document
-`symbols` for a one-based file position. It starts only an already-installed
-Pyright, TypeScript, Rust, Go, Clang, or Ruby language server and downloads
-nothing. If no server is installed, it falls back to the incremental hybrid
-index and still returns bounded `path:line` evidence. Hosted sessions always
-use the index fallback because language-server project configuration may be
-executable.
+`navigate` provides `definition`, `references`, `hover`, document `symbols`,
+incoming/outgoing calls, and semantic `rename` for a one-based file position.
+It starts only an already-installed Pyright, TypeScript, Rust, Go, Clang, or
+Ruby language server and downloads nothing. Safe read operations fall back to
+the incremental hybrid index. Rename never falls back to text replacement: LSP
+workspace edits are approval-gated, workspace-confined, syntax-checked, atomic,
+and checkpointed. See [LSP refactors and call hierarchy](lsp-refactors.md).
+Hosted sessions always use the index fallback because language-server project
+configuration may be executable.
 
 ```json
 {"action":"definition","path":"mjj/agent.py","line":151,"column":20}
@@ -194,6 +196,22 @@ durable goal. It can inspect status, record a bounded progress checkpoint, or
 mark the goal complete/blocked with an evidence message. Goal state is atomic,
 workspace-scoped, and independent of transcript compaction or branching. See
 [durable goals](goals.md).
+
+## `update_plan`
+
+`update_plan` stores a compact structured plan in the current run. A plan has
+at most 20 steps with `pending`, `in_progress`, or `completed` status, and at
+most one step may be in progress. Replacing the plan returns counts rather than
+echoing every step into the transcript; `/plan` displays the current state.
+The toolbar and tool result show completion progress without repeating the
+whole plan, and `/plan clear` removes run-local state.
+
+## Configured MCP tools
+
+Local MCP stdio servers contribute namespaced `mcp__SERVER__TOOL` functions
+only when configured. Discovery, schemas, binary content, and text results are
+bounded, and each call follows the active permission mode. See [MCP tool
+servers](mcp.md).
 
 ## `delegate`
 

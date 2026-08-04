@@ -18,6 +18,33 @@ except ImportError:  # pragma: no cover - Python 3.10
 EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
 VERBOSITIES = ("low", "medium", "high")
 PROVIDERS = ("auto", "openpaths", "openrouter", "openai", "custom")
+MAX_MCP_SERVERS = 16
+
+
+@dataclass(frozen=True)
+class MCPServerConfig:
+    """One explicitly configured local MCP stdio server."""
+
+    name: str
+    command: tuple[str, ...]
+    cwd: Path | None = None
+    env: tuple[tuple[str, str], ...] = ()
+    startup_timeout: float = 10.0
+    tool_timeout: float = 120.0
+    max_tools: int = 32
+
+    def public(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "command": list(self.command),
+            "cwd": str(self.cwd) if self.cwd is not None else None,
+            "env_keys": [key for key, _ in self.env],
+            "startup_timeout": self.startup_timeout,
+            "tool_timeout": self.tool_timeout,
+            "max_tools": self.max_tools,
+        }
+
+
 class ConfigError(ValueError):
     pass
 
@@ -36,11 +63,13 @@ class Config:
     auto_max_turns: int = 0
     disabled_tools: tuple[str, ...] = ()
     skill_paths: tuple[Path, ...] = ()
+    mcp_servers: tuple[MCPServerConfig, ...] = ()
     files: tuple[Path, ...] = field(default=(), repr=False)
 
     def public(self) -> dict[str, Any]:
         result = asdict(self)
         result["skill_paths"] = [str(path) for path in self.skill_paths]
+        result["mcp_servers"] = [server.public() for server in self.mcp_servers]
         result["files"] = [str(path) for path in self.files]
         return result
 
@@ -75,7 +104,7 @@ def load(
                 document = tomllib.load(handle)
         except (OSError, tomllib.TOMLDecodeError) as exc:
             raise ConfigError(f"cannot load {path}: {exc}") from exc
-        _merge_document(values, document, path)
+        _merge_document(values, document, path, env)
         loaded.append(path.resolve())
 
     env_keys = {
@@ -123,7 +152,12 @@ def _project_config(cwd: Path) -> Path | None:
     return None
 
 
-def _merge_document(values: dict[str, Any], document: dict, path: Path) -> None:
+def _merge_document(
+    values: dict[str, Any],
+    document: dict,
+    path: Path,
+    environ: Mapping[str, str],
+) -> None:
     agent = document.get("agent", {})
     tools = document.get("tools", {})
     skills = document.get("skills", {})
@@ -158,6 +192,67 @@ def _merge_document(values: dict[str, Any], document: dict, path: Path) -> None:
                 candidate = path.parent / candidate
             resolved.append(candidate.resolve())
         values["skill_paths"] = tuple(resolved)
+    raw_servers = document.get("mcp_servers", {})
+    if not isinstance(raw_servers, dict):
+        raise ConfigError(f"[mcp_servers] in {path} must be a table")
+    servers = dict(values.get("mcp_servers", {}))
+    for raw_name, raw_server in raw_servers.items():
+        name = str(raw_name).strip()
+        if not name or not isinstance(raw_server, dict):
+            raise ConfigError(f"mcp_servers.{raw_name} in {path} must be a table")
+        if not isinstance(raw_server.get("enabled", True), bool):
+            raise ConfigError(f"mcp_servers.{name}.enabled must be a boolean")
+        if raw_server.get("enabled", True) is False:
+            servers.pop(name, None)
+            continue
+        command = raw_server.get("command")
+        args = raw_server.get("args", [])
+        if isinstance(command, str):
+            command = [command]
+        if (
+            not isinstance(command, list)
+            or not command
+            or any(not isinstance(item, str) or not item for item in command)
+            or not isinstance(args, list)
+            or any(not isinstance(item, str) for item in args)
+        ):
+            raise ConfigError(
+                f"mcp_servers.{name}.command must be a string or non-empty string array"
+            )
+        raw_env = raw_server.get("env", {})
+        env_vars = raw_server.get("env_vars", [])
+        if not isinstance(raw_env, dict) or any(
+            not isinstance(key, str) or not isinstance(value, str)
+            for key, value in raw_env.items()
+        ):
+            raise ConfigError(f"mcp_servers.{name}.env must be a string table")
+        if not isinstance(env_vars, list) or any(
+            not isinstance(item, str) or not item for item in env_vars
+        ):
+            raise ConfigError(f"mcp_servers.{name}.env_vars must be a string array")
+        expanded_env = dict(raw_env)
+        for key in env_vars:
+            if key in environ:
+                expanded_env[key] = environ[key]
+        raw_cwd = raw_server.get("cwd")
+        server_cwd = None
+        if raw_cwd is not None:
+            if not isinstance(raw_cwd, str) or not raw_cwd.strip():
+                raise ConfigError(f"mcp_servers.{name}.cwd must be a path string")
+            server_cwd = Path(raw_cwd).expanduser()
+            if not server_cwd.is_absolute():
+                server_cwd = path.parent / server_cwd
+            server_cwd = server_cwd.resolve()
+        servers[name] = {
+            "name": name,
+            "command": tuple([*command, *args]),
+            "cwd": server_cwd,
+            "env": tuple(sorted(expanded_env.items())),
+            "startup_timeout": raw_server.get("startup_timeout", 10.0),
+            "tool_timeout": raw_server.get("tool_timeout", 120.0),
+            "max_tools": raw_server.get("max_tools", 32),
+        }
+    values["mcp_servers"] = servers
 
 
 def _validated(values: Mapping[str, Any]) -> Config:
@@ -175,6 +270,7 @@ def _validated(values: Mapping[str, Any]) -> Config:
     auto_max_turns = values.get("auto_max_turns", Config.auto_max_turns)
     disabled = values.get("disabled_tools", ())
     skill_paths = values.get("skill_paths", ())
+    raw_mcp_servers = values.get("mcp_servers", {})
     if provider not in PROVIDERS:
         raise ConfigError(f"agent.provider must be one of {', '.join(PROVIDERS)}")
     if not isinstance(model, str) or not model.strip():
@@ -223,6 +319,39 @@ def _validated(values: Mapping[str, Any]) -> Config:
         raise ConfigError("tools.disabled must be an array of tool names")
     if not isinstance(skill_paths, (list, tuple)):
         raise ConfigError("skills.paths must be an array of paths")
+    mcp_servers: list[MCPServerConfig] = []
+    if not isinstance(raw_mcp_servers, dict):
+        raise ConfigError("mcp_servers must be a table")
+    for name, raw_server in raw_mcp_servers.items():
+        try:
+            startup_timeout = float(raw_server["startup_timeout"])
+            tool_timeout = float(raw_server["tool_timeout"])
+            max_tools = int(raw_server["max_tools"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ConfigError(f"mcp_servers.{name} has invalid limits") from exc
+        if not 0.1 <= startup_timeout <= 300:
+            raise ConfigError(
+                f"mcp_servers.{name}.startup_timeout must be between 0.1 and 300"
+            )
+        if not 0.1 <= tool_timeout <= 3600:
+            raise ConfigError(
+                f"mcp_servers.{name}.tool_timeout must be between 0.1 and 3600"
+            )
+        if not 1 <= max_tools <= 128:
+            raise ConfigError(f"mcp_servers.{name}.max_tools must be between 1 and 128")
+        mcp_servers.append(
+            MCPServerConfig(
+                name=name,
+                command=raw_server["command"],
+                cwd=raw_server["cwd"],
+                env=raw_server["env"],
+                startup_timeout=startup_timeout,
+                tool_timeout=tool_timeout,
+                max_tools=max_tools,
+            )
+        )
+    if len(mcp_servers) > MAX_MCP_SERVERS:
+        raise ConfigError(f"mcp_servers may configure at most {MAX_MCP_SERVERS} servers")
     return Config(
         provider=provider,
         model=model.strip(),
@@ -236,6 +365,7 @@ def _validated(values: Mapping[str, Any]) -> Config:
         auto_max_turns=auto_max_turns,
         disabled_tools=tuple(dict.fromkeys(item.strip() for item in disabled)),
         skill_paths=tuple(Path(item).expanduser().resolve() for item in skill_paths),
+        mcp_servers=tuple(mcp_servers),
         files=tuple(values.get("files", ())),
     )
 

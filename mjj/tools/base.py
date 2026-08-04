@@ -78,6 +78,8 @@ class Tool(Protocol):
 @dataclass
 class Registry:
     tools: dict[str, Tool] = field(default_factory=dict)
+    warnings: list[str] = field(default_factory=list)
+    resources: list[Any] = field(default_factory=list, repr=False)
 
     def add(self, tool: Tool) -> "Registry":
         self.tools[tool.name] = tool
@@ -129,6 +131,17 @@ class Registry:
             return result
         except Exception as exc:  # a tool crash is a turn event, not a stack trace
             return ToolResult.error(f"{type(exc).__name__}: {exc}")
+
+    def close(self) -> None:
+        """Close unique optional backends without making shutdown fragile."""
+        resources, self.resources = self.resources, []
+        for resource in resources:
+            close = getattr(resource, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:
+                    pass
 
 
 def _argument_paths(args: dict, cwd: Path) -> list[Path]:

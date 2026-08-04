@@ -85,6 +85,11 @@ flow without leaving the app. Every successful patch creates an external,
 bounded checkpoint; `/undo` restores the latest one only when none of its files
 changed afterward, and `/checkpoints` shows the retained history.
 
+Configured MCP stdio servers contribute bounded namespaced tools shared by the
+same loop; `/mcp` shows inventory and startup warnings, while `/reload` refreshes
+servers, built-ins, and skills. Multi-step work can maintain a structured
+`update_plan` state visible through `/plan`. See [the MCP guide](docs/mcp.md).
+
 `/login chatgpt` launches the supported Codex browser sign-in and reuses its
 credential cache; `/login device` uses device-code sign-in. `/login openpaths`,
 `/login openrouter`, and `/login openai` securely prompt for an API key and save

@@ -88,3 +88,65 @@ def test_invalid_config_is_actionable(tmp_path: Path, content: str, message: str
 def test_invalid_autonomy_environment_boolean_is_actionable(tmp_path: Path):
     with pytest.raises(ConfigError, match="MJJ_AUTO_NEXT_STEPS"):
         load(tmp_path, environ={"MJJ_AUTO_NEXT_STEPS": "sometimes"})
+
+
+def test_mcp_config_resolves_paths_forwards_selected_env_and_redacts_values(tmp_path: Path):
+    config_path = tmp_path / "agent.toml"
+    config_path.write_text(
+        """
+[mcp_servers.files]
+command = "python"
+args = ["server.py"]
+cwd = "runtime"
+env = { PUBLIC = "yes" }
+env_vars = ["MCP_SECRET"]
+startup_timeout = 2
+tool_timeout = 9
+max_tools = 7
+""",
+        encoding="utf-8",
+    )
+
+    config = load(
+        tmp_path,
+        explicit=config_path,
+        environ={"MJJ_HOME": str(tmp_path / "home"), "MCP_SECRET": "hidden"},
+    )
+
+    server = config.mcp_servers[0]
+    assert server.command == ("python", "server.py")
+    assert server.cwd == (tmp_path / "runtime").resolve()
+    assert dict(server.env) == {"MCP_SECRET": "hidden", "PUBLIC": "yes"}
+    assert server.max_tools == 7
+    public = config.public()["mcp_servers"][0]
+    assert public["env_keys"] == ["MCP_SECRET", "PUBLIC"]
+    assert "hidden" not in str(public)
+
+
+@pytest.mark.parametrize(
+    "body, message",
+    [
+        ("[mcp_servers.bad]\ncommand=[]\n", "command"),
+        ("[mcp_servers.bad]\ncommand='x'\nmax_tools=0\n", "max_tools"),
+        ("[mcp_servers.bad]\ncommand='x'\nenv_vars='TOKEN'\n", "env_vars"),
+        ("[mcp_servers.bad]\ncommand='x'\nenabled='yes'\n", "enabled"),
+    ],
+)
+def test_invalid_mcp_config_is_actionable(tmp_path: Path, body: str, message: str):
+    path = tmp_path / "bad-mcp.toml"
+    path.write_text(body, encoding="utf-8")
+    with pytest.raises(ConfigError, match=message):
+        load(tmp_path, explicit=path, environ={})
+
+
+def test_mcp_server_count_is_bounded(tmp_path: Path):
+    path = tmp_path / "too-many.toml"
+    path.write_text(
+        "\n".join(
+            f"[mcp_servers.s{index}]\ncommand='server'" for index in range(17)
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="at most 16"):
+        load(tmp_path, explicit=path, environ={})

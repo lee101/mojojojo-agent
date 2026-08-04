@@ -23,6 +23,7 @@ network service, or optional compiler.
 | OpenCode discovers formatters; Hermes queues background work and steering | `check format=true` is approval-gated and checkpointed; shell jobs return pollable IDs; hosted steering queues user guidance at safe model boundaries | 64 parameter-schema tokens |
 | Codex keeps verifiable objectives alive across turns | Workspace-scoped goals persist independently of sessions, inject a bounded contract, retain 50 checkpoints, and expose their tool only while active | 0 schema tokens outside a goal |
 | Grok/Hermes use reviewer and worker agents | `delegate` runs four bounded model workers concurrently; reviewers are read-only and workers return isolated, snapshot-relative Git commits in deterministic order | 112 schema tokens |
+| Grok/Codex expose external tools and structured plans | Configured MCP stdio tools are namespaced and bounded; `update_plan` keeps at most 20 validated steps and returns count-only updates | MCP costs zero unless configured; plan schema is measured below |
 
 The map deliberately reuses MJJ's incremental search chunks instead of adding
 NetworkX, SQLite, another parser cache, or an always-running service. With the
@@ -43,13 +44,11 @@ the map itself works in the dependency-free fallback.
 
 ## High-value follow-ups
 
-1. **MCP and external tool servers.** This needs capability discovery,
-   authentication boundaries, schema budgets, and hosted tenant isolation.
-2. **LSP refactors and call hierarchy.** Navigation is read-only today. Rename,
+1. **LSP refactors and call hierarchy.** Navigation is read-only today. Rename,
    code actions, and workspace edits should reuse checkpoints and approval.
-3. **Plugin runtime and structured plans.** Portable skills and durable goals
-   cover workflows and resumable objectives, not in-process event hooks,
-   configurable keymaps, or editable dependency-aware plan state.
+2. **Plugin runtime and plan-mode UI.** Portable skills, MCP tools, structured
+   plans, and durable goals cover most workflow composition, not in-process
+   event hooks, configurable keymaps, or a dependency-aware plan editor.
 
 ## Measured cost
 
@@ -71,3 +70,7 @@ must be regenerated when the corpus, backend, or machine changes.
 The `delegate` schema is 447 minified JSON bytes, or 112 tokens under MJJ's
 four-characters-per-token estimator. That is a wire-size measurement, not a
 claim about model quality or parallel speedup.
+
+The `update_plan` schema is 504 minified JSON bytes, or 126 tokens under the
+same estimator. MCP adds no schema when unconfigured; configured servers pay
+only for their capped discovered schemas.

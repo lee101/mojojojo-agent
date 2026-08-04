@@ -23,6 +23,7 @@ MODULES = (
     "display",
     "py_exec",
     "skills",
+    "plan",
 )
 
 
@@ -32,6 +33,7 @@ def build_registry(
     disabled: tuple[str, ...] | list[str] = (),
     include_user_skills: bool = True,
     skill_paths=(),
+    mcp_servers=(),
 ) -> Registry:
     registry = Registry()
     disabled_names = {
@@ -56,4 +58,16 @@ def build_registry(
         for tool in tools:
             if tool.name not in disabled_names:
                 registry.add(tool)
+    if (only is None or "mcp" in only) and mcp_servers:
+        try:
+            from ..mcp import discover_mcp_tools
+
+            tools, warnings, clients = discover_mcp_tools(mcp_servers)
+            registry.warnings.extend(warnings)
+            registry.resources.extend(clients)
+            for tool in tools:
+                if tool.name not in disabled_names:
+                    registry.add(tool)
+        except Exception as exc:
+            registry.warnings.append(f"MCP discovery failed: {exc}")
     return registry

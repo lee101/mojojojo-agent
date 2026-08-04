@@ -18,6 +18,7 @@ ModelClient ---- CredentialResolver ---- OpenAI / OpenPaths / OpenRouter / custo
 bounded tool Registry ---- Ledger ---- filesystem / patch / shell / Python / search
                                       |
                                       +---- Mojo acceleration when available
+                                      +---- configured local MCP stdio tools
 ```
 
 ## Turn lifecycle
@@ -63,6 +64,11 @@ record. Active goals inject a bounded execution contract and install the goal
 tool on demand. Completion or blocking removes that schema again; normal runs
 therefore pay no permanent goal-tool context cost.
 
+Structured plans live only in the current tool context and are replaced
+atomically through `update_plan`. Configured local MCP clients are owned by the
+registry, namespace discovered functions, and close on reload or shutdown.
+Their failures remain registry warnings; hosted registries never load them.
+
 ## Execution and retrieval
 
 Search fuses exact ripgrep evidence, a compact lexical ranker, and optional
@@ -105,4 +111,5 @@ See [hosted server](server.md) for the HTTP and billing contract, and
 | `mjj/search/` | Exact, lexical, and vector retrieval |
 | `mjj/checkpoints.py` | External bounded snapshots and conflict-safe undo |
 | `mjj/lsp.py` | Installed language-server stdio transport |
+| `mjj/mcp.py` | Bounded MCP stdio discovery and tool calls |
 | `mjj/server.py` | Hosted workspaces, SSE runs, interrupts, and settlement |

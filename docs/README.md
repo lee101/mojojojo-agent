@@ -10,6 +10,8 @@ same code that ships in the [public repository](https://github.com/lee101/mojojo
   task, select providers, and recover a session.
 - [Configuration](config.md) — user, project, environment, and CLI precedence.
 - [Tools](tools.md) — bounded file, patch, shell, Python, terminal-image, and skill tools.
+- [MCP tool servers](mcp.md) — bounded stdio discovery, namespaced calls,
+  permissions, configuration, and failure isolation.
 - [Skills](skills.md) — discover and load `SKILL.md` workflows without permanent
   prompt overhead.
 - [Durable goals](goals.md) — persistent objectives, bounded continuation,
@@ -22,6 +24,8 @@ same code that ships in the [public repository](https://github.com/lee101/mojojo
 - [Architecture](architecture.md) — turn lifecycle, transcript guarantees,
   provider boundary, execution tiers, and hosted isolation.
 - [Search](search.md) — exact, lexical, and native vector retrieval.
+- [LSP refactors and call hierarchy](lsp-refactors.md) — semantic navigation,
+  safe atomic rename, checkpoints, and fallback boundaries.
 - [Execution](exec.md) — Mojo acceleration, local isolation, and remote fallback.
 - [Visualizers](visualizers.md) — native deterministic WebGL scaffolding,
   image transforms, and token/speed measurements.

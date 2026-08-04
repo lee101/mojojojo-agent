@@ -192,6 +192,29 @@ def test_help_and_hotkey_aliases_report_the_live_surface(
     assert "F4 or Alt+V" in output
 
 
+def test_plan_and_mcp_commands_show_live_tool_state(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("MJJ_HOME", str(tmp_path / "home"))
+    registry = Registry(warnings=["MCP broken: unavailable"])
+    registry.tools["mcp__browser__open"] = SimpleNamespace()
+    agent = Agent(registry=registry, cwd=tmp_path, instructions="test")
+    agent.ctx.state["plan"] = {
+        "explanation": "verify parity",
+        "plan": [{"step": "Run tests", "status": "in_progress"}],
+    }
+    app = InteractiveApp(agent, _args())
+
+    app.command("/plan")
+    app.command("/mcp")
+    app.command("/plan clear")
+
+    output = capsys.readouterr().out
+    assert '"step": "Run tests"' in output
+    assert "mcp__browser__open" in output
+    assert "MCP broken: unavailable" in output
+    assert "structured plan cleared" in output
+    assert "plan" not in agent.ctx.state
+
+
 def test_provider_change_resets_incompatible_known_model(
     tmp_path, monkeypatch
 ) -> None:

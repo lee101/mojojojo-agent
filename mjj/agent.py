@@ -456,10 +456,14 @@ def tool_progress(step: Step, *, verbose: bool = False) -> str:
         )
     if step.name == "goal":
         return f"updating goal: {args.get('action', 'status')}"
+    if step.name == "update_plan":
+        return "updating the task plan"
     if step.name == "delegate":
         tasks = args.get("tasks")
         count = len(tasks) if isinstance(tasks, list) else 0
         return f"delegating {count} bounded task{'' if count == 1 else 's'}"
+    if step.name.startswith("mcp__"):
+        return f"calling {step.name}"
     if step.name == "apply_patch":
         return "editing files"
     if step.name == "checkpoint":

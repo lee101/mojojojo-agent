@@ -30,6 +30,12 @@ disabled = []
 
 [skills]
 paths = ["../shared-agent-skills"]
+
+[mcp_servers.browser]
+command = "npx"
+args = ["-y", "@example/browser-mcp"]
+env_vars = ["BROWSER_API_KEY"]
+max_tools = 32
 ```
 
 Supported environment equivalents are `MJJ_PROVIDER`, `MJJ_MODEL`, `MJJ_EFFORT`,
@@ -40,6 +46,12 @@ comma-separated `MJJ_DISABLE_TOOLS`, and path-separator-delimited
 An autonomy turn limit of zero means unlimited continuation until interrupted.
 Credentials and executor endpoints keep their existing dedicated environment
 variables and never appear in `mjj config` output.
+
+MCP servers use explicit local stdio commands. Their `cwd` is relative to the
+configuration file; `startup_timeout`, `tool_timeout`, and `max_tools` are
+bounded. `env_vars` forwards selected environment variables, while `env` adds
+literal values. Resolved config output shows only environment key names. See
+[MCP tool servers](mcp.md) for the runtime and permission boundary.
 
 Operational tool overrides are also intentionally separate from model
 configuration. `MJJ_IMAGE_PROTOCOL` accepts `auto`, `kitty`, `ansi`, or `off`;

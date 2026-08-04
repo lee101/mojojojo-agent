@@ -25,7 +25,9 @@ still missing.
 | Context compaction | automatic and manual | automatic Responses compaction with graceful backend fallback |
 | Continued autonomous work | Pi Infinity continuation flags | `--auto-next-steps`, `--auto-next-idea`, `/auto` |
 | Persistent goals | Codex `/goal` and Grok background objectives | `/goal`, `mjj goal`, `--goal`; atomic workspace state, bounded checkpoints, evidence-backed completion |
+| Structured plans | Grok Plan mode; Codex plan updates | bounded `update_plan` state and `/plan` inspection |
 | Reviewer/worker subagents | Grok delegated workers and review agents | `delegate`: four concurrent bounded children, read-only review, isolated worker commits, deterministic merge |
+| External tools | Grok/Codex MCP | configured local stdio MCP, namespaced tools, bounded schemas/results, `/mcp`, safe failure isolation |
 | Skills and project context | skills and context files | scoped `SKILL.md` plus bounded hierarchical `AGENTS.md` |
 | Runtime reload | `/reload` | `/reload` for tools and skills |
 | Shell and coding tools | read/write/edit/bash/grep/find/ls | read/list/search/navigate/apply-patch/shell/Python/native execution |
@@ -38,16 +40,14 @@ still missing.
 
 These are feature gaps, not presentation preferences:
 
-- **MCP and external integrations.** Grok and Codex expose MCP. MJJ now has
-  installed-LSP navigation but no authenticated external tool-server runtime.
 - **Interactive TUI steering.** Hosted runs accept follow-ups while active; the
   inline terminal still waits for the current response before reading input.
 - **Package/plugin runtime.** Pi extensions/packages and Grok/Codex plugins can
   add commands, tools, events, and UI. Mojo Agent supports portable Agent Skills
   but not arbitrary in-process plugins.
-- **Plan artifacts and configurable keymaps.** Durable goals now persist their
-  objective and verification log, but editable structured plan artifacts and
-  user keybinding files are not yet implemented.
+- **Plan-mode UX and configurable keymaps.** Structured plan state is editable
+  by the model and inspectable with `/plan`, but the inline composer does not
+  yet provide Grok's dedicated Plan-mode toggle or user keybinding files.
 
 The presentation boundary remains deliberate:
 

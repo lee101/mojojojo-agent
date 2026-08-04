@@ -70,18 +70,26 @@ def _agent(args) -> Agent:
             requested_goal,
             session_id=session.id if session is not None else "",
         )
-    agent = Agent(
-        registry=build_registry(
-            disabled=args.disabled_tools,
-            skill_paths=args.skill_paths,
-        ),
-        client=client,
-        cwd=cwd,
-        ledger=Ledger(Budget(default=args.tool_budget)),
-        session=session,
-        goal_store=goal_store,
-        project_doc_max_bytes=args.resolved_config.project_doc_max_bytes,
+    registry = build_registry(
+        disabled=args.disabled_tools,
+        skill_paths=args.skill_paths,
+        mcp_servers=args.resolved_config.mcp_servers,
     )
+    try:
+        agent = Agent(
+            registry=registry,
+            client=client,
+            cwd=cwd,
+            ledger=Ledger(Budget(default=args.tool_budget)),
+            session=session,
+            goal_store=goal_store,
+            project_doc_max_bytes=args.resolved_config.project_doc_max_bytes,
+        )
+    except Exception:
+        registry.close()
+        if session is not None:
+            session.close()
+        raise
     agent.items = items
     permission_mode = getattr(args, "permission_mode", "auto")
     if permission_mode != "auto":
@@ -111,6 +119,9 @@ def cmd_exec(args) -> int:
         images = tuple(prepare_image(path) for path in args.images)
     except ImageInputError as exc:
         print(f"mjj exec: {exc}", file=sys.stderr)
+        agent.registry.close()
+        if agent.session:
+            agent.session.close()
         return 2
     heartbeat = _Heartbeat(
         sys.stderr,
@@ -136,6 +147,7 @@ def cmd_exec(args) -> int:
         code, final_text = 130, ""
     finally:
         heartbeat.stop()
+        agent.registry.close()
     if args.output_last_message:
         try:
             Path(args.output_last_message).expanduser().write_text(
@@ -265,9 +277,15 @@ def cmd_tools(args) -> int:
     registry = build_registry(
         disabled=args.disabled_tools,
         skill_paths=args.skill_paths,
+        mcp_servers=args.resolved_config.mcp_servers,
     )
-    for schema in registry.schemas():
-        print(f"{schema['name']:12} {schema['description'].splitlines()[0]}")
+    try:
+        for warning in registry.warnings:
+            print(f"warning: {warning}", file=sys.stderr)
+        for schema in registry.schemas():
+            print(f"{schema['name']:12} {schema['description'].splitlines()[0]}")
+    finally:
+        registry.close()
     return 0
 
 

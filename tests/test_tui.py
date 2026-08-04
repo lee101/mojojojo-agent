@@ -5,6 +5,8 @@ from types import SimpleNamespace
 
 from PIL import Image
 from prompt_toolkit.document import Document
+from prompt_toolkit.input.defaults import create_pipe_input
+from prompt_toolkit.output import DummyOutput
 
 from mjj.agent import Agent, Step
 from mjj.model import ModelClient
@@ -15,6 +17,8 @@ from mjj.tui import (
     DistinctFileHistory,
     InteractiveApp,
     WorkspaceCompleter,
+    _model_choices,
+    _pick_model,
     _workspace_history_path,
 )
 
@@ -309,6 +313,60 @@ def test_model_selection_accepts_number_substring_and_relative_change(
     assert "* 2. gpt-5.6-sol" in output
     assert "ambiguous model" in output
     assert "/model NUMBER|NAME|next|prev" in output
+
+
+def test_model_picker_moves_with_arrows_and_accepts_enter() -> None:
+    with create_pipe_input() as pipe:
+        pipe.send_text("\x1b[B\r")
+        selected = _pick_model(
+            ("auto", "auto-code", "auto-best"),
+            "auto",
+            "auto",
+            input_stream=pipe,
+            output=DummyOutput(),
+        )
+
+    assert selected == "auto-code"
+
+
+def test_auto_model_picker_prioritizes_stable_task_aliases() -> None:
+    assert _model_choices("auto")[:5] == (
+        "auto",
+        "auto-code",
+        "auto-fast",
+        "auto-cheap",
+        "auto-best",
+    )
+
+
+def test_shift_arrows_change_reasoning_and_toolbar_shows_live_state(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("MJJ_HOME", str(tmp_path / "home"))
+    agent = Agent(
+        registry=Registry(),
+        client=ModelClient(model="auto-best", provider="auto", effort="medium"),
+        cwd=tmp_path,
+        instructions="test",
+    )
+    app = InteractiveApp(agent, _args())
+    bindings = {
+        tuple(getattr(key, "value", key) for key in binding.keys): binding.handler
+        for binding in app.bindings.bindings
+    }
+    event = SimpleNamespace(app=SimpleNamespace(invalidate=lambda: None))
+
+    bindings[("s-up",)](event)
+    assert agent.client.effort == "high"
+    bindings[("s-down",)](event)
+    assert agent.client.effort == "medium"
+    toolbar = app._toolbar().value
+    assert "model <b>auto-best</b>" in toolbar
+    assert "reasoning <b>medium</b>" in toolbar
+    assert "Shift+↑/↓ reasoning" in toolbar
+    agent.client.model = "auto"
+    app._cycle_model(1)
+    assert agent.client.model == "auto-code"
 
 
 def test_help_and_hotkey_aliases_report_the_live_surface(

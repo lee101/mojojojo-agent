@@ -25,13 +25,17 @@ try:
     if os.environ.get("MJJ_TUI", "").lower() == "basic":
         raise ImportError("basic TUI requested")
     from prompt_toolkit import PromptSession, print_formatted_text
+    from prompt_toolkit.application import Application
     from prompt_toolkit.completion import Completer, Completion
-    from prompt_toolkit.formatted_text import ANSI, HTML
+    from prompt_toolkit.formatted_text import ANSI, HTML, FormattedText
     from prompt_toolkit.history import FileHistory, InMemoryHistory
     from prompt_toolkit.input import DummyInput
     from prompt_toolkit.key_binding import KeyBindings
+    from prompt_toolkit.layout import Layout, Window
+    from prompt_toolkit.layout.controls import FormattedTextControl
     from prompt_toolkit.output import DummyOutput
     from prompt_toolkit.shortcuts import prompt as secure_prompt
+    from prompt_toolkit.styles import Style
 
     RICH_TUI = True
 except ImportError:
@@ -119,7 +123,7 @@ from .tools import build_registry
 COMMANDS = {
     "/help": "show commands and keyboard shortcuts",
     "/commands": "alias for /help",
-    "/model": "show or set the model",
+    "/model": "choose a model with arrows or set it by name",
     "/provider": "show or set auto/openpaths/openrouter/openai/custom",
     "/effort": "show or set reasoning effort",
     "/reasoning": "alias for /effort",
@@ -287,11 +291,140 @@ def _model_choices(provider: str) -> tuple[str, ...]:
         return MODEL_PRESETS.get(provider, ("auto",))
     return tuple(
         dict.fromkeys(
-            model
-            for models in MODEL_PRESETS.values()
-            for model in models
+            (
+                "auto",
+                *AUTO_MODEL_IDS,
+                *(
+                    model
+                    for models in MODEL_PRESETS.values()
+                    for model in models
+                ),
+            )
         )
     )
+
+
+_MODEL_DESCRIPTIONS = {
+    "auto": "choose the best available route",
+    "gpt-5.6-sol": "capability-first OpenAI coding",
+    "gpt-5.6-terra": "balanced OpenAI coding",
+    "gpt-5.6-luna": "fast, lower-cost OpenAI coding",
+    "gpt-5.3-codex": "previous-generation Codex",
+    "grok-4.5": "Grok coding through OpenPaths",
+    "x-ai/grok-4.5": "Grok coding through OpenRouter",
+    "openpaths/auto": "OpenPaths automatic routing",
+    "openpaths/auto-code": "OpenPaths coding router",
+    "openpaths/auto-hard": "OpenPaths hard-task router",
+    "openrouter/auto": "OpenRouter automatic routing",
+}
+
+
+def _model_description(model: str) -> str:
+    return describe_model(model) or _MODEL_DESCRIPTIONS.get(model, "custom model ID")
+
+
+def _pick_model(
+    models: tuple[str, ...],
+    current: str,
+    provider: str,
+    *,
+    input_stream=None,
+    output=None,
+) -> str | None:
+    """Render a small inline picker and return the confirmed model."""
+    choices = list(models)
+    if current not in choices:
+        choices.insert(0, current)
+    selected = choices.index(current)
+    visible_rows = min(7, len(choices))
+
+    def fragments():
+        start = max(0, min(selected - visible_rows // 2, len(choices) - visible_rows))
+        end = min(len(choices), start + visible_rows)
+        result = [
+            ("class:title", f"  Choose model · provider {provider}\n"),
+            ("class:hint", "  ↑/↓ move · Enter select · Esc cancel\n\n"),
+        ]
+        if start:
+            result.append(("class:hint", f"    ↑ {start} more\n"))
+        for index in range(start, end):
+            model = choices[index]
+            active = index == selected
+            marker = "›" if active else " "
+            current_marker = "  current" if model == current else ""
+            style = "class:selected" if active else "class:model"
+            result.extend(
+                [
+                    (style, f"  {marker} {model}"),
+                    ("class:current", current_marker),
+                    ("class:description", f"\n      {_model_description(model)}\n"),
+                ]
+            )
+        if end < len(choices):
+            result.append(("class:hint", f"    ↓ {len(choices) - end} more\n"))
+        return FormattedText(result)
+
+    bindings = KeyBindings()
+
+    @bindings.add("up")
+    @bindings.add("s-up")
+    def move_up(event) -> None:
+        nonlocal selected
+        selected = (selected - 1) % len(choices)
+        event.app.invalidate()
+
+    @bindings.add("down")
+    @bindings.add("s-down")
+    def move_down(event) -> None:
+        nonlocal selected
+        selected = (selected + 1) % len(choices)
+        event.app.invalidate()
+
+    @bindings.add("home")
+    def move_first(event) -> None:
+        nonlocal selected
+        selected = 0
+        event.app.invalidate()
+
+    @bindings.add("end")
+    def move_last(event) -> None:
+        nonlocal selected
+        selected = len(choices) - 1
+        event.app.invalidate()
+
+    @bindings.add("enter")
+    def accept(event) -> None:
+        event.app.exit(result=choices[selected])
+
+    @bindings.add("escape")
+    @bindings.add("c-c")
+    def cancel(event) -> None:
+        event.app.exit(result=None)
+
+    control = FormattedTextControl(fragments)
+    application_io = {}
+    if input_stream is not None:
+        application_io["input"] = input_stream
+    if output is not None:
+        application_io["output"] = output
+    picker = Application(
+        layout=Layout(Window(control, height=visible_rows * 2 + 5)),
+        key_bindings=bindings,
+        style=Style.from_dict(
+            {
+                "title": "bold #2de2cf",
+                "hint": "#777e9e",
+                "model": "#d7daea",
+                "selected": "bold #ffffff bg:#34305f",
+                "current": "#2de2cf",
+                "description": "#777e9e",
+            }
+        ),
+        full_screen=False,
+        erase_when_done=True,
+        **application_io,
+    )
+    return picker.run()
 
 
 class WorkspaceCompleter(Completer):
@@ -457,12 +590,12 @@ class InteractiveApp:
 
         @bindings.add("s-up")
         def shift_up(event) -> None:
-            self._cycle_model(1)
+            self._cycle_effort(1)
             event.app.invalidate()
 
         @bindings.add("s-down")
         def shift_down(event) -> None:
-            self._cycle_model(-1)
+            self._cycle_effort(-1)
             event.app.invalidate()
 
         @bindings.add("f2")
@@ -497,7 +630,7 @@ class InteractiveApp:
         )
 
     def _cycle_model(self, direction: int) -> None:
-        models = MODEL_PRESETS.get(self.provider, ("auto",))
+        models = _model_choices(self.provider)
         self.agent.client.model = _cycle_choice(
             self.agent.client.model,
             models,
@@ -528,17 +661,13 @@ class InteractiveApp:
             if isinstance(item, dict)
         )
         plan_label = f" · plan {completed}/{len(plan_items)}" if plan_items else ""
-        model_key = (
-            "F2 model"
-            if len(MODEL_PRESETS.get(self.provider, ("auto",))) > 1
-            else "/model"
-        )
         return HTML(
-            " <b>mjj</b> · "
-            f"{html.escape(self.provider)}/{html.escape(self.agent.client.model)} · "
-            f"reasoning <b>{html.escape(self.agent.client.effort)}</b>"
+            " <b>mjj</b> · model <b>"
+            f"{html.escape(self.agent.client.model)}</b>"
+            f" · reasoning <b>{html.escape(self.agent.client.effort)}</b>"
+            f" · provider {html.escape(self.provider)}"
             f"{auto}{goal_label}{plan_label}{images} · "
-            f"{html.escape(cwd)}   {model_key} · F3 effort · / commands "
+            f"{html.escape(cwd)}   /model choose · Shift+↑/↓ reasoning "
         )
 
     def run(self) -> int:
@@ -563,22 +692,18 @@ class InteractiveApp:
         return 0
 
     def _welcome(self) -> None:
-        model_hint = (
-            "F2 model"
-            if RICH_TUI and len(MODEL_PRESETS.get(self.provider, ("auto",))) > 1
-            else "/model chooses a model"
-        )
         input_hint = (
-            "F3 reasoning · Alt+Enter newline"
+            "Shift+↑/↓ reasoning · Alt+Enter newline"
             if RICH_TUI
             else "/reasoning changes effort"
         )
         print_formatted_text(
             ANSI(
                 "\x1b[38;5;45m╭─ mjj\x1b[0m  coding agent\n"
-                f"\x1b[38;5;45m│\x1b[0m  {self.provider}/{self.agent.client.model}"
-                f"  ·  reasoning {self.agent.client.effort}\n"
-                f"\x1b[38;5;45m╰─\x1b[0m  / commands · {model_hint} · "
+                f"\x1b[38;5;45m│\x1b[0m  model {self.agent.client.model}"
+                f"  ·  reasoning {self.agent.client.effort}"
+                f"  ·  provider {self.provider}\n"
+                f"\x1b[38;5;45m╰─\x1b[0m  /model picker · / commands · "
                 f"{input_hint}"
             )
         )
@@ -932,6 +1057,14 @@ class InteractiveApp:
     def _set_model(self, value: str) -> None:
         models = _model_choices(self.provider)
         if not value:
+            if RICH_TUI and sys.stdin.isatty() and sys.stdout.isatty():
+                selected = _pick_model(models, self.agent.client.model, self.provider)
+                if selected is None:
+                    print(f"model unchanged: {self.agent.client.model}")
+                    return
+                self.agent.client.model = selected
+                print(f"model: {selected} · reasoning: {self.agent.client.effort}")
+                return
             self._show_models()
             return
         try:
@@ -975,17 +1108,19 @@ class InteractiveApp:
 
     def _show_models(self) -> None:
         models = _model_choices(self.provider)
-        print(f"model shortcuts for {self.provider}:")
+        print(f"models for provider {self.provider} · current {self.agent.client.model}:")
         for index, model in enumerate(models, 1):
             marker = "*" if model == self.agent.client.model else " "
-            purpose = describe_model(model)
-            suffix = f" — {purpose}" if purpose else ""
-            print(f" {marker} {index}. {model}{suffix}")
+            print(f" {marker} {index}. {model} — {_model_description(model)}")
         if self.agent.client.model not in models:
             print(f" * custom: {self.agent.client.model}")
         if self.provider == "auto":
             print("auto routing: select /provider for guaranteed compatibility")
-        print("use /model NUMBER|NAME|next|prev; custom model names are accepted")
+        picker_hint = "run /model for the arrow-key picker; " if RICH_TUI else ""
+        print(
+            f"{picker_hint}use /model NUMBER|NAME|next|prev; "
+            "custom model names are accepted"
+        )
 
     def _show_help(self) -> None:
         for name, description in COMMANDS.items():
@@ -996,9 +1131,9 @@ class InteractiveApp:
     @staticmethod
     def _show_hotkeys() -> None:
         print(
-            "F2 or Alt+M: next provider-specific model · "
-            "Shift+↑/↓: model forward/back\n"
-            "F3 or Alt+R: next reasoning · empty ←/→: reasoning back/forward\n"
+            "/model: arrow-key model picker · F2 or Alt+M: next model\n"
+            "Shift+↑/↓: reasoning higher/lower · F3 or Alt+R: next reasoning\n"
+            "empty ←/→: reasoning lower/higher\n"
             "F4 or Alt+V: next verbosity · Alt+Enter: newline · Ctrl+C: interrupt\n"
             "↑/↓: prompts from this directory · Ctrl+R: search prompt history\n"
             "@file: attach context · !command: include output · !!command: local only"

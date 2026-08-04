@@ -19,11 +19,11 @@ binary before atomically replacing an existing installation. To pin or stage a
 release, download the installer and pass options directly:
 
 ```bash
-./install.sh --version v0.3.0 --install-dir "$HOME/.local/bin"
+./install.sh --version v0.4.0 --install-dir "$HOME/.local/bin"
 ```
 
 ```powershell
-.\install.ps1 -Version v0.3.0 -InstallDir "$env:LOCALAPPDATA\Programs\mjj"
+.\install.ps1 -Version v0.4.0 -InstallDir "$env:LOCALAPPDATA\Programs\mjj"
 ```
 
 The equivalent environment variables are `MJJ_VERSION`, `MJJ_INSTALL_DIR`,
@@ -82,11 +82,12 @@ mjj
 ```
 
 Type `/` to search commands and press Tab to complete commands or valid values.
-`/model` prints numbered shortcuts and the active model; select with a number,
-full name, unique fragment, `next`, or `prev`. Arbitrary model IDs are accepted.
-F2 or Alt+M cycles models after selecting an explicit provider, F3 or Alt+R
-cycles reasoning, and F4 or Alt+V cycles verbosity. Empty-composer left/right
-and Shift+Up/Down remain the bidirectional reasoning and model controls.
+`/model` opens an arrow-key picker: use Up/Down to highlight a model and Enter
+to select it. The numbered fallback also accepts a number, full name, unique
+fragment, `next`, or `prev`; arbitrary model IDs are accepted. Shift+Up/Down
+changes the reasoning level and the prompt toolbar always shows the active model
+and reasoning. F2 or Alt+M cycles models, F3 or Alt+R cycles reasoning, and F4
+or Alt+V cycles verbosity. Empty-composer left/right also changes reasoning.
 Alt+Enter inserts a newline. Type `@` to attach a fuzzy-matched repository file,
 `!command` to run a shell command and retain its output as model context, or
 `!!command` to run it only locally. Useful first commands are `/status`,

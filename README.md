@@ -101,9 +101,11 @@ mjj exec --provider openrouter --model auto-openai "review this migration"
 OpenPaths aliases use its live task router. Direct OpenAI aliases currently map
 to the Sol, Terra, and Luna capability tiers. Provider-constrained aliases keep
 the chosen model lab fixed even when OpenPaths or OpenRouter is the transport.
-Use `/models` to see the current map and `/model NAME` to switch without
-restarting. See [models and prompt caching](docs/models-and-cache.md) for the
-exact mapping and tradeoffs.
+Use `/model` for an arrow-key picker (Up/Down, then Enter), or `/models` to see
+the current map. Shift+Up/Down changes reasoning; the prompt always shows the
+active model and reasoning level. See
+[models and prompt caching](docs/models-and-cache.md) for the exact mapping and
+tradeoffs.
 
 ## Prompt caching is automatic
 

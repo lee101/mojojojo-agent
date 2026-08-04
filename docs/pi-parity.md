@@ -12,7 +12,7 @@ still missing.
 | Interactive default | `pinf` | `mjj` |
 | Headless and JSONL | print/JSON modes | `mjj exec`, `--json` |
 | In-app authentication | `/login`, `/logout` | `/login`, `/logout`, `/auth` |
-| Model and reasoning control | `/model`, settings, hotkeys | value-completed and numbered `/model`; Grok 4.5 and Codex presets; request-time lightweight family prompts; `/provider`, `/reasoning`, `/verbosity`; arrows, F2–F4, and Alt bindings |
+| Model and reasoning control | `/model`, settings, hotkeys | arrow-key `/model` picker with descriptions and numbered fallback; always-visible model/reasoning; Shift+Up/Down reasoning; Grok 4.5 and Codex presets; `/provider`, `/reasoning`, `/verbosity`; F2–F4 and Alt bindings |
 | File references | Pi/Grok/Codex `@` completion and attachments | fuzzy `@path`, quoted paths, bounded text, and `@path:START-END` |
 | Multimodal prompts | clipboard/files | `/image`, `--image`, or `@image`; quality-85 bounded WebP |
 | Images in tool responses | terminal/media attachments | `display_image`, Kitty graphics, bounded ANSI fallback, `/preview` |

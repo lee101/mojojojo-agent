@@ -12,6 +12,8 @@ same code that ships in the [public repository](https://github.com/lee101/mojojo
 - [Tools](tools.md) — bounded file, patch, shell, Python, terminal-image, and skill tools.
 - [Skills](skills.md) — discover and load `SKILL.md` workflows without permanent
   prompt overhead.
+- [Durable goals](goals.md) — persistent objectives, bounded continuation,
+  checkpoints, evidence-backed completion, and lifecycle controls.
 
 ## How it works
 

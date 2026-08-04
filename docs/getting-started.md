@@ -58,12 +58,17 @@ cd your-project
 mjj
 ```
 
-Type `/` to discover commands. On an empty composer, left/right changes the
-reasoning level and Shift+Up/Down changes the model. Alt+Enter inserts a newline.
-Type `@` to attach a fuzzy-matched repository file, `!command` to run a shell
-command and retain its output as model context, or `!!command` to run it only
-locally. Useful first commands are `/status`, `/settings`, `/permissions`,
-`/review`, `/model`, `/effort`, `/auth`, and `/help`.
+Type `/` to search commands and press Tab to complete commands or valid values.
+`/model` prints numbered shortcuts and the active model; select with a number,
+full name, unique fragment, `next`, or `prev`. Arbitrary model IDs are accepted.
+F2 or Alt+M cycles models after selecting an explicit provider, F3 or Alt+R
+cycles reasoning, and F4 or Alt+V cycles verbosity. Empty-composer left/right
+and Shift+Up/Down remain the bidirectional reasoning and model controls.
+Alt+Enter inserts a newline. Type `@` to attach a fuzzy-matched repository file,
+`!command` to run a shell command and retain its output as model context, or
+`!!command` to run it only locally. Useful first commands are `/status`,
+`/settings`, `/permissions`, `/review`, `/model`, `/reasoning`, `/auth`, and
+`/help`.
 
 For scripts and CI, use headless mode:
 
@@ -127,6 +132,19 @@ mjj exec --auto-next-steps --auto-max-turns 3 \
 
 Add `--auto-next-idea` to select a useful follow-on improvement after the
 original objective is complete. A zero maximum means continue until interrupted.
+
+For work that must survive sessions and stop on a verifiable condition, use a
+durable goal:
+
+```bash
+mjj exec --goal "Implement PLAN.md and stop when the test suite passes" \
+  --auto-max-turns 8
+mjj goal                         # inspect it without calling a model
+```
+
+In the terminal app, `/goal OBJECTIVE` starts immediately. `/goal pause`,
+`/goal resume`, `/goal complete EVIDENCE`, `/goal blocked REASON`, and
+`/goal clear` control the lifecycle. See [durable goals](goals.md).
 
 ## Project instructions and skills
 

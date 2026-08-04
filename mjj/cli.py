@@ -24,6 +24,7 @@ from .config import (
     VERBOSITIES,
     load as load_config,
 )
+from .goals import GoalStore
 from .ledger import Budget, Ledger
 from .model import ModelClient, probe
 from .media import ImageInputError, prepare_image
@@ -62,6 +63,13 @@ def _agent(args) -> Agent:
         verbosity=args.verbosity,
         resolver=auth.CredentialResolver(provider=args.provider),
     )
+    goal_store = GoalStore(cwd)
+    requested_goal = getattr(args, "goal", None)
+    if requested_goal:
+        goal_store.set(
+            requested_goal,
+            session_id=session.id if session is not None else "",
+        )
     agent = Agent(
         registry=build_registry(
             disabled=args.disabled_tools,
@@ -71,6 +79,7 @@ def _agent(args) -> Agent:
         cwd=cwd,
         ledger=Ledger(Budget(default=args.tool_budget)),
         session=session,
+        goal_store=goal_store,
         project_doc_max_bytes=args.resolved_config.project_doc_max_bytes,
     )
     agent.items = items
@@ -361,6 +370,45 @@ def cmd_sessions(args) -> int:
     return 0
 
 
+def cmd_goal(args) -> int:
+    store = GoalStore(args.cwd)
+    words = list(args.goal_args)
+    if not words:
+        goal = store.load()
+        if goal is None:
+            print("no goal for this workspace")
+            return 1
+    else:
+        action = words[0].lower()
+        message = " ".join(words[1:]).strip()
+        try:
+            if action == "set":
+                goal = store.set(message)
+            elif action == "pause":
+                goal = store.transition("paused", message)
+            elif action == "resume":
+                goal = store.transition("active", message)
+            elif action in ("complete", "blocked"):
+                if not message:
+                    print(
+                        f"mjj goal: {action} requires an evidence message",
+                        file=sys.stderr,
+                    )
+                    return 2
+                goal = store.transition(action, message)
+            elif action == "clear":
+                removed = store.clear()
+                print("goal cleared" if removed else "no goal for this workspace")
+                return 0 if removed else 1
+            else:
+                goal = store.set(" ".join(words))
+        except ValueError as exc:
+            print(f"mjj goal: {exc}", file=sys.stderr)
+            return 2
+    print(json.dumps(goal.public(), indent=2) if args.json else goal.summary())
+    return 0
+
+
 def cmd_export(args) -> int:
     try:
         path = export_session(args.session, args.output)
@@ -448,6 +496,11 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--auto-next-idea", action="store_true", default=argparse.SUPPRESS)
     run.add_argument("--auto-max-turns", type=int, default=argparse.SUPPRESS)
     run.add_argument(
+        "--goal",
+        metavar="OBJECTIVE",
+        help="set and follow a durable workspace goal",
+    )
+    run.add_argument(
         "-i", "--image", dest="images", action="append", default=[], metavar="PATH",
         help="attach an image (repeatable; sent as quality-85 WebP)",
     )
@@ -475,6 +528,7 @@ def main(argv: list[str] | None = None) -> int:
     chat.add_argument("--auto-next-steps", action="store_true", default=argparse.SUPPRESS)
     chat.add_argument("--auto-next-idea", action="store_true", default=argparse.SUPPRESS)
     chat.add_argument("--auto-max-turns", type=int, default=argparse.SUPPRESS)
+    chat.add_argument("--goal", metavar="OBJECTIVE")
     chat_persistence = chat.add_mutually_exclusive_group()
     chat_persistence.add_argument("--resume", nargs="?", const="", default=None)
     chat_persistence.add_argument("--fork", nargs="?", const="", default=None)
@@ -532,6 +586,17 @@ def main(argv: list[str] | None = None) -> int:
     sessions.add_argument("--limit", type=int, default=20)
     sessions.add_argument("--json", action="store_true")
     sessions.set_defaults(func=cmd_sessions)
+
+    goals = sub.add_parser("goal", help="inspect or manage the workspace goal")
+    goals.add_argument(
+        "goal_args",
+        nargs="*",
+        metavar="ACTION_OR_OBJECTIVE",
+        help="OBJECTIVE or set/pause/resume/complete/blocked/clear",
+    )
+    goals.add_argument("--json", action="store_true")
+    goals.add_argument("-C", "--cd", "--cwd", dest="cwd", default=argparse.SUPPRESS)
+    goals.set_defaults(func=cmd_goal)
 
     exporting = sub.add_parser("export", help="export a session to HTML or JSONL")
     exporting.add_argument("output")

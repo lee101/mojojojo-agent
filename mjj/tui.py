@@ -26,6 +26,7 @@ from . import auth
 from .agent import Agent, Step, tool_progress
 from .config import EFFORTS, PROVIDERS, VERBOSITIES
 from .context_files import IMAGE_SUFFIXES, discover_project_files
+from .goals import GoalStore
 from .media import ImageAttachment, ImageInputError, prepare_image
 from .permissions import PermissionPolicy
 from .session import (
@@ -64,6 +65,7 @@ COMMANDS = {
     "/undo": "restore the latest conflict-free patch checkpoint",
     "/checkpoints": "list recent automatic patch checkpoints",
     "/auto": "set autonomy: off, steps, ideas, or full",
+    "/goal": "inspect, set, pause, resume, complete, or clear a durable goal",
     "/session": "show current session information",
     "/history": "list recent sessions",
     "/resume": "resume a saved session by id or path",
@@ -326,6 +328,16 @@ class InteractiveApp:
                         f"{step.meta.get('turn', 0)}\x1b[0m"
                     )
                 )
+            elif step.kind == "goal":
+                if text_open:
+                    print()
+                    text_open = False
+                status = step.meta.get("status", "active")
+                turn = step.meta.get("turn", 0)
+                suffix = f" · continuation {turn}" if turn else ""
+                print_formatted_text(
+                    ANSI(f"\x1b[38;5;45m  ◎ goal {status}{suffix}\x1b[0m")
+                )
             elif step.kind == "steering":
                 if text_open:
                     print()
@@ -399,6 +411,11 @@ class InteractiveApp:
                         "permission_mode": self.permission_policy.mode,
                         "autonomy": self._autonomy_label(),
                         "auto_max_turns": self.args.auto_max_turns,
+                        "goal": (
+                            self.agent.current_goal().public()
+                            if self.agent.current_goal() is not None
+                            else None
+                        ),
                         "terminal_images": terminal_image_protocol(),
                     },
                     indent=2,
@@ -433,6 +450,8 @@ class InteractiveApp:
             self._checkpoint("list", "")
         elif command == "/auto":
             self._set_autonomy(value)
+        elif command == "/goal":
+            self._goal(value)
         elif command == "/session":
             self._show_session()
         elif command == "/history":
@@ -458,6 +477,8 @@ class InteractiveApp:
                 disabled=self.args.disabled_tools,
                 skill_paths=self.args.skill_paths,
             )
+            if self.agent.goal_store is not None:
+                self.agent.bind_goal_store(self.agent.goal_store)
             print("reloaded tools and skills")
         elif command == "/hotkeys":
             print(
@@ -507,6 +528,11 @@ class InteractiveApp:
             "verbosity": self.agent.client.verbosity,
             "permissions": self.permission_policy.mode,
             "autonomy": self._autonomy_label(),
+            "goal": (
+                self.agent.current_goal().public()
+                if self.agent.current_goal() is not None
+                else None
+            ),
             "terminal_images": terminal_image_protocol(),
             "session": session.id if session else "ephemeral",
             "transcript_items": len(self.agent.items),
@@ -666,6 +692,56 @@ class InteractiveApp:
         self.args.auto_next_steps = mode in ("steps", "full")
         self.args.auto_next_idea = mode in ("ideas", "full")
         print(f"autonomy: {self._autonomy_label()}")
+
+    def _goal(self, value: str) -> None:
+        store = self.agent.goal_store or GoalStore(self.agent.cwd)
+        self.agent.bind_goal_store(store)
+        if not value:
+            goal = store.load()
+            print(goal.summary() if goal is not None else "no goal for this workspace")
+            return
+        action, _, message = value.partition(" ")
+        action = action.lower()
+        message = message.strip()
+        try:
+            if action == "pause":
+                goal = store.transition("paused", message)
+                self.agent.bind_goal_store(store)
+                print(goal.summary())
+                return
+            if action == "resume":
+                goal = store.transition("active", message)
+                self.agent.bind_goal_store(store)
+                print(goal.summary())
+                self.turn("Resume the active goal from its latest verified checkpoint.")
+                return
+            if action in ("complete", "blocked"):
+                if not message:
+                    print(f"usage: /goal {action} EVIDENCE")
+                    return
+                goal = store.transition(action, message)
+                self.agent.bind_goal_store(store)
+                print(goal.summary())
+                return
+            if action == "clear":
+                removed = store.clear()
+                self.agent.bind_goal_store(store)
+                print("goal cleared" if removed else "no goal for this workspace")
+                return
+            objective = message if action == "set" else value
+            if not objective:
+                print("usage: /goal OBJECTIVE")
+                return
+            goal = store.set(
+                objective,
+                session_id=self.agent.session.id if self.agent.session else "",
+            )
+        except ValueError as exc:
+            print(f"goal: {exc}")
+            return
+        self.agent.bind_goal_store(store)
+        print(goal.summary())
+        self.turn("Begin the active goal now and establish its first checkpoint.")
 
     def _show_session(self) -> None:
         if not self.agent.session:

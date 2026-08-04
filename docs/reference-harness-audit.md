@@ -21,6 +21,7 @@ network service, or optional compiler.
 | OpenCode and Hermes protect edits with external snapshots | Every successful patch stores a secure, bounded checkpoint outside the worktree; undo verifies post-edit hashes and modes before restoring | 79 schema tokens |
 | OpenCode exposes installed language servers | `navigate` provides definition, references, hover, and symbols through stdio LSP, with the hybrid index as its no-server fallback | 115 schema tokens |
 | OpenCode discovers formatters; Hermes queues background work and steering | `check format=true` is approval-gated and checkpointed; shell jobs return pollable IDs; hosted steering queues user guidance at safe model boundaries | 64 parameter-schema tokens |
+| Codex keeps verifiable objectives alive across turns | Workspace-scoped goals persist independently of sessions, inject a bounded contract, retain 50 checkpoints, and expose their tool only while active | 0 schema tokens outside a goal |
 
 The map deliberately reuses MJJ's incremental search chunks instead of adding
 NetworkX, SQLite, another parser cache, or an always-running service. With the
@@ -48,8 +49,9 @@ the map itself works in the dependency-free fallback.
    workspace ownership, and deterministic transcript merge ordering.
 3. **LSP refactors and call hierarchy.** Navigation is read-only today. Rename,
    code actions, and workspace edits should reuse checkpoints and approval.
-4. **Plugin runtime and persistent goals.** Portable skills cover workflows,
-   not in-process event hooks, configurable keymaps, or resumable plan state.
+4. **Plugin runtime and structured plans.** Portable skills and durable goals
+   cover workflows and resumable objectives, not in-process event hooks,
+   configurable keymaps, or editable dependency-aware plan state.
 
 ## Measured cost
 

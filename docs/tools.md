@@ -187,6 +187,14 @@ ambiguous short names require `scope:name`. Hosted sessions disable user-scope
 discovery so the service account's private skills cannot cross into a tenant
 workspace. See [skills.md](skills.md).
 
+## `goal` (on demand)
+
+The `goal` tool is present only while the current workspace has an active
+durable goal. It can inspect status, record a bounded progress checkpoint, or
+mark the goal complete/blocked with an evidence message. Goal state is atomic,
+workspace-scoped, and independent of transcript compaction or branching. See
+[durable goals](goals.md).
+
 ## Scoped project instructions
 
 Startup loads bounded `AGENTS.md` files from repository root to the working

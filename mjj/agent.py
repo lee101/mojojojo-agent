@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Callable, Iterator
 
 from .context_files import FileMentionError, prepare_mentions
+from .goals import Goal, GoalStore
 from .ledger import Ledger
 from .media import ImageAttachment
 from .model import Event, ModelClient
@@ -29,13 +30,14 @@ from .project_docs import (
 )
 from .session import Session, prune_to_latest_compaction
 from .tools.base import Registry, ToolContext, ToolResult
+from .tools.goal import GoalTool
 
 
 @dataclass
 class Step:
     """What the caller sees while a turn runs."""
 
-    kind: str  # reasoning | text | tool_call | tool_result | compaction | autonomous | steering | usage | error
+    kind: str  # reasoning | text | tool_call | tool_result | compaction | autonomous | goal | steering | usage | error
     text: str = ""
     name: str = ""
     meta: dict = field(default_factory=dict)
@@ -59,6 +61,7 @@ class Agent:
     steering: queue.Queue[str] = field(
         default_factory=lambda: queue.Queue(maxsize=32), repr=False
     )
+    goal_store: GoalStore | None = None
 
     def __post_init__(self) -> None:
         if self.instructions is None:
@@ -67,8 +70,23 @@ class Agent:
             )
             self.instructions = compose(SYSTEM_PROMPT, self.project_instructions)
         self.ctx = ToolContext(cwd=self.cwd, ledger=self.ledger, approve=self.approve)
+        if self.goal_store is not None:
+            self.bind_goal_store(self.goal_store)
         if self.session and not self.client.cache_key:
             self.client.cache_key = f"mjj-{self.session.id}"
+
+    def bind_goal_store(self, store: GoalStore) -> None:
+        """Bind durable goal state and expose its tool only while active."""
+        self.goal_store = store
+        self.ctx.state["goal-store"] = store
+        goal = store.load()
+        if goal is not None and goal.status == "active":
+            self.registry.add(GoalTool())
+        else:
+            self.registry.tools.pop("goal", None)
+
+    def current_goal(self) -> Goal | None:
+        return self.goal_store.load() if self.goal_store is not None else None
 
     # -- conversation -------------------------------------------------------
 
@@ -133,6 +151,10 @@ class Agent:
         auto_next_idea: bool = False,
         max_autonomous_turns: int = 0,
     ) -> Iterator[Step]:
+        goal = self.current_goal()
+        if goal is not None and goal.status == "active":
+            self.registry.add(GoalTool())
+            prompt = _goal_contract(goal, prompt)
         if prompt or images:
             try:
                 mentions = prepare_mentions(prompt or "", self.cwd)
@@ -186,6 +208,45 @@ class Agent:
                         yield Step(kind="steering", text=steering)
                     tool_rounds = 0
                     continue
+                goal = self.current_goal()
+                if goal is not None and goal.status == "active":
+                    under_limit = (
+                        max_autonomous_turns == 0
+                        or autonomous_turns < max_autonomous_turns
+                    )
+                    if under_limit:
+                        autonomous_turns += 1
+                        follow_up = _goal_continuation(goal)
+                        self.user(follow_up)
+                        yield Step(
+                            kind="goal",
+                            text=follow_up,
+                            meta={
+                                "id": goal.id,
+                                "status": goal.status,
+                                "turn": autonomous_turns,
+                            },
+                        )
+                        tool_rounds = 0
+                        continue
+                    yield Step(
+                        kind="goal",
+                        text="goal remains active; continuation budget reached",
+                        meta={
+                            "id": goal.id,
+                            "status": "checkpoint",
+                            "turn": autonomous_turns,
+                        },
+                    )
+                    return
+                if goal is not None and goal.status in ("complete", "blocked"):
+                    yield Step(
+                        kind="goal",
+                        text=goal.summary(),
+                        meta={"id": goal.id, "status": goal.status},
+                    )
+                    self.registry.tools.pop("goal", None)
+                    return
                 autonomous = auto_next_steps or auto_next_idea
                 under_limit = (
                     max_autonomous_turns == 0
@@ -287,6 +348,11 @@ def render(steps: Iterator[Step], out, verbose: bool = False) -> int:
             out.write(f"\n[compacted {step.meta.get('dropped_items', 0)} items]\n")
         elif step.kind == "autonomous":
             out.write(f"\n↻ autonomous continuation {step.meta.get('turn', 0)}\n")
+        elif step.kind == "goal":
+            out.write(
+                f"\n◎ goal {step.meta.get('status', 'active')}"
+                f" · turn {step.meta.get('turn', 0)}\n"
+            )
         elif step.kind == "steering":
             out.write("\n↪ steering queued\n")
         elif step.kind == "error":
@@ -344,6 +410,12 @@ def render_exec(
         elif step.kind == "autonomous" and not jsonl:
             err.write(f"↻ autonomous continuation {step.meta.get('turn', 0)}\n")
             err.flush()
+        elif step.kind == "goal" and not jsonl:
+            err.write(
+                f"◎ goal {step.meta.get('status', 'active')}"
+                f" · turn {step.meta.get('turn', 0)}\n"
+            )
+            err.flush()
         elif step.kind == "steering" and not jsonl:
             err.write("↪ steering applied\n")
             err.flush()
@@ -381,6 +453,8 @@ def tool_progress(step: Step, *, verbose: bool = False) -> str:
             if args.get("name")
             else "checking available workflows"
         )
+    if step.name == "goal":
+        return f"updating goal: {args.get('action', 'status')}"
     if step.name == "apply_patch":
         return "editing files"
     if step.name == "checkpoint":
@@ -456,3 +530,30 @@ def _autonomous_prompt(next_steps: bool, next_idea: bool) -> str:
     if next_steps and next_idea:
         instructions.append("Repeat this cycle until a human interrupts you.")
     return "\n\n".join(instructions)
+
+
+def _goal_contract(goal: Goal, prompt: str | None) -> str:
+    request = (prompt or "Continue the active goal.").strip()
+    return (
+        f'<active_goal id="{goal.id}">\n'
+        f"{goal.objective}\n"
+        "</active_goal>\n\n"
+        "Work in verifiable checkpoints. Use the goal tool to record meaningful "
+        "progress. Call goal complete only after the stopping condition is actually "
+        "verified; call goal blocked only when further progress genuinely requires "
+        "external input. Do not replace this objective with an unrelated backlog.\n\n"
+        f"<current_request>\n{request}\n</current_request>"
+    )
+
+
+def _goal_continuation(goal: Goal) -> str:
+    latest = ""
+    if goal.progress:
+        latest = str(goal.progress[-1].get("message") or "")
+    checkpoint = f"\nLatest checkpoint: {latest}" if latest else ""
+    return (
+        f"Continue durable goal {goal.id}: {goal.objective}{checkpoint}\n"
+        "Take the next concrete step, verify it, and record useful progress with the "
+        "goal tool. Complete the goal only with evidence that its stopping condition "
+        "has been met."
+    )

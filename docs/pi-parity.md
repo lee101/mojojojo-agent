@@ -12,7 +12,7 @@ still missing.
 | Interactive default | `pinf` | `mjj` |
 | Headless and JSONL | print/JSON modes | `mjj exec`, `--json` |
 | In-app authentication | `/login`, `/logout` | `/login`, `/logout`, `/auth` |
-| Model and reasoning control | `/model`, settings, hotkeys | `/model`, `/provider`, `/effort`, `/verbosity`, left/right and Shift+Up/Down |
+| Model and reasoning control | `/model`, settings, hotkeys | value-completed and numbered `/model`; `/provider`, `/reasoning`, `/verbosity`; arrows, F2–F4, and Alt bindings |
 | File references | Pi/Grok/Codex `@` completion and attachments | fuzzy `@path`, quoted paths, bounded text, and `@path:START-END` |
 | Multimodal prompts | clipboard/files | `/image`, `--image`, or `@image`; quality-85 bounded WebP |
 | Images in tool responses | terminal/media attachments | `display_image`, Kitty graphics, bounded ANSI fallback, `/preview` |
@@ -24,6 +24,7 @@ still missing.
 | Portable transcripts | `/import`, `/export` | `/import`, `/export`, `mjj import`, `mjj export` |
 | Context compaction | automatic and manual | automatic Responses compaction with graceful backend fallback |
 | Continued autonomous work | Pi Infinity continuation flags | `--auto-next-steps`, `--auto-next-idea`, `/auto` |
+| Persistent goals | Codex `/goal` and Grok background objectives | `/goal`, `mjj goal`, `--goal`; atomic workspace state, bounded checkpoints, evidence-backed completion |
 | Skills and project context | skills and context files | scoped `SKILL.md` plus bounded hierarchical `AGENTS.md` |
 | Runtime reload | `/reload` | `/reload` for tools and skills |
 | Shell and coding tools | read/write/edit/bash/grep/find/ls | read/list/search/navigate/apply-patch/shell/Python/native execution |
@@ -45,8 +46,9 @@ These are feature gaps, not presentation preferences:
 - **Package/plugin runtime.** Pi extensions/packages and Grok/Codex plugins can
   add commands, tools, events, and UI. Mojo Agent supports portable Agent Skills
   but not arbitrary in-process plugins.
-- **Plan/goal workflows and configurable keymaps.** Autonomy continuation is
-  available, but persistent plans/goals and user keybinding files are not.
+- **Plan artifacts and configurable keymaps.** Durable goals now persist their
+  objective and verification log, but editable structured plan artifacts and
+  user keybinding files are not yet implemented.
 
 The presentation boundary remains deliberate:
 

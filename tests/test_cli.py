@@ -115,6 +115,18 @@ def test_exec_accepts_autonomy_and_session_controls_after_subcommand(monkeypatch
     }
 
 
+def test_exec_accepts_a_durable_goal_after_subcommand(monkeypatch) -> None:
+    seen = {}
+
+    def capture(args) -> int:
+        seen["goal"] = args.goal
+        return 0
+
+    monkeypatch.setattr(cli, "cmd_exec", capture)
+    assert main(["exec", "--goal", "finish with passing tests"]) == 0
+    assert seen == {"goal": "finish with passing tests"}
+
+
 def test_login_defaults_to_chatgpt(monkeypatch) -> None:
     seen = {}
 

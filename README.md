@@ -58,12 +58,15 @@ tools, search, sandboxed execution, and a served mode with app.nz sign-in.
 ## Interactive agent
 
 Running `mjj` with no arguments opens the cross-platform terminal app. Type `/`
-for the command palette, use left/right on an empty composer to change reasoning
-effort, Shift+Up/Down to change model, and Alt+Enter for a newline. Provider,
-model, reasoning, images, authentication, session history, branching, export,
-and autonomy can all be controlled without leaving the session. `/help` and
-`/hotkeys` show the complete live command surface. Long headless turns emit a
-heartbeat on stderr while preserving the final answer alone on stdout.
+for the searchable command palette; Tab completes both commands and their valid
+values. `/model` shows numbered shortcuts with the active model marked, while
+`/model 2`, `/model terra`, and `/model next` make switching quick. Custom model
+IDs remain accepted. F2/Alt+M cycles provider-specific models, F3/Alt+R cycles
+reasoning, F4/Alt+V cycles verbosity, and Alt+Enter inserts a newline. The
+original empty-composer left/right reasoning and Shift+Up/Down model controls
+remain available. `/help`, `/commands`, `/hotkeys`, and `/keys` expose the live
+surface. Long headless turns emit a heartbeat on stderr while preserving the
+final answer alone on stdout.
 
 `/image PATH` now previews the attachment as well as queueing it; `/preview PATH`
 displays without attaching. The model can call `display_image` after creating or
@@ -241,6 +244,13 @@ Interactive sessions expose the same controls as `/auto MODE [N]`.
 mjj exec --auto-next-steps --auto-next-idea --auto-max-turns 4 \
   "build the feature, validate it, then improve it"
 ```
+
+Durable goals add an explicit stopping contract that survives sessions and
+process restarts. `/goal OBJECTIVE` starts one interactively; `mjj exec --goal
+OBJECTIVE` does the same headlessly. Goal checkpoints are bounded and the model
+must attach evidence when it marks the objective complete or blocked. Inspect
+or control the state without a model call using `mjj goal`, `mjj goal pause`,
+`mjj goal resume`, and `mjj goal clear`. See [the goal guide](docs/goals.md).
 
 Headless runs keep the final answer alone on stdout and send tool progress to
 stderr, so shell capture stays clean. `--json` emits JSONL events,

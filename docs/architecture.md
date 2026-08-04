@@ -58,6 +58,11 @@ Project context is bounded separately. `AGENTS.md` files are loaded from Git
 root to working directory up to the configured byte cap. Skills expose metadata
 first and load their full instructions only through the bounded skill tool.
 
+Durable goals live outside the transcript in a workspace-keyed, atomic JSON
+record. Active goals inject a bounded execution contract and install the goal
+tool on demand. Completion or blocking removes that schema again; normal runs
+therefore pay no permanent goal-tool context cost.
+
 ## Execution and retrieval
 
 Search fuses exact ripgrep evidence, a compact lexical ranker, and optional

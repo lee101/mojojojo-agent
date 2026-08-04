@@ -12,6 +12,7 @@ import base64
 import html
 import json
 import re
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -20,7 +21,9 @@ from prompt_toolkit import PromptSession, print_formatted_text
 from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.formatted_text import ANSI, HTML
 from prompt_toolkit.history import FileHistory
+from prompt_toolkit.input import DummyInput
 from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.output import DummyOutput
 from prompt_toolkit.shortcuts import prompt as secure_prompt
 
 from . import auth
@@ -257,6 +260,11 @@ class InteractiveApp:
         self.bindings = self._bindings()
         history = auth.mjj_home() / "history"
         history.parent.mkdir(parents=True, exist_ok=True)
+        prompt_io = {}
+        if not sys.stdin.isatty():
+            prompt_io["input"] = DummyInput()
+        if not sys.stdout.isatty():
+            prompt_io["output"] = DummyOutput()
         self.session = PromptSession(
             history=FileHistory(str(history)),
             completer=WorkspaceCompleter(
@@ -268,6 +276,7 @@ class InteractiveApp:
             bottom_toolbar=self._toolbar,
             reserve_space_for_menu=8,
             multiline=False,
+            **prompt_io,
         )
 
     @property

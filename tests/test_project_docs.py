@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from mjj.agent import Agent
@@ -296,7 +297,7 @@ def test_nested_project_docs_outside_workspace_are_not_injected(tmp_path: Path) 
     context = ToolContext(workspace, Ledger())
 
     result = build_registry(only=["fs"]).dispatch(
-        "read", f'{{"path":"{target}"}}', context
+        "read", json.dumps({"path": str(target)}), context
     )
 
     assert result.ok

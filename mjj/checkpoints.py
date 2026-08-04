@@ -102,7 +102,7 @@ class CheckpointStore:
                     {
                         "path": self._relative(path),
                         "existed": existed,
-                        "mode": stat.S_IMODE(path.stat().st_mode) if existed else None,
+                        "mode": _path_mode(path) if existed else None,
                         "before": _digest(content) if existed else None,
                         "after": None,
                         "after_mode": None,
@@ -138,17 +138,15 @@ class CheckpointStore:
                 content = expected[path]
                 record["after"] = _digest(content) if content is not None else None
                 record["after_mode"] = (
-                    int(record.get("mode") or 0o644)
+                    None
+                    if os.name == "nt"
+                    else int(record.get("mode") or 0o644)
                     if content is not None
                     else None
                 )
             else:
                 record["after"] = _path_digest(path)
-                record["after_mode"] = (
-                    stat.S_IMODE(path.stat().st_mode)
-                    if path.exists() and path.is_file() and not path.is_symlink()
-                    else None
-                )
+                record["after_mode"] = _path_mode(path)
         manifest["complete"] = True
         self._write_manifest(pending.directory, manifest)
         self.cleanup()
@@ -191,11 +189,7 @@ class CheckpointStore:
         conflicts = []
         for record in manifest["files"]:
             path = self._manifest_path(record["path"])
-            current_mode = (
-                stat.S_IMODE(path.stat().st_mode)
-                if path.exists() and path.is_file() and not path.is_symlink()
-                else None
-            )
+            current_mode = _path_mode(path)
             if (
                 _path_digest(path) != record.get("after")
                 or current_mode != record.get("after_mode")
@@ -357,6 +351,14 @@ def _path_digest(path: Path) -> str | None:
     if not path.is_file() or path.is_symlink():
         return "invalid"
     return _digest(path.read_bytes())
+
+
+def _path_mode(path: Path) -> int | None:
+    if os.name == "nt":
+        return None
+    if not path.exists() or not path.is_file() or path.is_symlink():
+        return None
+    return stat.S_IMODE(path.stat().st_mode)
 
 
 def _capture(path: Path) -> tuple[bool, bytes, int]:

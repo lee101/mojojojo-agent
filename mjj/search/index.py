@@ -147,7 +147,7 @@ class RepositoryIndex:
     chunks: list[Chunk]
     vectors: Int8Vectors
     stats: UpdateStats = field(default_factory=UpdateStats)
-    _mapping: mmap.mmap | None = field(default=None, repr=False)
+    _mapping: mmap.mmap | bytes | None = field(default=None, repr=False)
     _lexical: LexicalIndex | None = field(default=None, init=False, repr=False)
     _regions: dict[str, tuple[list[int], list[int]]] | None = field(
         default=None, init=False, repr=False
@@ -171,13 +171,19 @@ class RepositoryIndex:
             if index_path is not None
             else root_path / ".mjj" / "index"
         )
-        file_handle = destination.open("rb")
-        try:
-            mapping = mmap.mmap(
-                file_handle.fileno(), 0, access=mmap.ACCESS_COPY
-            )
-        finally:
-            file_handle.close()
+        if os.name == "nt":
+            # Windows prevents replacing or deleting a memory-mapped file.
+            # Keep immutable bytes as the backing store so incremental rebuilds
+            # and temporary-directory cleanup remain possible.
+            mapping: mmap.mmap | bytes = destination.read_bytes()
+        else:
+            file_handle = destination.open("rb")
+            try:
+                mapping = mmap.mmap(
+                    file_handle.fileno(), 0, access=mmap.ACCESS_COPY
+                )
+            finally:
+                file_handle.close()
         try:
             if len(mapping) < HEADER.size:
                 raise ValueError("index header is truncated")
@@ -231,7 +237,8 @@ class RepositoryIndex:
                 _mapping=mapping,
             )
         except Exception:
-            mapping.close()
+            if isinstance(mapping, mmap.mmap):
+                mapping.close()
             raise
 
     @property

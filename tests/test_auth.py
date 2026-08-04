@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import time
 
 import pytest
@@ -167,7 +168,8 @@ def test_saved_provider_key_is_private_and_resolvable(tmp_path, monkeypatch):
     monkeypatch.delenv("MJJ_OPENROUTER_API_KEY", raising=False)
     path = auth.save_provider_key("openrouter", "sk-secret")
     assert path == tmp_path / "auth.json"
-    assert path.stat().st_mode & 0o077 == 0
+    if os.name != "nt":
+        assert path.stat().st_mode & 0o077 == 0
     credential = auth.CredentialResolver(provider="openrouter").resolve()
     assert credential.token == "sk-secret"
     assert "sk-secret" not in json.dumps(auth.describe())

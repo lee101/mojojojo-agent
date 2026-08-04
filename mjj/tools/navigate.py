@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import urlparse
+from urllib.request import url2pathname
 
 from ..checkpoints import CheckpointError, store_for
 from ..lsp import LspError, request_lsp, request_lsp_call_hierarchy, server_for
@@ -383,7 +384,7 @@ def _location(item, root: Path) -> str | None:
     parsed = urlparse(uri)
     if parsed.scheme != "file":
         return None
-    path = Path(unquote(parsed.path)).resolve()
+    path = _file_uri_path(parsed)
     try:
         label = path.relative_to(root).as_posix()
         inside = True
@@ -519,7 +520,7 @@ def _collect_text_edits(
     parsed = urlparse(uri)
     if parsed.scheme != "file":
         raise ValueError("rename edits must use file URIs")
-    path = Path(unquote(parsed.path)).resolve()
+    path = _file_uri_path(parsed)
     try:
         path.relative_to(root)
     except ValueError:
@@ -531,6 +532,11 @@ def _collect_text_edits(
     if not edits:
         return
     grouped.setdefault(path, []).extend(edits)
+
+
+def _file_uri_path(parsed) -> Path:
+    value = f"//{parsed.netloc}{parsed.path}" if parsed.netloc else parsed.path
+    return Path(url2pathname(value)).resolve()
 
 
 def _apply_text_edits(source: str, edits: list[dict]) -> str:

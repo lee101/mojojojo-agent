@@ -2,6 +2,12 @@
 
 A coding agent harness that spends tokens like they cost money.
 
+[Website](https://mojojojo.cc/agent) ·
+[Documentation](docs/README.md) ·
+[Releases](https://github.com/lee101/mojojojo-agent/releases) ·
+[Issues](https://github.com/lee101/mojojojo-agent/issues) ·
+[MIT licence](LICENSE)
+
 Same job as Codex or Claude Code: read a repository, change it, run the tests,
 report back. The difference is where the work happens. Searching a codebase,
 executing code, and matching diffs are **computation**, not reasoning — so this
@@ -11,7 +17,7 @@ the model an answer instead of a pile of context to read.
 Linux and macOS can install the self-contained release binary without Python:
 
 ```bash
-curl -fsSL https://mojojojo.app.nz/install.sh | sh
+curl -fsSL https://mojojojo.cc/install.sh | sh
 mjj                                  # opens the interactive coding agent
 mjj auth --probe                     # reuses your existing ChatGPT sign-in
 mjj exec "make the failing test in tests/test_router.py pass"
@@ -20,7 +26,7 @@ mjj exec "make the failing test in tests/test_router.py pass"
 On Windows PowerShell:
 
 ```powershell
-irm https://mojojojo.app.nz/install.ps1 | iex
+irm https://mojojojo.cc/install.ps1 | iex
 ```
 
 The installers select the operating system and CPU, verify the release's
@@ -41,6 +47,10 @@ From a checkout, `uv sync && uv run pytest -q` creates the development
 environment and verifies it. The base package uses Pillow for bounded vision
 inputs and prompt-toolkit for the cross-platform composer; `mojosub` and
 `mojo-embed` are guarded accelerators, not startup requirements.
+
+New users should start with the [getting-started guide](docs/getting-started.md).
+The [documentation index](docs/README.md) links task-oriented guides, internals,
+deployment, and the Pi Infinity parity notes.
 
 Status: **early but working end to end** — credential, model client, loop,
 tools, search, sandboxed execution, and a served mode with app.nz sign-in.
@@ -217,7 +227,7 @@ disable the cap with `agent.project_doc_max_bytes`.
 `python -m mjj.server` puts the same loop behind an SSE endpoint that
 authenticates with the shared app.nz session cookie or an `mj_live_` key, bills
 the same credit ledger the rest of the platform uses, and gives every account
-its own workspace. mojojojo.app.nz proxies it into the editor's agent panel.
+its own workspace. mojojojo.cc proxies it into the editor's agent panel.
 See [docs/server.md](docs/server.md).
 
 ## Layout
@@ -225,6 +235,11 @@ See [docs/server.md](docs/server.md).
 See [AGENTS.md](AGENTS.md) — it is the working contract for this repo, and the
 map of which module owns what. [docs/](docs/) covers the tools, search,
 execution, the server, and the accelerated kernels.
+
+The project is MIT-licensed and developed in public. See
+[CONTRIBUTING.md](CONTRIBUTING.md) for the local workflow and pull-request
+expectations, and [docs/architecture.md](docs/architecture.md) for the runtime
+and security boundaries.
 
 ## Licence
 

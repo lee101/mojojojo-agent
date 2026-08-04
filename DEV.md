@@ -71,6 +71,8 @@ and exercises both installers against locally built archives.
 
 Never publish a number that cannot be reproduced. Benchmarks run under one
 lock; evals score task success, token use, cache reads, tool calls, and latency.
+The [eval guide](evals/README.md) defines isolation, artifacts, and the
+construction-to-held-out acceptance loop.
 
 ```bash
 bench/run.sh

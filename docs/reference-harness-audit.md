@@ -34,6 +34,11 @@ Prefer extending an existing tool over adding an always-visible one. A feature
 with no task-success evidence, no bounded result policy, or no fallback stays
 out even when several harnesses ship it.
 
+For changes to agent behavior, use the layered artifacts and held-out workflow
+in the [eval guide](../evals/README.md). A verifier failure is evidence against
+the candidate, even when its final prose sounds convincing; a token regression
+is published beside any correctness result.
+
 ## Patterns already adapted
 
 | reference pattern | MJJ boundary |

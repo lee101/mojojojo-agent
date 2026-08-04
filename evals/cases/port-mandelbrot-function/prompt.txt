@@ -1,0 +1,7 @@
+Accelerate `kernel.py`'s `mandelbrot_checksum` with the available mojosub
+package while preserving its Python name, signature, and exact integer results.
+Use mojosub's correctness verification and keep the Python fallback. Add
+`bench.py`; it must time the original Python function and the retained native
+path on the same arguments and print one JSON object containing
+`python_seconds`, `mojo_seconds`, `speedup`, and `compiled`. Run the tests and
+the benchmark. Do not modify the existing tests or fabricate timing numbers.

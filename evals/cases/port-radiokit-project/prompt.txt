@@ -1,0 +1,9 @@
+This is a small working Python signal-analysis project. Port at least two hot
+numeric functions in `radiokit/kernels.py` to Mojo with the available mojosub
+package while preserving every public name, signature, return value, the
+`analyze` API, and the CLI JSON shape. Use correctness verification and retain
+the Python fallback. Add `bench.py` that compares the original Python and
+retained native `autocorrelation_peak` paths on identical input and prints one
+JSON object with `compiled_kernels`, `python_seconds`, `mojo_seconds`, and
+`speedup`. Run the existing tests and benchmark. Do not modify the tests or
+fabricate results.

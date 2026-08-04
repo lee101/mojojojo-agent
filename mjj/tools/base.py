@@ -9,11 +9,18 @@ they have not clipped through the ledger.
 from __future__ import annotations
 
 import json
+import re
+import shlex
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Protocol
 
 from ..ledger import Ledger
+from ..project_docs import ProjectInstructions, ScopedProjectDocs
+
+
+_PATCH_PATH = re.compile(r"^\*\*\* (?:Add|Update|Delete) File: (.+)$", re.MULTILINE)
+_PATH_KEYS = {"path", "file_path", "filePath", "cwd"}
 
 
 @dataclass
@@ -22,6 +29,11 @@ class ToolContext:
     ledger: Ledger
     approve: Callable[[str, dict], bool] | None = None
     state: dict = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        self.cwd = Path(self.cwd).expanduser().resolve()
+        self.ledger.bind_workspace(self.cwd)
+        self.state.setdefault("scoped-project-docs", ScopedProjectDocs(self.cwd))
 
     def resolve(self, path: str) -> Path:
         """Resolve a model-supplied path inside the workspace.
@@ -34,6 +46,12 @@ class ToolContext:
         if candidate.is_absolute():
             return candidate
         return (self.cwd / candidate).resolve()
+
+    def discover_project_docs(self, args: dict) -> ProjectInstructions:
+        tracker = self.state.get("scoped-project-docs")
+        if not isinstance(tracker, ScopedProjectDocs):
+            return ProjectInstructions()
+        return tracker.discover(_argument_paths(args, self.cwd))
 
 
 @dataclass
@@ -100,7 +118,68 @@ class Registry:
                     ctx.ledger.clip(name, f"tool denied by permission mode: {name}"),
                     denied=True,
                 )
+        scoped_docs = ctx.discover_project_docs(args)
         try:
-            return tool.run(args, ctx)
+            result = tool.run(args, ctx)
+            if scoped_docs.text:
+                result.output = ctx.ledger.attach(name, result.output, scoped_docs.text)
+                result.meta["project_docs"] = [
+                    str(path) for path in scoped_docs.sources
+                ]
+            return result
         except Exception as exc:  # a tool crash is a turn event, not a stack trace
             return ToolResult.error(f"{type(exc).__name__}: {exc}")
+
+
+def _argument_paths(args: dict, cwd: Path) -> list[Path]:
+    paths: list[Path] = []
+    command_cwd = _resolve_candidate(args.get("cwd"), cwd) or cwd
+    for key in _PATH_KEYS:
+        candidate = _resolve_candidate(args.get(key), cwd)
+        if candidate is not None:
+            paths.append(candidate)
+    raw_paths = args.get("paths")
+    if isinstance(raw_paths, list):
+        paths.extend(
+            candidate
+            for value in raw_paths
+            if (candidate := _resolve_candidate(value, cwd)) is not None
+        )
+    patch = args.get("input")
+    if isinstance(patch, str):
+        paths.extend(
+            (cwd / value).resolve()
+            for value in _PATCH_PATH.findall(patch)
+            if value and not Path(value).is_absolute()
+        )
+    command = args.get("command")
+    if isinstance(command, list):
+        tokens = [value for value in command if isinstance(value, str)]
+    elif isinstance(command, str):
+        try:
+            tokens = shlex.split(command)
+        except ValueError:
+            tokens = command.split()
+    else:
+        tokens = []
+    for token in tokens[1:]:
+        if token.startswith("-") or token.startswith(("http://", "https://")):
+            continue
+        value = token.split(":", 1)[0]
+        candidate = _resolve_candidate(value, command_cwd)
+        if candidate is not None and (
+            candidate.exists() or "/" in value or "\\" in value
+        ):
+            paths.append(candidate)
+    return list(dict.fromkeys(paths))
+
+
+def _resolve_candidate(value, base: Path) -> Path | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    candidate = Path(value).expanduser()
+    return (
+        candidate.resolve()
+        if candidate.is_absolute()
+        else (base / candidate).resolve()
+    )

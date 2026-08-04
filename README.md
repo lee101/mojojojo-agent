@@ -113,6 +113,7 @@ agent the compact workflow only when visual work calls for it. See the
 | what a harness does | usual approach | here |
 | --- | --- | --- |
 | find code | dump files into context | ranked `path:line` hits from a native int8 index |
+| understand a repository | read every file | reference-ranked symbol map, fitted to budget |
 | run code | shell out to CPython | subset-compiled to Mojo, cached by content hash |
 | edit code | rewrite the file | atomic `apply_patch`, syntax gate, `+n/-n` summary |
 | validate code | run every build inline | parser checks now, compiler jobs in background |
@@ -135,6 +136,18 @@ Corpus is a real 270-file repository. `bench/search_bench.py` reproduces it.
 Search that always answers is worse than search that says *no matches*, so a
 hit must share a distinctive word with the query. [docs/search.md](docs/search.md)
 shows the measurements that forced that design.
+
+Broad orientation is available without a file dump:
+
+```json
+{"path": ".", "symbols": true, "query": "authentication refresh"}
+```
+
+Clipped tool results remain recoverable from their `.mjj/tool-results/` address,
+and nested project instructions are loaded once when a tool first enters their
+subtree. Both behaviors add zero tool-schema tokens. The
+[reference harness audit](docs/reference-harness-audit.md) records the OpenCode,
+Hermes, and Aider designs that motivated these choices.
 
 The same adaptive literal → lexical/mojo-embed path is usable directly from disk:
 

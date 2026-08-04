@@ -1,6 +1,8 @@
 from pathlib import Path
 
 from mjj.ledger import Budget, Ledger
+from mjj.repo_map import render_repo_map
+from mjj.search.index import build_index
 from mjj.tools.base import ToolContext
 from mjj.tools.fs import ListTool, ReadTool
 
@@ -96,3 +98,60 @@ def test_list_collapses_large_directories_to_counts(tmp_path):
     assert "crowded/" in result.output
     assert "… 101 files" in result.output
     assert "000.txt" not in result.output
+
+
+def test_symbol_map_ranks_cross_file_definitions_and_accepts_query(tmp_path):
+    (tmp_path / "core.py").write_text(
+        "def central_service():\n    return 1\n\ndef side_path():\n    return 2\n"
+    )
+    for number in range(4):
+        (tmp_path / f"caller_{number}.py").write_text(
+            "from core import central_service\n\n"
+            f"def caller_{number}():\n    return central_service()\n"
+        )
+    (tmp_path / "rare.py").write_text(
+        "def rare_manager():\n    return 2\n\n"
+        "def ultraviolet_wombat():\n    return rare_manager()\n"
+    )
+    ctx = context(tmp_path, read_budget=300)
+
+    broad = ListTool().run({"symbols": True}, ctx)
+    focused = ListTool().run(
+        {"symbols": True, "query": "ultraviolet wombat"}, ctx
+    )
+
+    assert broad.ok
+    assert broad.meta["map"] is True
+    assert "core.py\n  1: def central_service():" in broad.output
+    assert broad.output.index("core.py") < broad.output.index("rare.py")
+    assert focused.output.index("rare.py") < focused.output.index("core.py")
+    assert focused.output.index("ultraviolet_wombat") < focused.output.index(
+        "rare_manager"
+    )
+    assert focused.meta["symbols"] > 0
+
+
+def test_symbol_map_prefits_small_budget_without_ledger_clipping(tmp_path):
+    for number in range(40):
+        (tmp_path / f"module_{number:02}.py").write_text(
+            f"def bounded_symbol_{number:02}():\n    return {number}\n"
+        )
+    ctx = ToolContext(tmp_path, Ledger(Budget(default=80)))
+
+    result = ListTool().run({"symbols": True}, ctx)
+
+    assert result.ok
+    assert not ctx.ledger.drops
+    assert result.meta["omitted_files"] > 0
+    assert len(result.output) <= 80 * 4
+
+
+def test_symbol_map_direct_renderer_obeys_tiny_character_budgets(tmp_path):
+    (tmp_path / "module.py").write_text(
+        "def a_very_long_symbol_name_for_budget_testing():\n    return 1\n"
+    )
+    index = build_index(tmp_path)
+
+    for budget in range(100):
+        repo_map = render_repo_map(index, character_budget=budget)
+        assert len(repo_map.output) <= budget

@@ -2,7 +2,10 @@
 
 Every tool implements `mjj.tools.base.Tool` and returns a `ToolResult`. Tool
 text, including errors, passes through `ctx.ledger.clip()` exactly once. The
-ledger therefore remains the single output-budget policy.
+ledger therefore remains the single output-budget policy. When clipping is
+necessary, the complete result is retained mode `0600` under
+`.mjj/tool-results/` for seven days (at most 256 files), and the bounded result
+includes that retrieval address.
 
 ## `read`
 
@@ -26,6 +29,16 @@ file counts instead of an entry dump.
 
 ```json
 {"path": "mjj", "depth": 3}
+```
+
+Set `"symbols": true` for a reference-weighted repository map. Declarations
+come from incremental search chunks, files referenced by other files rank
+higher, and `query` personalizes the ranking to the current task. The renderer
+fits complete file blocks before the ledger budget, so truncation never splits
+a symbol address.
+
+```json
+{"path": "mjj", "symbols": true, "query": "session compaction"}
 ```
 
 ## `shell`
@@ -120,3 +133,12 @@ bounded bundled-file listing. Project skills are searched before user skills;
 ambiguous short names require `scope:name`. Hosted sessions disable user-scope
 discovery so the service account's private skills cannot cross into a tenant
 workspace. See [skills.md](skills.md).
+
+## Scoped project instructions
+
+Startup loads bounded `AGENTS.md` files from repository root to the working
+directory. When a tool first reads, searches, checks, patches, or runs a command
+in a deeper subtree, MJJ discovers the applicable nested `AGENTS.override.md`
+or `AGENTS.md` and attaches it once to that tool result. This supplies local
+rules when they matter without changing the system prompt or invalidating its
+cache.

@@ -15,6 +15,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from mjj.ledger import Budget, Ledger, estimate_tokens  # noqa: E402
+from mjj.repo_map import render_repo_map  # noqa: E402
 from mjj.search.index import build_index  # noqa: E402
 from mjj.tools import build_registry  # noqa: E402
 from mjj.tools.base import ToolContext  # noqa: E402
@@ -76,6 +77,14 @@ def benchmark(iterations: int = 20) -> dict:
             ),
             max(2, iterations // 4),
         )
+        map_ms, repo_map = _median(
+            lambda: render_repo_map(
+                index,
+                query="shared result",
+                character_budget=256,
+            ),
+            iterations,
+        )
         raw = "\n".join(
             f"worker_{number:03}.py:2:    return shared_result  # {number}"
             for number in range(120)
@@ -83,6 +92,19 @@ def benchmark(iterations: int = 20) -> dict:
         schemas = {item["name"]: item for item in build_registry().schemas()}
         check_schema_tokens = estimate_tokens(
             json.dumps(schemas["check"], separators=(",", ":"))
+        )
+        map_parameter_tokens = estimate_tokens(
+            json.dumps(
+                {
+                    key: schemas["list"]["parameters"]["properties"][key]
+                    for key in ("symbols", "query")
+                },
+                separators=(",", ":"),
+            )
+        )
+        raw_symbols = "\n".join(
+            f"worker_{number:03}.py:1:def shared_worker_{number:03}():"
+            for number in range(120)
         )
         return {
             "corpus": {
@@ -94,6 +116,7 @@ def benchmark(iterations: int = 20) -> dict:
                 "exact_auto_median": round(exact_ms, 3),
                 "naming_variant_median": round(variant_ms, 3),
                 "large_fallback_median": round(fallback_ms, 3),
+                "repository_map_median": round(map_ms, 3),
             },
             "ranking": {
                 "exact_sources": list(exact_hits[0].sources),
@@ -113,11 +136,19 @@ def benchmark(iterations: int = 20) -> dict:
                     - estimate_tokens(second.output),
                 ),
                 "check_tool_schema": check_schema_tokens,
+                "map_parameters_schema": map_parameter_tokens,
+                "raw_symbol_listing": estimate_tokens(raw_symbols),
+                "repository_map": estimate_tokens(repo_map.output),
             },
             "continuation": {
                 "first_cursor": first.meta["next_cursor"],
                 "second_cursor": second.meta["next_cursor"],
                 "pages_differ": first.output != second.output,
+            },
+            "repository_map": {
+                "files": repo_map.files,
+                "symbols": repo_map.symbols,
+                "omitted_files": repo_map.omitted_files,
             },
         }
 

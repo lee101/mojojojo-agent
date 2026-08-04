@@ -36,6 +36,9 @@ These are feature gaps, not presentation preferences:
   while tools are running; Mojo Agent's inline loop is still synchronous.
 - **MCP, LSP, and external integrations.** Grok and Codex expose MCP, while
   Grok also supplies language-server diagnostics and navigation.
+- **Transparent checkpoints and undo.** OpenCode and Hermes protect agent
+  mutations with external shadow-Git snapshots; MJJ's patches are atomic but
+  do not yet provide cross-tool rollback.
 - **Background jobs and subagents.** Grok can manage long-running tasks and
   reviewer/worker agents. Mojo Agent currently runs one foreground turn loop.
 - **Package/plugin runtime.** Pi extensions/packages and Grok/Codex plugins can

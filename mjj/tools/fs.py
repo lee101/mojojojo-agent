@@ -7,6 +7,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..repo_map import render_repo_map
+from ..search.index import RepositoryIndex, build_index
 from .base import ToolContext, ToolResult
 
 _OUTLINE = re.compile(
@@ -219,7 +221,7 @@ def _read_ignore_file(path: Path, base: Path) -> list[_IgnoreRule]:
 
 
 def _ignored(relative: Path, is_dir: bool, rules: list[_IgnoreRule]) -> bool:
-    ignored = relative.parts[:1] == (".git",)
+    ignored = relative.parts[:1] in {(".git",), (".mjj",)}
     for rule in rules:
         if rule.matches(relative, is_dir):
             ignored = not rule.negated
@@ -239,6 +241,14 @@ class ListTool:
                 "maximum": 20,
                 "default": 2,
             },
+            "symbols": {
+                "type": "boolean",
+                "description": "Return a ranked repository symbol map.",
+            },
+            "query": {
+                "type": "string",
+                "description": "Optional relevance query for the symbol map.",
+            },
         },
         "additionalProperties": False,
     }
@@ -254,12 +264,60 @@ class ListTool:
         assert depth is not None
         if depth < 0 or depth > 20:
             return _result(ctx, self.name, "depth must be between 0 and 20", ok=False)
+        symbols = args.get("symbols", False)
+        if not isinstance(symbols, bool):
+            return _result(ctx, self.name, "symbols must be true or false", ok=False)
+        query = args.get("query", "")
+        if not isinstance(query, str):
+            return _result(ctx, self.name, "query must be a string", ok=False)
 
         root = ctx.resolve(path_arg)
         if not root.exists():
             return _result(ctx, self.name, f"not found: {path_arg}", ok=False)
         if not root.is_dir():
             return _result(ctx, self.name, f"not a directory: {path_arg}", ok=False)
+
+        if symbols:
+            workspace = ctx.cwd.resolve()
+            try:
+                scope = root.relative_to(workspace).as_posix()
+            except ValueError:
+                return _result(
+                    ctx,
+                    self.name,
+                    "symbol maps must stay inside the workspace",
+                    ok=False,
+                )
+            if scope == ".":
+                scope = ""
+            cache_key = f"search-index:{workspace}"
+            cached = ctx.state.get(cache_key)
+            try:
+                index = build_index(
+                    workspace,
+                    existing=cached if isinstance(cached, RepositoryIndex) else None,
+                )
+                ctx.state[cache_key] = index
+                repo_map = render_repo_map(
+                    index,
+                    scope=scope,
+                    query=query,
+                    character_budget=ctx.ledger.budget.for_tool(self.name) * 4,
+                )
+            except (OSError, ValueError) as exc:
+                return _result(ctx, self.name, str(exc), ok=False)
+            return _result(
+                ctx,
+                self.name,
+                repo_map.output,
+                hint="narrow path or add a query",
+                path=str(root),
+                map=True,
+                files=repo_map.files,
+                symbols=repo_map.symbols,
+                omitted_files=repo_map.omitted_files,
+                backend=index.backend_name,
+            )
 
         lines = [f"{path_arg.rstrip('/') or '.'}/"]
         rules = _ancestor_rules(root, ctx.cwd.resolve())

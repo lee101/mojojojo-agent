@@ -36,6 +36,7 @@ instead of being paid for in context.
 | `mjj/syntax.py` | exact parsers + optional per-language tree-sitter checks |
 | `mjj/visualize.py` | token-free native WebGL visualizer expansion |
 | `mjj/search/` | mojo-embed backed index: literal + lexical + semantic |
+| `mjj/repo_map.py` | reference-ranked, budget-fitted repository symbol map |
 | `mjj/kernels/` | mojosub `@jit` hot paths with CPython fallbacks |
 | `mjj/server.py` | SSE agent backend with app.nz SSO + credit billing |
 | `mjj/cli.py` | `mjj`, `mjj exec` (headless, scriptable) |

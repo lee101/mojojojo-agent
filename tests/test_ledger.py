@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import re
+
 from mjj.ledger import CHARS_PER_TOKEN, Budget, Ledger, estimate_tokens
+from mjj.tools.base import ToolContext
 
 
 def ledger(**budgets) -> Ledger:
@@ -44,6 +47,29 @@ def test_single_line_blob_is_clipped_in_the_middle():
     assert "[clipped]" in out and out.startswith("aaa") and out.endswith("aaa")
 
 
+def test_clipped_output_is_spilled_with_a_retrieval_address(tmp_path):
+    led = ledger(default=40)
+    ToolContext(tmp_path, led)
+    original = "\n".join(f"diagnostic {number}" for number in range(500))
+
+    out = led.clip("shell", original)
+    match = re.search(r"\.mjj/tool-results/[\w.-]+\.txt", out)
+
+    assert match is not None
+    spilled = tmp_path / match.group(0)
+    assert spilled.read_text() == original
+    assert spilled.stat().st_mode & 0o777 == 0o600
+
+
+def test_single_line_spill_address_survives_blob_clipping(tmp_path):
+    led = ledger(default=40)
+    ToolContext(tmp_path, led)
+
+    out = led.clip("shell", "x" * 20_000)
+
+    assert "full output: .mjj/tool-results/" in out
+
+
 def test_drops_are_recorded():
     led = ledger(default=20)
     led.clip("search", "\n".join(str(i) for i in range(500)))
@@ -73,6 +99,18 @@ def test_budget_is_a_hard_bound_even_with_hostile_hints():
         for text in texts:
             out = ledger(default=budget).clip("read", text, hint="hint\n" * 1000)
             assert len(out) <= budget * CHARS_PER_TOKEN
+
+
+def test_attached_context_obeys_every_tiny_budget():
+    for budget in range(101):
+        led = ledger(default=budget)
+        current = led.clip("read", "result\n" * 1000)
+
+        out = led.attach("read", current, "instructions\n" * 1000)
+
+        assert len(out) <= budget * CHARS_PER_TOKEN
+        assert led.tool_calls == 1
+        assert led.tool_tokens == estimate_tokens(out)
 
 
 def test_summary_does_not_allocate_the_withheld_output():

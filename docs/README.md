@@ -21,6 +21,8 @@ same code that ships in the [public repository](https://github.com/lee101/mojojo
 - [Execution](exec.md) — Mojo acceleration, local isolation, and remote fallback.
 - [Visualizers](visualizers.md) — native deterministic WebGL scaffolding,
   image transforms, and token/speed measurements.
+- [Reference harness audit](reference-harness-audit.md) — OpenCode, Hermes,
+  and Aider ideas adopted, deferred, and measured.
 - [Agent feature parity](pi-parity.md) — current Pi Infinity, Grok Infinity,
   and Codex workflow mappings plus the remaining substantive gaps.
 

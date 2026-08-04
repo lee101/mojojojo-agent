@@ -4,7 +4,9 @@ from pathlib import Path
 
 from mjj.agent import Agent
 from mjj.project_docs import compose, load
-from mjj.tools.base import Registry
+from mjj.ledger import Budget, Ledger
+from mjj.tools import build_registry
+from mjj.tools.base import Registry, ToolContext
 
 
 def test_loads_root_to_cwd_and_prefers_override(tmp_path: Path) -> None:
@@ -69,3 +71,44 @@ def test_agent_loads_project_docs_once_at_startup(tmp_path: Path) -> None:
     assert "first version" in agent.instructions
     assert "later version" not in agent.instructions
     assert agent.project_instructions.sources == (agents.resolve(),)
+
+
+def test_nested_project_docs_are_injected_once_on_first_tool_access(tmp_path: Path) -> None:
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "AGENTS.md").write_text("root rules")
+    nested = tmp_path / "src" / "feature"
+    nested.mkdir(parents=True)
+    override = nested / "AGENTS.override.md"
+    override.write_text("run the feature-specific check")
+    target = nested / "module.py"
+    target.write_text("value = 1\n")
+    context = ToolContext(tmp_path, Ledger(Budget(default=300)))
+    registry = build_registry(only=["fs"])
+
+    first = registry.dispatch("read", '{"path":"src/feature/module.py"}', context)
+    second = registry.dispatch("read", '{"path":"src/feature/module.py"}', context)
+
+    assert "scoped project instructions" in first.output
+    assert "run the feature-specific check" in first.output
+    assert first.meta["project_docs"] == [str(override.resolve())]
+    assert "scoped project instructions" not in second.output
+    assert context.ledger.tool_calls == 2
+
+
+def test_nested_project_docs_outside_workspace_are_not_injected(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / ".git").mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "AGENTS.md").write_text("outside rules")
+    target = outside / "file.txt"
+    target.write_text("content")
+    context = ToolContext(workspace, Ledger())
+
+    result = build_registry(only=["fs"]).dispatch(
+        "read", f'{{"path":"{target}"}}', context
+    )
+
+    assert result.ok
+    assert "outside rules" not in result.output

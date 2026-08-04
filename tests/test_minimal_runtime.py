@@ -5,6 +5,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 try:
     import tomllib
 except ImportError:  # Python 3.10 development environment.
@@ -12,6 +14,10 @@ except ImportError:  # Python 3.10 development environment.
 
 
 ROOT = Path(__file__).resolve().parents[1]
+NO_SITE_PACKAGES = pytest.mark.skipif(
+    sys.version_info < (3, 11),
+    reason="Python 3.10 correctly needs the base tomli dependency",
+)
 
 
 def _minimal_python(*arguments: str, input_text: str = "", env=None):
@@ -28,6 +34,7 @@ def _minimal_python(*arguments: str, input_text: str = "", env=None):
     )
 
 
+@NO_SITE_PACKAGES
 def test_version_starts_without_site_packages() -> None:
     completed = _minimal_python("--version")
 
@@ -35,6 +42,7 @@ def test_version_starts_without_site_packages() -> None:
     assert completed.stdout.startswith("mjj ")
 
 
+@NO_SITE_PACKAGES
 def test_stdlib_interactive_composer_starts_without_site_packages(tmp_path) -> None:
     env = os.environ.copy()
     env.update(

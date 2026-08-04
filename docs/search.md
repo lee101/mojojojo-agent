@@ -221,3 +221,35 @@ machine, two 56-token pages withheld 1301 of 1413 raw-match tokens; an excluded
 2 MiB tail match took 38.575 ms. The always-present `check` tool schema costs
 122 estimated cached-context tokens. These are harness measurements, not model
 recall or artistic-quality claims, and should be regenerated on other machines.
+
+### Allocation and flame profiles
+
+`bench/allocation_bench.py` measures the tokenizer and static embedding with a
+fixed synthetic workload. With `--corpus`, it also reports a content SHA-256,
+file/chunk counts, cold-index median, traced heap peak, and retained allocation
+sites. `bench/flamegraph.sh` records a 250 Hz CPU flame graph through pinned
+py-spy; the Memray commands in [DEV.md](../DEV.md) record Python allocation
+events and an allocation flame graph.
+
+One controlled run on 2026-08-04 used CPython 3.13.13, Linux 6.8, CPU 0 of an
+Intel Xeon E5-2697 v4, and the same 179-file/1,786-chunk corpus for both
+revisions. Its corpus SHA-256 was
+`c04d039feeddccb75f76c4c5bfab6a9476ddeae6da194a310eeca14b9d4e322c`.
+Medians are seven inner timing samples and three cold index builds:
+
+| measurement | `ebecf73` | optimized | change |
+| --- | ---: | ---: | ---: |
+| tokenizer | 2438.668 us | 1158.170 us | -52.5% |
+| static embedding | 9614.326 us | 7241.230 us | -24.7% |
+| cold index build | 2492.845 ms | 1783.851 ms | -28.4% |
+| cold index traced heap peak | 15,226,642 B | 15,022,523 B | -1.3% |
+
+Memray 1.19.3 with `--trace-python-allocators` over ten identical tokenizer
+and embedding iterations recorded 993,125 allocation events / 130.867 MB for
+`ebecf73`, versus 681,786 / 96.618 MB after the change: 31.3% fewer events and
+26.2% fewer allocated bytes. Peak memory for that small direct-call workload
+was effectively flat (1.357 MB versus 1.366 MB). A full index produced by both
+implementations was byte-identical, SHA-256
+`47df8db11ed1ca67911c066dd91417510ddfda7a73beb5800c3f491f3293bf30`.
+These are reproducible measurements on one machine, not universal latency
+claims; compare only reports with the same corpus digest and execution setup.

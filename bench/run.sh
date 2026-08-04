@@ -11,6 +11,7 @@ fi
 cd "$root"
 uv run python bench/search_bench.py
 uv run python bench/retrieval_bench.py
+uv run python bench/allocation_bench.py
 (
   cd visualbench
   npm run bench

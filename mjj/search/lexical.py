@@ -6,10 +6,9 @@ import math
 import re
 from array import array
 from collections import Counter, defaultdict
-from typing import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 
 from mjj.kernels import ACCEL_ENABLED, bm25_accumulate
-
 
 _WORDS = re.compile(r"[A-Za-z][A-Za-z0-9]*|\d+")
 _CAMEL_BOUNDARY = re.compile(
@@ -28,10 +27,17 @@ def tokenize(value: str) -> list[str]:
     for match in _WORDS.finditer(value):
         word = match.group(0)
         whole = word.lower()
-        pieces = [piece.lower() for piece in _CAMEL_BOUNDARY.split(word)]
         tokens.append(whole)
+        # Lowercase prose and numeric runs cannot contain a camel boundary.
+        # They dominate source bodies, so avoid allocating a split list there.
+        if word.islower() or word.isdigit():
+            continue
+        pieces = _CAMEL_BOUNDARY.split(word)
         if len(pieces) > 1:
-            tokens.extend(piece for piece in pieces if piece != whole)
+            for piece in pieces:
+                lowered = piece.lower()
+                if lowered != whole:
+                    tokens.append(lowered)
     return tokens
 
 
@@ -42,10 +48,24 @@ def term_frequencies(
     signature: str = "",
 ) -> dict[str, int]:
     """Return compact frequencies with modest path/signature boosts."""
-    terms = Counter(tokenize(text))
-    for term in tokenize(signature):
+    return term_frequencies_from_tokens(
+        tokenize(text),
+        path=tokenize(path),
+        signature=tokenize(signature),
+    )
+
+
+def term_frequencies_from_tokens(
+    tokens: Iterable[str],
+    *,
+    path: Iterable[str] = (),
+    signature: Iterable[str] = (),
+) -> dict[str, int]:
+    """Build frequencies from token streams already needed elsewhere."""
+    terms = Counter(tokens)
+    for term in signature:
         terms[term] += 1
-    for term in tokenize(path):
+    for term in path:
         terms[term] += 2
     return dict(terms)
 

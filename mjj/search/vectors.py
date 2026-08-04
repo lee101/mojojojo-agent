@@ -9,15 +9,20 @@ import os
 import threading
 import zlib
 from array import array
+from collections.abc import Iterable, Sequence
 from pathlib import Path
-from typing import Sequence
 
 from mjj.kernels import quantize_i8
 
 from .lexical import tokenize
 
-
 DIMENSION = 256
+_HASH_HIGH_SEED = 0x9E3779B9
+_TOKEN_PREFIX = (zlib.crc32(b"token:"), zlib.crc32(b"token:", _HASH_HIGH_SEED))
+_NGRAM_PREFIX = (zlib.crc32(b"ngram:"), zlib.crc32(b"ngram:", _HASH_HIGH_SEED))
+_START_MARKER = ord("^")
+_END_MARKER = ord("$")
+_HASH_SIGN_BIT = 1 << 63
 
 
 def _hash64(value: str) -> int:
@@ -25,37 +30,58 @@ def _hash64(value: str) -> int:
     # independently seeded passes provide enough bits for a bucket and sign.
     encoded = value.encode("utf-8", "surrogatepass")
     low = zlib.crc32(encoded)
-    high = zlib.crc32(encoded, 0x9E3779B9)
+    high = zlib.crc32(encoded, _HASH_HIGH_SEED)
     return low | (high << 32)
 
 
-def _project(values: list[float], feature: str, weight: float) -> None:
-    hashed = _hash64(feature)
+def _project_hashed(values: list[float], low: int, high: int, weight: float) -> None:
+    hashed = low | (high << 32)
     position = hashed % len(values)
-    values[position] += weight if hashed & (1 << 63) else -weight
+    values[position] += weight if hashed & _HASH_SIGN_BIT else -weight
 
 
 def static_embedding(text: str, dim: int = DIMENSION) -> list[float]:
     """Hash identifier tokens and their character n-grams into a unit vector."""
+    return static_embedding_tokens(tokenize(text), dim)
+
+
+def static_embedding_tokens(
+    tokens: Iterable[str],
+    dim: int = DIMENSION,
+) -> list[float]:
+    """Embed an existing ordered token stream without tokenizing it again."""
     if dim <= 0:
         raise ValueError("vector dimension must be positive")
     values = [0.0] * dim
     frequencies: dict[str, int] = {}
-    for token in tokenize(text):
+    for token in tokens:
         frequencies[token] = frequencies.get(token, 0) + 1
+    crc32 = zlib.crc32
+    project = _project_hashed
+    token_prefix_low, token_prefix_high = _TOKEN_PREFIX
+    ngram_prefix_low, ngram_prefix_high = _NGRAM_PREFIX
     for token, frequency in frequencies.items():
         token_weight = 1.5 * math.sqrt(frequency)
-        _project(values, "token:" + token, token_weight)
-        marked = "^" + token + "$"
+        encoded = token.encode("utf-8", "surrogatepass")
+        low = crc32(encoded, token_prefix_low)
+        high = crc32(encoded, token_prefix_high)
+        project(values, low, high, token_weight)
+        token_length = len(encoded)
+        marked = bytearray(token_length + 2)
+        marked[0] = _START_MARKER
+        marked[1:-1] = encoded
+        marked[-1] = _END_MARKER
+        marked_bytes = memoryview(marked)
         for width, weight in ((3, 0.45), (4, 0.65)):
-            if len(marked) < width:
+            if token_length + 2 < width:
                 continue
-            for offset in range(len(marked) - width + 1):
-                _project(
-                    values,
-                    f"ngram:{marked[offset:offset + width]}",
-                    weight,
-                )
+            for start in range(token_length + 3 - width):
+                span = marked_bytes[start:start + width]
+                low = crc32(span, ngram_prefix_low)
+                high = crc32(span, ngram_prefix_high)
+                span.release()
+                project(values, low, high, weight)
+        marked_bytes.release()
     norm = math.sqrt(sum(value * value for value in values))
     if norm:
         inverse = 1.0 / norm
@@ -80,6 +106,13 @@ def quantize(values: Sequence[float]) -> tuple[bytes, float]:
 
 def encode(text: str, dim: int = DIMENSION) -> tuple[bytes, float]:
     return quantize(static_embedding(text, dim))
+
+
+def encode_tokens(
+    tokens: Iterable[str],
+    dim: int = DIMENSION,
+) -> tuple[bytes, float]:
+    return quantize(static_embedding_tokens(tokens, dim))
 
 
 def _library_candidates() -> list[str]:

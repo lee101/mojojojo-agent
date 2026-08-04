@@ -76,7 +76,21 @@ lock; evals score task success, token use, cache reads, tool calls, and latency.
 bench/run.sh
 uv run python evals/run.py
 uv run python bench/search_bench.py
+uv run python bench/allocation_bench.py --corpus /path/to/pinned-corpus
+bench/flamegraph.sh /path/to/pinned-corpus build/profiles/search-flamegraph.svg
+uvx memray==1.19.3 run --trace-python-allocators \
+  -o build/profiles/search-allocations.bin \
+  bench/allocation_bench.py --iterations 100 --workload-only
+uvx memray==1.19.3 stats build/profiles/search-allocations.bin
+uvx memray==1.19.3 flamegraph -o build/profiles/search-allocations.html \
+  build/profiles/search-allocations.bin
 ```
+
+Use the same immutable corpus for before/after runs. The allocation report
+prints its content SHA-256 plus file and chunk counts; results with different
+digests are not comparable. The flame-graph wrapper writes through a temporary
+file and accepts output only when the current profiler run produced a complete
+SVG.
 
 The detailed search methodology is in [docs/search.md](docs/search.md), visual
 measurements in [docs/visualizers.md](docs/visualizers.md), and reference-agent

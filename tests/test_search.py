@@ -1,18 +1,80 @@
 from __future__ import annotations
 
+import math
 import os
+import re
 import time
+import zlib
 from pathlib import Path
 
 import pytest
 
 from mjj.ledger import Budget, Ledger, estimate_tokens
 from mjj.search import index as index_module
-from mjj.search.index import MAGIC, RepositoryIndex, build_index
+from mjj.search.index import MAGIC, RepositoryIndex, _make_chunks, build_index
 from mjj.search.lexical import LexicalIndex, term_frequencies, tokenize
-from mjj.search.vectors import Int8Vectors, encode
+from mjj.search.vectors import (
+    Int8Vectors,
+    _hash64,
+    encode,
+    encode_tokens,
+    quantize,
+    static_embedding,
+)
 from mjj.tools.base import ToolContext
 from mjj.tools.search import SearchTool
+
+_REFERENCE_WORDS = re.compile(r"[A-Za-z][A-Za-z0-9]*|\d+")
+_REFERENCE_CAMEL_BOUNDARY = re.compile(
+    r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])"
+)
+
+
+def _reference_tokenize(value: str) -> list[str]:
+    tokens: list[str] = []
+    for match in _REFERENCE_WORDS.finditer(value):
+        word = match.group(0)
+        whole = word.lower()
+        pieces = [piece.lower() for piece in _REFERENCE_CAMEL_BOUNDARY.split(word)]
+        tokens.append(whole)
+        if len(pieces) > 1:
+            tokens.extend(piece for piece in pieces if piece != whole)
+    return tokens
+
+
+def _reference_hash64(value: str) -> int:
+    encoded = value.encode("utf-8", "surrogatepass")
+    return zlib.crc32(encoded) | (zlib.crc32(encoded, 0x9E3779B9) << 32)
+
+
+def _reference_project(values: list[float], feature: str, weight: float) -> None:
+    hashed = _reference_hash64(feature)
+    values[hashed % len(values)] += weight if hashed & (1 << 63) else -weight
+
+
+def _reference_static_embedding(text: str, dim: int) -> list[float]:
+    values = [0.0] * dim
+    frequencies: dict[str, int] = {}
+    for token in _reference_tokenize(text):
+        frequencies[token] = frequencies.get(token, 0) + 1
+    for token, frequency in frequencies.items():
+        token_weight = 1.5 * math.sqrt(frequency)
+        _reference_project(values, "token:" + token, token_weight)
+        marked = "^" + token + "$"
+        for width, weight in ((3, 0.45), (4, 0.65)):
+            if len(marked) < width:
+                continue
+            for offset in range(len(marked) - width + 1):
+                _reference_project(
+                    values,
+                    f"ngram:{marked[offset:offset + width]}",
+                    weight,
+                )
+    norm = math.sqrt(sum(value * value for value in values))
+    if norm:
+        inverse = 1.0 / norm
+        values = [value * inverse for value in values]
+    return values
 
 
 def test_tokenize_identifiers_and_bm25() -> None:
@@ -26,6 +88,67 @@ def test_tokenize_identifiers_and_bm25() -> None:
     ]
     hits = LexicalIndex(documents).search("accessToken")
     assert hits and hits[0][0] == 0
+
+
+def test_tokenize_matches_reference_order_and_duplicates() -> None:
+    text = "lowercase lowercase 123 123 snake_case HTTPServer XMLHttpRequest"
+    expected = [
+        "lowercase",
+        "lowercase",
+        "123",
+        "123",
+        "snake",
+        "case",
+        "httpserver",
+        "http",
+        "server",
+        "xmlhttprequest",
+        "xml",
+        "http",
+        "request",
+    ]
+    assert _reference_tokenize(text) == expected
+    assert tokenize(text) == expected
+
+
+@pytest.mark.parametrize("dim", (1, 7, 256))
+@pytest.mark.parametrize(
+    "text",
+    (
+        "",
+        "x A HTTP 123 !!!",
+        "lowercase lowercase 123 123 snake_case HTTPServer XMLHttpRequest",
+        "version2HTTPServer path/to/file.py CAPS lowerUPPER42Next",
+    ),
+)
+def test_static_embedding_matches_old_feature_hashing_exactly(
+    dim: int,
+    text: str,
+) -> None:
+    reference = _reference_static_embedding(text, dim)
+    assert static_embedding(text, dim) == reference
+    assert encode(text, dim) == quantize(reference)
+    assert _hash64("ngram:^HTT") == _reference_hash64("ngram:^HTT")
+
+
+def test_index_reuses_tokens_without_changing_terms_or_vectors() -> None:
+    path = "src/HTTPServer.py"
+    text = (
+        "def refresh_access_token(worker_id):\n"
+        "    return workerBootstrap and cached_result\n\n"
+        "class XMLHttpRequest:\n"
+        "    pass\n"
+    )
+
+    for chunk, body, embedding_tokens in _make_chunks(path, text):
+        assert chunk.terms == term_frequencies(
+            body,
+            path=path,
+            signature=chunk.signature,
+        )
+        assert encode_tokens(embedding_tokens) == encode(
+            path + "\n" + chunk.signature + "\n" + body
+        )
 
 
 def test_python_vector_scan_finds_naming_variant() -> None:

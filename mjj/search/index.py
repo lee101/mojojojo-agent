@@ -22,13 +22,13 @@ import sys
 import tempfile
 import time
 from array import array
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
+from itertools import chain
 from pathlib import Path
-from typing import Iterable, Iterator, Mapping, Sequence
 
-from .lexical import LexicalIndex, term_frequencies, tokenize
-from .vectors import DIMENSION, Int8Vectors, encode
-
+from .lexical import LexicalIndex, term_frequencies_from_tokens, tokenize
+from .vectors import DIMENSION, Int8Vectors, encode_tokens
 
 MAGIC = b"MJJIDX01"
 VERSION = 1
@@ -743,11 +743,12 @@ def build_index(
         text = _decode_text(raw)
         if text is None:
             continue
-        for chunk, chunk_text in _make_chunks(relative_path, text):
+        for chunk, _chunk_text, embedding_tokens in _make_chunks(
+            relative_path,
+            text,
+        ):
             chunks.append(chunk)
-            vector, factor = encode(
-                relative_path + "\n" + chunk.signature + "\n" + chunk_text
-            )
+            vector, factor = encode_tokens(embedding_tokens)
             vector_data.extend(vector)
             factors.append(factor)
 
@@ -847,10 +848,14 @@ def _decode_text(raw: bytes) -> str | None:
         return raw.decode("utf-8", errors="replace")
 
 
-def _make_chunks(path: str, text: str) -> Iterator[tuple[Chunk, str]]:
+def _make_chunks(
+    path: str,
+    text: str,
+) -> Iterator[tuple[Chunk, str, Iterable[str]]]:
     lines = text.splitlines()
     if not lines:
         return
+    path_tokens = tokenize(path)
     starts = [0]
     starts.extend(
         line_number
@@ -879,17 +884,22 @@ def _make_chunks(path: str, text: str) -> Iterator[tuple[Chunk, str]]:
             Path(path).name,
         )
         body = "\n".join(body_lines)
+        body_tokens = tokenize(body)
+        signature_tokens = tokenize(signature)
         yield (
             Chunk(
                 path=path,
                 start_line=start + 1,
                 end_line=end,
                 signature=signature,
-                terms=term_frequencies(
-                    body, path=path, signature=signature
+                terms=term_frequencies_from_tokens(
+                    body_tokens,
+                    path=path_tokens,
+                    signature=signature_tokens,
                 ),
             ),
             body,
+            chain(path_tokens, signature_tokens, body_tokens),
         )
 
 

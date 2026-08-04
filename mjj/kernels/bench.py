@@ -36,7 +36,6 @@ from mjj.search.lexical import tokenize
 from mjj.search.vectors import Int8Vectors, quantize
 from mjj.tools.patch import _find_block
 
-
 QUERIES = (
     "auth token refresh",
     "execute sandbox worker",
@@ -293,6 +292,8 @@ def real_profile(
             "quantize",
             "_reference_quantize",
             "static_embedding",
+            "static_embedding_tokens",
+            "encode_tokens",
         ):
             print(f"  {name}: {_cumulative(profile, name):.3f}s cumulative")
 

@@ -1,55 +1,38 @@
 # Mojo Agent documentation
 
-Mojo Agent (`mjj`) is an open-source coding agent for interactive terminal work,
-headless automation, and the hosted mojojojo editor. These pages document the
-same code that ships in the [public repository](https://github.com/lee101/mojojojo-agent).
+These pages document the `mjj` CLI, Python package, and hosted agent backend.
 
-## Start here
+## Use MJJ
 
-- [Getting started](getting-started.md) — install, authenticate, run the first
-  task, select providers, and recover a session.
-- [Configuration](config.md) — user, project, environment, and CLI precedence.
-- [Models and prompt caching](models-and-cache.md) — cost/speed aliases,
-  provider-constrained routes, adaptive KV-cache policy, and telemetry.
-- [Project and user instructions](project-instructions.md) — automatic
-  `AGENTS.md`, `CLAUDE.md`, global rules, precedence, and bounded nested scope.
-- [Tools](tools.md) — bounded file, patch, shell, Python, terminal-image, and skill tools.
-- [Windows and Linux support](platforms.md) — process quoting, timeouts,
-  executable discovery, fallbacks, and the cross-platform tool matrix.
-- [MCP tool servers](mcp.md) — bounded stdio discovery, namespaced calls,
-  permissions, configuration, and failure isolation.
-- [Skills](skills.md) — discover and load `SKILL.md` workflows without permanent
-  prompt overhead.
-- [Durable goals](goals.md) — persistent objectives, bounded continuation,
-  checkpoints, evidence-backed completion, and lifecycle controls.
-- [Reviewer and worker subagents](subagents.md) — parallel read-only review and
-  isolated, reviewable implementation commits.
+- [Getting started](getting-started.md) — install, authenticate, run, and resume.
+- [Configuration](config.md) — config files, environment variables, and flags.
+- [Models and prompt caching](models-and-cache.md) — routes, providers, and
+  measured cache behavior.
+- [Project instructions](project-instructions.md) and [skills](skills.md) —
+  bounded repository guidance loaded only where it applies.
+- [Tools](tools.md) — search, read, patch, shell, checks, navigation, and media.
+- [Execution](exec.md) — local isolation, Mojo acceleration, and remote fallback.
+- [Platforms](platforms.md) — Windows/Linux process and path behavior.
+- [MCP](mcp.md) and [plugins](plugins.md) — opt-in external tool boundaries.
+- [Goals](goals.md), [subagents](subagents.md), and
+  [LSP refactors](lsp-refactors.md) — longer and semantic workflows.
 
-## How it works
+## Understand the harness
 
-- [Architecture](architecture.md) — turn lifecycle, transcript guarantees,
-  provider boundary, execution tiers, and hosted isolation.
-- [Search](search.md) — exact, lexical, and native vector retrieval.
-- [LSP refactors and call hierarchy](lsp-refactors.md) — semantic navigation,
-  safe atomic rename, checkpoints, and fallback boundaries.
-- [Execution](exec.md) — Mojo acceleration, local isolation, and remote fallback.
-- [Native runtime boundary](native-runtime.md) — zero-dependency base install,
-  optional UI/vision layers, dependency audit, and the Mojo migration boundary.
-- [Visualizers](visualizers.md) — native deterministic WebGL scaffolding,
-  image transforms, and token/speed measurements.
-- [Reference harness audit](reference-harness-audit.md) — OpenCode, Hermes,
-  and Aider ideas adopted, deferred, and measured.
-- [Agent feature parity](pi-parity.md) — current Pi Infinity, Grok Infinity,
-  and Codex workflow mappings plus the remaining substantive gaps.
+- [Architecture](architecture.md) — turn lifecycle and isolation boundaries.
+- [Search](search.md) — literal, lexical, and native vector retrieval.
+- [Native runtime](native-runtime.md) — optional dependency and Mojo boundaries.
+- [Visualizers](visualizers.md) — deterministic WebGL output and measurements.
+- [Harness reference guide](reference-harness-audit.md) — pinned Aider,
+  OpenCode, Codex, Grok Build, and Hermes source patterns.
+- [Feature parity](pi-parity.md) — implemented workflows and remaining gaps.
 
-## Operate or contribute
+## Contribute or operate
 
-- [Hosted server](server.md) — authentication, billing, SSE, workspaces, and API.
-- [Visualbench](../visualbench/README.md) — deterministic shader captures and
-  screenshot health checks for multimodal workflows.
-- [Contributing](../CONTRIBUTING.md) — development setup, tests, and pull requests.
-- [Releases](https://github.com/lee101/mojojojo-agent/releases) — checksummed
-  Linux, macOS, and Windows binaries.
+- [Development guide](../DEV.md) and [contributing](../CONTRIBUTING.md)
+- [Hosted server](server.md)
+- [Visualbench](../visualbench/README.md)
+- [Releases](https://github.com/lee101/mojojojo-agent/releases)
 
-Secrets never belong in documentation examples or issue reports. `mjj auth`
-reports credential state without printing credential values.
+Keep secrets out of examples and issue reports. `mjj auth` reports credential
+state without printing credential values.

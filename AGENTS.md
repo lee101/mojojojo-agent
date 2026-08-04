@@ -1,122 +1,71 @@
-# mojojojo-agent — working notes for agents
+# mojojojo-agent
 
-Open-source coding agent harness. Python host, Mojo hot paths. Ships as
-`mojojojo-agent` on PyPI with the `mjj` CLI, and as the agent backend behind
+Python-hosted coding agent with optional Mojo hot paths. It ships as the
+`mojojojo-agent` package, the `mjj` CLI, and the backend for
 [mojojojo.app.nz](https://mojojojo.app.nz).
 
-Design goal, in one line: **the fewest tokens per unit of work of any harness**,
-because the expensive parts (search, code execution, diff matching) run native
-instead of being paid for in context.
+## Product contract
 
-## Non-negotiables
+1. **Optimize completed work per token.** Route every tool result through
+   `mjj/ledger.py`; output must be bounded, structured, deduplicated, and
+   recoverable when clipped.
+2. **Never wait for native compilation.** Run the Python fallback immediately
+   and adopt a completed mojosub build later.
+3. **Measure claims.** Numbers in docs or code need a reproducer under `bench/`
+   or `evals/`, including regressions as well as wins.
+4. **Degrade cleanly.** Missing Mojo, native libraries, language servers,
+   credentials, or network access may reduce capability, never break the base
+   harness. Keep this covered by tests.
 
-1. **Token efficiency is the product.** Every tool result passes through
-   `mjj/ledger.py`. No tool may emit unbounded output. Prefer structured,
-   deduplicated, line-anchored output over raw dumps.
-2. **Never block the loop on a compile.** mojosub semantics: run CPython now,
-   swap to native when the build lands. Same rule everywhere in this repo.
-3. **No fabricated benchmarks.** Every number in a README or docstring is
-   reproducible from `bench/`. Losses get published next to wins.
-4. **Degrade, never crash.** No Mojo toolchain, no mojo-embed `.so`, no network
-   — the harness still works, just slower. Guarded by tests.
+## Find the code
 
-## Layout
-
-| path | what |
+| concern | paths |
 | --- | --- |
-| `mjj/auth.py` | OpenAI Max Plan (ChatGPT OAuth) + API key credentials |
-| `mjj/model.py` | Responses API streaming client, usage ledger |
-| `mjj/model_routes.py` | provider-aware coding model intent aliases |
-| `mjj/prompt_cache.py` | adaptive OpenAI/Anthropic prompt-cache policy |
-| `mjj/agent.py` | the turn loop, tool dispatch, interrupts |
-| `mjj/session.py` | rollout JSONL, resume, fork |
-| `mjj/ledger.py` | token accounting + output truncation policy |
-| `mjj/config.py` | config resolution (env, `~/.mjj/config.toml`, flags) |
-| `mjj/project_docs.py` | bounded hierarchical AGENTS/OpenCode/Claude rules |
-| `mjj/tools/` | shell, apply_patch, read/ls, py, search, skill loading |
-| `mjj/skills.py` | scoped `SKILL.md` discovery and metadata |
-| `mjj/syntax.py` | exact parsers + optional per-language tree-sitter checks |
-| `mjj/visualize.py` | token-free native WebGL visualizer expansion |
-| `mjj/search/` | mojo-embed backed index: literal + lexical + semantic |
-| `mjj/repo_map.py` | reference-ranked, budget-fitted repository symbol map |
-| `mjj/checkpoints.py` | secure external patch snapshots and conflict-safe undo |
-| `mjj/lsp.py` | stdio client for already-installed language servers |
-| `mjj/terminal_images.py` | TTY-safe Kitty/ANSI image presentation boundary |
-| `mjj/kernels/` | mojosub `@jit` hot paths with CPython fallbacks |
-| `mjj/server.py` | SSE agent backend with app.nz SSO + credit billing |
-| `mjj/cli.py` | `mjj`, `mjj exec` (headless, scriptable) |
-| `evals/` | real-project construction + Python→Mojo port evals |
+| turn loop and prompts | `mjj/agent.py`, `mjj/prompt.py` |
+| providers, auth, routing, cache | `mjj/model.py`, `mjj/auth.py`, `mjj/model_routes.py`, `mjj/prompt_cache.py` |
+| sessions, goals, plans, delegation | `mjj/session.py`, `mjj/goals.py`, `mjj/subagents.py` |
+| token and tool boundary | `mjj/ledger.py`, `mjj/tools/` |
+| instructions, skills, plugins, MCP | `mjj/project_docs.py`, `mjj/skills.py`, `mjj/plugins.py`, `mjj/mcp.py` |
+| search and repository map | `mjj/search/`, `mjj/repo_map.py` |
+| edits, syntax, LSP, undo | `mjj/tools/patch.py`, `mjj/syntax.py`, `mjj/lsp.py`, `mjj/checkpoints.py` |
+| local/remote execution | `mjj/exec/`, `mjj/kernels/` |
+| CLI, TUI, hosted server | `mjj/cli.py`, `mjj/tui.py`, `mjj/server.py` |
 
-## Credentials — OpenAI Max Plan
+## Boundaries
 
-The machine already holds a signed-in ChatGPT max-plan credential. Reuse it,
-never re-implement device login as the primary path.
+- Reuse an existing Codex/ChatGPT credential; do not add a competing login
+  flow. Never print tokens or overwrite another harness's auth cache unless the
+  operator explicitly enables the existing write-back path. See `mjj/auth.py`
+  and `tests/test_auth.py` for the contract.
+- Keep the hosted workspace, billing, and no-compiler sandbox boundaries intact.
+  Shared app.nz behavior must match `../app-site` and `../mojojojo/auth.go`.
+- Treat `../mojosub`, `../mojo-embed`, and `../mojojojo` as optional peers.
+  The ordinary Python suite must work without them.
 
-- File: `$CODEX_HOME/auth.json`, default `~/.codexinfinity/auth.json`
-  (`MJJ_CODEX_HOME` overrides; `~/.codex/auth.json` is the fallback).
-- Shape: `{"auth_mode": "chatgpt", "tokens": {id_token, access_token,
-  refresh_token, account_id}, "last_refresh": iso8601}`.
-- Issuer `https://auth.openai.com`, token endpoint `/oauth/token`,
-  client id `app_EMoamEEZ73f0CkXaXp7hrann`.
-- Refresh: JSON POST `{client_id, grant_type: "refresh_token", refresh_token}`.
-- Then exchange the fresh `id_token` for a usable API key: form POST with
-  `grant_type=urn:ietf:params:oauth:grant-type:token-exchange`,
-  `requested_token=openai-api-key`,
-  `subject_token_type=urn:ietf:params:oauth:token-type:id_token`.
-  The returned `access_token` **is** the API key.
-- Refresh proactively every 4h and reactively on 401. Never write the harness's
-  own tokens back over `~/.codexinfinity/auth.json` unless
-  `MJJ_WRITE_BACK_AUTH=1` — codex-infinity owns that file.
+## Reference harnesses
 
-Reference implementation to mirror (Go):
-`/nvme0n1-disk/code/openpaths/internal/handler/openai_max_plan.go`.
+Use other agents as evidence, not as a feature checklist. Start with the pinned
+source map and adoption test in
+[docs/reference-harness-audit.md](docs/reference-harness-audit.md). Prefer a
+small MJJ-native mechanism when it lowers task tokens or failure risk; do not
+vendor reference code or add a daemon/dependency without measured justification.
 
-## The stack this harness is built on
-
-- **mojosub** (`../mojosub`) — compiles a subset of Python to Mojo, content
-  addressed cache, ~1.2 us per hot call. Requires `source=` when the code was
-  `exec`'d from an AST, and `MODULAR_HOME` matching the resolved `mojo` binary.
-- **mojo-embed** (`../mojo-embed`) — int8 SIMD flat vector index, C ABI in
-  `src/embed/capi.mojo`, prebuilt `build/libmojo_embed.so`. No persistence and
-  no embedding model upstream; both live here.
-- **mojojojo** (`../mojojojo`) — the execution service. Local jail at
-  `/usr/local/bin/mojojail`, worker on `:4342`, web tier on `:4341`, remote at
-  `https://mojojojo.app.nz` with `mj_live_` keys. **No compiler inside the
-  sandbox** — that boundary is load-bearing, do not weaken it.
-
-## Reference harnesses (read, do not vendor)
-
-- `~/code/codex/codex-rs` — apply-patch format, `execpolicy`, rollout/session
-  model, exec-server. Note upstream URLs are scrubbed to `https://n`.
-- `~/code/grok-infinity` — Grok Build TUI, autonomous continuation modes.
-- `../app-site` — app.nz SSO, credits ledger, site conventions.
-- `../mojojojo/auth.go` — the exact cookie names and ledger semantics to copy.
-
-## app.nz integration
-
-Shared cookies `__Host-appnz_sso_session` and `appnz_session` on `.app.nz`.
-Keys live in the shared `api_keys` table with an `app_id`. Agent runs bill the
-same ledger as `exec:` runs do; the app_id for this service is `mojojojo`.
-
-## Commands
+## Validate
 
 ```bash
-uv sync                              # dev env
-uv run pytest -q                     # unit tests (offline, no creds needed)
-uv run mjj exec "..."                # headless run
-uv run mjj search QUERY [PATH]        # hybrid disk search
-uv run mjj index                      # build or refresh a repo index
-uv run mjj visualize demo --kind cells # scaffold standalone WebGL
-pixi run mojo-check                   # compile and ABI-smoke native search
-bench/run.sh                         # all benchmarks under a lock
+uv run pytest -q                     # complete offline suite
+uv build                             # package changes
+pixi run mojo-check                  # native search or ABI changes
+bench/run.sh                         # published performance claims
 ```
+
+Run focused tests first. Provider tests use fake credentials and local streams;
+CI must not require secrets. See [DEV.md](DEV.md) for subsystem commands and
+[CONTRIBUTING.md](CONTRIBUTING.md) for submission guidance.
 
 ## Git workflow
 
-- Work directly on `main` unless the user explicitly asks for an isolated
-  branch or worktree.
-- Commit tested, coherent increments and push `main` directly. Do not open
-  pull requests for routine work in this repository.
-- Before staging, inspect the complete worktree and preserve unrelated user
-  changes. After pushing, leave the checkout on `main` and report any
-  remaining uncommitted files.
+- Work on `main` unless the user requests isolation.
+- Preserve unrelated worktree changes. Commit coherent, tested increments and
+  push `main` directly; routine work does not use pull requests.
+- After pushing, leave the checkout on `main` and report uncommitted files.

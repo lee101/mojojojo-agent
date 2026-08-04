@@ -105,5 +105,6 @@ comparisons in [docs/reference-harness-audit.md](docs/reference-harness-audit.md
 - Test Windows path/process behavior as well as Linux.
 - Preserve unrelated changes in a dirty worktree.
 
-See [AGENTS.md](AGENTS.md) for the complete repository contract and
-[CONTRIBUTING.md](CONTRIBUTING.md) for contribution mechanics.
+See [AGENTS.md](AGENTS.md) for the always-loaded repository constraints and
+[CONTRIBUTING.md](CONTRIBUTING.md) for contribution mechanics and the
+harness-reference adoption checklist.

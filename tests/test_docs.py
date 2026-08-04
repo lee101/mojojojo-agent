@@ -6,10 +6,16 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 MARKDOWN_LINK = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
+AGENT_INSTRUCTION_MAX_BYTES = 4 * 1024
 
 
 def test_repository_local_markdown_links_resolve() -> None:
-    documents = [ROOT / "README.md", ROOT / "CONTRIBUTING.md"]
+    documents = [
+        ROOT / "README.md",
+        ROOT / "AGENTS.md",
+        ROOT / "CONTRIBUTING.md",
+        ROOT / "DEV.md",
+    ]
     documents.extend(sorted((ROOT / "docs").glob("*.md")))
     broken: list[str] = []
 
@@ -23,3 +29,12 @@ def test_repository_local_markdown_links_resolve() -> None:
                 broken.append(f"{document.relative_to(ROOT)} -> {raw_target}")
 
     assert broken == []
+
+
+def test_always_loaded_agent_instructions_stay_concise() -> None:
+    instructions = (ROOT / "AGENTS.md").read_bytes()
+
+    assert len(instructions) <= AGENT_INSTRUCTION_MAX_BYTES, (
+        "AGENTS.md is injected into every repository turn; move discoverable "
+        "detail to DEV.md or docs/ instead of increasing its 4 KiB budget"
+    )

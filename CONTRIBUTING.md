@@ -1,62 +1,77 @@
 # Contributing
 
-Mojo Agent is MIT-licensed and developed in the open. Bug reports, focused
-documentation fixes, provider compatibility work, and measured improvements to
-token use are welcome through the
-[public repository](https://github.com/lee101/mojojojo-agent).
+Mojo Agent is MIT-licensed. Focused bug fixes, docs, provider compatibility,
+fallback hardening, and measured token-efficiency improvements are welcome in
+the [public repository](https://github.com/lee101/mojojojo-agent).
 
-## Development setup
+## Start locally
 
-Python 3.10 or newer and [uv](https://docs.astral.sh/uv/) are required:
+Python 3.10+ and [uv](https://docs.astral.sh/uv/) are enough for development:
 
 ```bash
 git clone https://github.com/lee101/mojojojo-agent.git
 cd mojojojo-agent
 uv sync
-# Optional multi-language tree-sitter validation:
-uv sync --extra syntax
 uv run pytest -q
 uv run mjj --version
 ```
 
-Mojo, mojosub, mojo-embed, credentials, and network access are optional for the
-offline test suite. Missing acceleration must degrade to a tested fallback.
+Mojo, mojosub, mojo-embed, credentials, and network access are optional. Use
+`uv sync --extra syntax` only when working on tree-sitter validation.
 
-## Working agreements
+## Choose the narrow check
 
-- Keep tool output bounded through `mjj/ledger.py`.
-- Preserve Responses items verbatim between turns, especially encrypted
-  reasoning and function-call output.
-- Do not weaken hosted workspace or execution boundaries to make local behavior
-  more convenient.
-- Publish benchmark numbers only with a reproducer under `bench/` or `evals/`.
-- Keep optional provider and native dependencies from becoming startup
-  requirements.
-- Never commit credentials, auth caches, session transcripts, or `.env` files.
+Run the focused check while iterating, then the complete offline suite before
+submission.
 
-Repository-specific implementation notes live in [AGENTS.md](AGENTS.md).
+| change | focused validation |
+| --- | --- |
+| docs only | `uv run pytest -q tests/test_docs.py` |
+| provider, auth, or caching | `uv run pytest -q tests/test_auth.py tests/test_model.py tests/test_prompt_cache.py` |
+| tools or agent loop | matching `tests/test_*.py`, then `uv run pytest -q` |
+| search or repository map | matching search tests and benchmark; add `pixi run mojo-check` for Mojo/ABI changes |
+| packaging or runtime deps | `uv build` and `uv run pytest -q tests/test_minimal_runtime.py` |
+| published performance claim | the exact reproducer under `bench/` or `evals/` |
 
-## Tests
+The base harness must still start without optional packages. Tests must use fake
+credentials and local streams; never commit keys, auth caches, transcripts,
+`.env` files, generated archives, or local benchmark output.
 
-Run the complete offline suite before submitting a change:
+## Propose a harness-inspired change
 
-```bash
-uv run pytest -q
-```
+Read the pinned [reference harness guide](docs/reference-harness-audit.md) before
+copying a pattern from Aider, OpenCode, Codex, Grok Build, or Hermes. A useful
+proposal states:
 
-For documentation changes, the suite verifies that repository-local Markdown
-links resolve. For package changes, also verify the distributable:
+1. the coding job or failure it improves;
+2. the smallest reference mechanism worth adapting;
+3. permanent prompt/schema tokens and bounded result behavior;
+4. behavior without optional services or dependencies;
+5. a test or benchmark that can reject the idea.
 
-```bash
-uv build
-uv run --isolated --with ./dist/mojojojo_agent-*.whl mjj --version
-```
+Feature count is not the target. Prefer extending an existing MJJ tool or state
+boundary over adding another always-visible tool.
 
-If a change affects benchmarks or hosted behavior, include the focused command
-and result in the pull-request description.
+## Documentation style
+
+- Lead with the user outcome and one runnable example.
+- Keep one canonical explanation; link to it instead of copying it.
+- Put contributor internals in `DEV.md`, user behavior in `docs/`, and only
+  always-relevant agent constraints in `AGENTS.md`.
+- Keep commands copyable, local links valid, and claims reproducible.
+- Avoid workstation-specific paths, credential shapes, roadmap speculation,
+  and comparison claims that are not tied to a pinned source.
+
+`AGENTS.md` is injected into agent context, so its 4 KiB budget is enforced by
+the docs test. Add a rule there only when it changes how most repository tasks
+must be performed.
 
 ## Pull requests
 
-Keep a pull request focused on one coherent outcome. Explain what changed, why,
-the user-visible effect, and the checks run. Link an issue when one exists.
-Generated release archives and local benchmark outputs should not be committed.
+Keep one coherent outcome per pull request. Explain the user-visible change,
+why it belongs in MJJ, and the exact checks run. Preserve Responses items
+verbatim between turns, keep tool output behind `mjj/ledger.py`, retain guarded
+fallbacks, and never weaken hosted execution boundaries for local convenience.
+
+See [DEV.md](DEV.md) for architecture, native builds, benchmarks, and release
+work.

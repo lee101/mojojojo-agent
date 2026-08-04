@@ -1,76 +1,79 @@
-# OpenCode, Hermes, and Aider audit
+# Harness reference guide
 
-This audit was performed on 2026-08-04 against:
+MJJ borrows mechanisms, not product surfaces. A reference idea belongs here
+only when it improves completed coding work per token, keeps output bounded, and
+has a useful fallback without a daemon, network service, or optional compiler.
 
-- [OpenCode](https://github.com/anomalyco/opencode) `dev` at `7fe993879f98`;
-- [Aider](https://github.com/Aider-AI/aider) `main` at `5dc9490bb35f`;
-- [Hermes Agent](https://github.com/NousResearch/hermes-agent) `main` at
-  `91937a6dc3ff`, plus the local integration fork at `e826c16a6`.
+## What to read
 
-The goal was not feature-count parity. A feature belongs in MJJ when it improves
-completed coding work per token and still degrades cleanly without a daemon,
-network service, or optional compiler.
+These pins make comparisons reviewable instead of relying on changing feature
+pages. Read the narrow source named for the problem; do not vendor it.
 
-## Adopted
+| harness and pin | useful source | consult it for |
+| --- | --- | --- |
+| [Aider `5dc9490`](https://github.com/Aider-AI/aider/tree/5dc9490bb35f9729ef2c95d00a19ccd30c26339c) | [`aider/repomap.py`](https://github.com/Aider-AI/aider/blob/5dc9490bb35f9729ef2c95d00a19ccd30c26339c/aider/repomap.py), [`aider/linter.py`](https://github.com/Aider-AI/aider/blob/5dc9490bb35f9729ef2c95d00a19ccd30c26339c/aider/linter.py) | reference-ranked repository maps and post-edit feedback |
+| [OpenCode `c387fe1`](https://github.com/anomalyco/opencode/tree/c387fe190bbd22e9396d264effe242d157f866d2) | [`tool/truncate.ts`](https://github.com/anomalyco/opencode/blob/c387fe190bbd22e9396d264effe242d157f866d2/packages/opencode/src/tool/truncate.ts), [`session/instruction.ts`](https://github.com/anomalyco/opencode/blob/c387fe190bbd22e9396d264effe242d157f866d2/packages/opencode/src/session/instruction.ts), [`snapshot/index.ts`](https://github.com/anomalyco/opencode/blob/c387fe190bbd22e9396d264effe242d157f866d2/packages/opencode/src/snapshot/index.ts) | recoverable truncation, scoped rules, and external edit snapshots |
+| [Codex Infinity `4c5ed16`](https://github.com/lee101/codex-infinity/tree/4c5ed168e5becf19bd89df95f8a0bec4e135edb8) | [`codex_thread.rs`](https://github.com/lee101/codex-infinity/blob/4c5ed168e5becf19bd89df95f8a0bec4e135edb8/codex-rs/core/src/codex_thread.rs), [`unified_exec`](https://github.com/lee101/codex-infinity/tree/4c5ed168e5becf19bd89df95f8a0bec4e135edb8/codex-rs/core/src/unified_exec), [`execpolicy`](https://github.com/lee101/codex-infinity/tree/4c5ed168e5becf19bd89df95f8a0bec4e135edb8/codex-rs/execpolicy) | steering, pollable processes, rollout safety, and command policy |
+| [Grok Infinity / Grok Build `a293fcd`](https://github.com/lee101/grok-infinity/tree/a293fcd5722d566a237a2e5ce26c827f0be390ef) | [plan mode](https://github.com/lee101/grok-infinity/blob/a293fcd5722d566a237a2e5ce26c827f0be390ef/crates/codegen/xai-grok-pager/docs/user-guide/19-plan-mode.md), [background tasks](https://github.com/lee101/grok-infinity/blob/a293fcd5722d566a237a2e5ce26c827f0be390ef/crates/codegen/xai-grok-pager/docs/user-guide/20-background-tasks.md), [`agent_view/queue.rs`](https://github.com/lee101/grok-infinity/blob/a293fcd5722d566a237a2e5ce26c827f0be390ef/crates/codegen/xai-grok-pager/src/app/agent_view/queue.rs) | plan approval, live prompt queues, workers, and background work |
+| [Hermes Agent `91937a6`](https://github.com/NousResearch/hermes-agent/tree/91937a6dc3ffbbe2f3be91a500f0ecf962c4cf53) | [`agent/`](https://github.com/NousResearch/hermes-agent/tree/91937a6dc3ffbbe2f3be91a500f0ecf962c4cf53/agent), [`tools/`](https://github.com/NousResearch/hermes-agent/tree/91937a6dc3ffbbe2f3be91a500f0ecf962c4cf53/tools) | bounded delegation, skills, tool loading, and compiler fallbacks |
 
-| Reference idea | MJJ implementation | Context cost |
-| --- | --- | ---: |
-| OpenCode retains full truncated tool output at an address | Every clipped MJJ result is saved mode `0600` under `.mjj/tool-results/`; the bounded result contains a path usable by `read` or `search` | 0 schema tokens |
-| Hermes/OpenCode discover compatible project hints | `AGENTS.override.md`, `AGENTS.md`, `CLAUDE.md`, and `CONTEXT.md` use bounded root-to-CWD plus lazy nested scope; local runs reuse one MJJ/OpenCode/Claude global rule | 0 schema tokens |
-| Aider ranks tree-sitter tags by cross-file references and mentioned identifiers | `list` with `symbols=true` ranks indexed declarations by cross-file term references and an optional task query, then pre-fits complete file blocks to the list budget | 43 schema tokens |
-| OpenCode and Hermes protect edits with external snapshots | Every successful patch stores a secure, bounded checkpoint outside the worktree; undo verifies post-edit hashes and modes before restoring | 79 schema tokens |
-| OpenCode exposes installed language servers and semantic edits | `navigate` provides definition, references, hover, symbols, call hierarchy, and checkpointed atomic rename; safe reads keep the hybrid-index fallback | 126 schema tokens |
-| OpenCode discovers formatters; Hermes queues background work and steering | `check format=true` is approval-gated and checkpointed; shell jobs return pollable IDs; hosted steering queues user guidance at safe model boundaries | 64 parameter-schema tokens |
-| Codex keeps verifiable objectives alive across turns | Workspace-scoped goals persist independently of sessions, inject a bounded contract, retain 50 checkpoints, and expose their tool only while active | 0 schema tokens outside a goal |
-| Grok/Hermes use reviewer and worker agents | `delegate` runs four bounded model workers concurrently; reviewers are read-only and workers return isolated, snapshot-relative Git commits in deterministic order | 112 schema tokens |
-| Grok/Codex expose external tools and structured plans | Configured MCP stdio tools are namespaced and bounded; `update_plan` keeps at most 20 validated steps and returns count-only updates | MCP costs zero unless configured; plan schema is measured below |
-| Pi/Grok/Codex support installed extensions | Trusted opt-in Python entry points contribute namespaced tools; imports, counts, schemas, descriptions, failures, approvals, and results are bounded | 0 schema tokens unless enabled |
+Local mirrors may be newer than these pins. Update a pin only after checking
+that the cited behavior and MJJ comparison still hold.
 
-The map deliberately reuses MJJ's incremental search chunks instead of adding
-NetworkX, SQLite, another parser cache, or an always-running service. With the
-`syntax` extra installed, tree-sitter remains available for edit validation;
-the map itself works in the dependency-free fallback.
+## Adoption test
 
-## Already covered
+Before implementing a reference pattern, record:
 
-- OpenCode's capped tool results, permissions, session branching, compaction,
-  format/diagnostic feedback, skills, and provider routing map to MJJ's ledger,
-  permission modes, JSONL sessions, Responses compaction, `check`, skills, and
-  OpenPaths support.
-- Hermes's bounded context injection, skill caching, multimodal preprocessing,
-  iteration limits, and compiler fallbacks have corresponding MJJ paths.
-- Aider's automatic syntax/lint feedback and multiple edit formats are covered
-  by syntax-gated atomic `apply_patch` plus non-blocking compiler checks. MJJ
-  keeps one patch format so the permanent prompt stays small.
+1. the user job or observed failure;
+2. the smallest mechanism that addresses it;
+3. permanent prompt/schema cost and worst-case result size;
+4. behavior when optional dependencies are absent;
+5. the test, eval, or benchmark that could reject the change.
 
-## High-value follow-ups
+Prefer extending an existing tool over adding an always-visible one. A feature
+with no task-success evidence, no bounded result policy, or no fallback stays
+out even when several harnesses ship it.
 
-1. **Plan-mode UI and broader extension hooks.** Portable skills, MCP tools,
-   opt-in package tools, structured plans, and durable goals cover most
-   workflow composition, not in-process events, plugin commands, configurable
-   keymaps, or a dependency-aware plan editor.
+## Patterns already adapted
 
-## Measured cost
+| reference pattern | MJJ boundary |
+| --- | --- |
+| Aider's cross-reference-ranked repository map | `mjj/repo_map.py` fits complete, ranked symbol blocks to the caller's budget |
+| OpenCode's recoverable truncation | `mjj/ledger.py` bounds every result and stores clipped output mode `0600` under `.mjj/tool-results/` |
+| Codex/OpenCode hierarchical rules | `mjj/project_docs.py` loads bounded root-to-CWD rules and discovers nested scope lazily |
+| OpenCode snapshots and LSP | `mjj/checkpoints.py` provides hash-safe undo; `mjj/lsp.py` supplies navigation and checkpointed rename |
+| Codex/Grok background and steering paths | shell and compiler jobs are pollable; hosted follow-ups enter at safe model boundaries |
+| Codex goals and Grok plans/workers | durable goals, bounded plans, and isolated reviewer/worker delegation reuse existing session and Git boundaries |
+| Codex/Grok MCP and extension surfaces | MCP and trusted Python tools are opt-in, namespaced, permission-preserving, and bounded |
+| Aider's post-edit checks | atomic patches receive syntax validation; compiler and formatter work can continue without blocking the turn loop |
 
-`bench/retrieval_bench.py` contains a 120-definition adversarial corpus. On the
-audit machine, a 256-character repository-map budget returned three complete
-ranked file blocks in 55 estimated tokens versus 1,230 tokens for the raw symbol
-listing. Median map construction was 30.197 ms. The two new `list` parameters
-cost 43 estimated schema tokens; spill recovery and scoped instructions change
-no tool schema.
+MJJ intentionally keeps one patch format, one transcript protocol, a
+dependency-free Python base, and no mandatory index daemon. It does not copy
+unbounded project-rule loading, whole provider SDK stacks, or UI/theme systems
+that do not improve the coding loop.
 
-The follow-up tranche adds 79 tokens for `checkpoint`, 126 for `navigate`, 39
-for shell job parameters, and 25 for opt-in formatting. These are estimated
-from the exact Responses tool JSON by the same benchmark. Steering changes the
-HTTP API and transcript only, so it adds no model tool-schema tokens.
+## Next comparisons
 
-These figures measure harness output and latency, not model task success. They
-must be regenerated when the corpus, backend, or machine changes.
+1. **Interactive TUI steering.** Hosted steering exists; compare Codex
+   `steer_input` and Grok's prompt queue before adding concurrent inline input.
+2. **Plan approval UX.** MJJ has bounded plan state, but not a read-only planning
+   mode with explicit approval. Preserve permissions at the enforcement layer,
+   not only in a prompt.
+3. **Plugin lifecycle hooks.** Add events or commands only when a concrete job
+   cannot fit the current skills, MCP, or tool-entry-point boundaries without
+   permanent prompt cost.
 
-The `delegate` schema is 447 minified JSON bytes, or 112 tokens under MJJ's
-four-characters-per-token estimator. That is a wire-size measurement, not a
-claim about model quality or parallel speedup.
+## Reproducible cost
 
-The `update_plan` schema is 493 minified JSON bytes, or 124 tokens under the
-same estimator. MCP adds no schema when unconfigured; configured servers pay
-only for their capped discovered schemas.
+`bench/retrieval_bench.py` contains the adversarial repository-map corpus and
+schema accounting. On the recorded audit machine, a 256-character map budget
+returned three complete file blocks in 55 estimated tokens versus 1,230 for the
+raw symbol list; median construction was 30.197 ms. These measure harness output
+and latency, not model task success, and must be regenerated when the corpus,
+backend, or machine changes.
+
+The same four-characters-per-token estimator records the optional tool schemas:
+`list` map parameters 43 tokens, `checkpoint` 79, `navigate` 126, `delegate`
+112, and `update_plan` 124. MCP and plugins cost zero schema tokens when not
+configured. Treat these as wire-size measurements, never quality or speedup
+claims.

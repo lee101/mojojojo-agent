@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
 import time
 from dataclasses import dataclass, field
 
@@ -42,6 +43,7 @@ class PromptCacheOptimizer:
         self._prefixes: dict[str, _Prefix] = {}
         self.read_tokens = 0
         self.write_tokens = 0
+        self._lock = threading.RLock()
 
     def openai_plan(
         self,
@@ -52,25 +54,26 @@ class PromptCacheOptimizer:
         now: float | None = None,
         observe: bool = True,
     ) -> CachePlan:
-        key, chars = _prefix(model, instructions, tools)
-        if self.mode == "implicit":
-            return CachePlan(key=key, mode="implicit")
-        if self.mode == "off" or chars < MIN_CACHEABLE_CHARS:
-            return CachePlan(key=key, mode="explicit")
-        if self.mode == "explicit":
-            return CachePlan(key=key, mode="explicit", breakpoint=True, ttl="30m")
-        times = (
-            self._observe_times(key, now)
-            if observe
-            else self._times(key)
-        )
-        cache = _openai_cache_pays(times)
-        return CachePlan(
-            key=key,
-            mode="explicit",
-            breakpoint=cache,
-            ttl="30m" if cache else "",
-        )
+        with self._lock:
+            key, chars = _prefix(model, instructions, tools)
+            if self.mode == "implicit":
+                return CachePlan(key=key, mode="implicit")
+            if self.mode == "off" or chars < MIN_CACHEABLE_CHARS:
+                return CachePlan(key=key, mode="explicit")
+            if self.mode == "explicit":
+                return CachePlan(key=key, mode="explicit", breakpoint=True, ttl="30m")
+            times = (
+                self._observe_times(key, now)
+                if observe
+                else self._times(key)
+            )
+            cache = _openai_cache_pays(times)
+            return CachePlan(
+                key=key,
+                mode="explicit",
+                breakpoint=cache,
+                ttl="30m" if cache else "",
+            )
 
     def anthropic_plan(
         self,
@@ -81,31 +84,34 @@ class PromptCacheOptimizer:
         now: float | None = None,
         observe: bool = True,
     ) -> CachePlan:
-        key, chars = _prefix(model, instructions, tools)
-        if self.mode in {"off", "implicit"} or chars < MIN_CACHEABLE_CHARS:
-            return CachePlan(key=key)
-        ttl = (
-            "5m"
-            if self.mode == "explicit"
-            else (
-                self._observe(key, now, cold="5m")
-                if observe
-                else self._decision(key, cold="5m")
+        with self._lock:
+            key, chars = _prefix(model, instructions, tools)
+            if self.mode in {"off", "implicit"} or chars < MIN_CACHEABLE_CHARS:
+                return CachePlan(key=key)
+            ttl = (
+                "5m"
+                if self.mode == "explicit"
+                else (
+                    self._observe(key, now, cold="5m")
+                    if observe
+                    else self._decision(key, cold="5m")
+                )
             )
-        )
-        return CachePlan(key=key, breakpoint=ttl != "none", ttl=ttl)
+            return CachePlan(key=key, breakpoint=ttl != "none", ttl=ttl)
 
     def record(self, *, read_tokens: int = 0, write_tokens: int = 0) -> None:
-        self.read_tokens += max(0, int(read_tokens))
-        self.write_tokens += max(0, int(write_tokens))
+        with self._lock:
+            self.read_tokens += max(0, int(read_tokens))
+            self.write_tokens += max(0, int(write_tokens))
 
     def status(self) -> dict:
-        return {
-            "mode": self.mode,
-            "prefixes": len(self._prefixes),
-            "cache_read_tokens": self.read_tokens,
-            "cache_write_tokens": self.write_tokens,
-        }
+        with self._lock:
+            return {
+                "mode": self.mode,
+                "prefixes": len(self._prefixes),
+                "cache_read_tokens": self.read_tokens,
+                "cache_write_tokens": self.write_tokens,
+            }
 
     def _observe(
         self,

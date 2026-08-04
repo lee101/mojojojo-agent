@@ -31,6 +31,7 @@ from .model import (
     _decode_sse,
     _retryable_message,
 )
+from .prompt_cache import PromptCacheOptimizer
 from .session import Session, load_items
 from .tools import build_registry
 from .tools.base import Registry, ToolContext, ToolResult
@@ -549,6 +550,11 @@ class AgentService:
                 config.database_path, self.auth, config.tokens_per_credit
             )
         self.runs = RunManager(self)
+        # Hosted runs are short-lived ModelClient instances, but their stable
+        # instruction/tool prefixes recur across users and sessions. Preserve
+        # the bounded reuse history across runs so `auto` cache mode can make
+        # an evidence-based write decision instead of seeing every run as cold.
+        self.cache_optimizer = PromptCacheOptimizer()
 
     def authenticate(self, handler: BaseHTTPRequestHandler) -> tuple[str, User | None]:
         if self.config.service_token:
@@ -685,7 +691,10 @@ class AgentService:
 
     def _produce(self, state: RunState) -> None:
         client = InterruptibleModelClient(
-            model=state.model, effort=state.effort, cancel=state.cancel
+            model=state.model,
+            effort=state.effort,
+            cancel=state.cancel,
+            cache_optimizer=self.cache_optimizer,
         )
         agent = Agent(
             registry=_server_registry(self.workspace_for(state.user_key)),

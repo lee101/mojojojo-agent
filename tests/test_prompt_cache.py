@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+
 from mjj.prompt_cache import MIN_CACHEABLE_CHARS, PromptCacheOptimizer, _decide_ttl
 
 
@@ -96,3 +98,24 @@ def test_prefix_tracker_evicts_old_entries_at_its_hard_cap() -> None:
         )
 
     assert optimizer.status()["prefixes"] == 512
+
+
+def test_shared_optimizer_is_safe_for_concurrent_hosted_runs() -> None:
+    optimizer = PromptCacheOptimizer()
+
+    def observe(index: int) -> None:
+        optimizer.openai_plan(
+            f"gpt-5.6-terra-{index % 8}",
+            LONG_INSTRUCTIONS,
+            [],
+            now=float(index),
+        )
+        optimizer.record(read_tokens=1, write_tokens=1)
+
+    with ThreadPoolExecutor(max_workers=16) as pool:
+        list(pool.map(observe, range(1_000)))
+
+    status = optimizer.status()
+    assert status["prefixes"] == 8
+    assert status["cache_read_tokens"] == 1_000
+    assert status["cache_write_tokens"] == 1_000

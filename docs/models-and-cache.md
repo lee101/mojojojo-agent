@@ -92,6 +92,12 @@ shows cache hit percentage and writes alongside input, output, and reasoning
 tokens. Chat-completions usage is normalized from both OpenAI-style and
 Anthropic-style cache fields.
 
+The hosted agent keeps this bounded reuse tracker for the service-process
+lifetime instead of resetting it for every run. Independent runs with the same
+model, instructions, and tool contract can therefore inform the automatic cost
+decision. The tracker retains only prefix hashes and timestamps, not prompts or
+tool arguments.
+
 Automatic policy is conservative, not clairvoyant: a marked prefix can still
 miss due to eviction, routing, minimum-length rules, or a changed tool schema.
 Use telemetry and representative evals to decide whether `auto`, `implicit`, or

@@ -42,8 +42,9 @@ exit code; timeouts use exit code 124.
 A small read-only allowlist runs without approval. It covers inspection
 commands such as `cat`, `ls`, `rg`, and read-only Git subcommands. Other
 commands call `ctx.approve("shell", details)` when an approval callback is
-configured. A missing callback means auto-approve, as used by `--yolo` and
-tests. Shell-interpreted strings always take the approval path.
+configured. A missing callback means auto-approve. Shell-interpreted strings
+always take the approval path. The interactive `/permissions` command and
+`--permission-mode` flag provide Auto, Ask, and Read-only policies.
 
 ```json
 {"command": ["python", "-m", "pytest", "tests", "-q"], "timeout": 300}
@@ -76,6 +77,10 @@ The entire patch is parsed and applied in memory before writes begin. New
 contents are staged to temporary files and replaced only after every file and
 hunk validates. On success the result contains only per-file `+n/-n` counts,
 never file contents.
+
+Patches always pass through the configured approval policy before parsing or
+writing. The `py` tool does the same because arbitrary Python can mutate the
+workspace. Read-only mode therefore blocks both at the registry boundary.
 
 ## `search`
 

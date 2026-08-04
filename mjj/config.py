@@ -7,6 +7,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
 
+from .permissions import PERMISSION_MODES
+
 try:
     import tomllib
 except ImportError:  # pragma: no cover - Python 3.10
@@ -16,8 +18,6 @@ except ImportError:  # pragma: no cover - Python 3.10
 EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
 VERBOSITIES = ("low", "medium", "high")
 PROVIDERS = ("auto", "openpaths", "openrouter", "openai", "custom")
-
-
 class ConfigError(ValueError):
     pass
 
@@ -28,6 +28,7 @@ class Config:
     model: str = "auto"
     effort: str = "high"
     verbosity: str = "low"
+    permission_mode: str = "auto"
     tool_budget: int = 1600
     project_doc_max_bytes: int = 32 * 1024
     auto_next_steps: bool = False
@@ -82,6 +83,7 @@ def load(
         "MJJ_MODEL": "model",
         "MJJ_EFFORT": "effort",
         "MJJ_VERBOSITY": "verbosity",
+        "MJJ_PERMISSION_MODE": "permission_mode",
         "MJJ_TOOL_BUDGET": "tool_budget",
         "MJJ_PROJECT_DOC_MAX_BYTES": "project_doc_max_bytes",
         "MJJ_AUTO_MAX_TURNS": "auto_max_turns",
@@ -133,6 +135,7 @@ def _merge_document(values: dict[str, Any], document: dict, path: Path) -> None:
         "model",
         "effort",
         "verbosity",
+        "permission_mode",
         "project_doc_max_bytes",
         "auto_next_steps",
         "auto_next_idea",
@@ -162,6 +165,7 @@ def _validated(values: Mapping[str, Any]) -> Config:
     model = values.get("model", Config.model)
     effort = values.get("effort", Config.effort)
     verbosity = values.get("verbosity", Config.verbosity)
+    permission_mode = values.get("permission_mode", Config.permission_mode)
     budget = values.get("tool_budget", Config.tool_budget)
     project_doc_max_bytes = values.get(
         "project_doc_max_bytes", Config.project_doc_max_bytes
@@ -180,6 +184,10 @@ def _validated(values: Mapping[str, Any]) -> Config:
     if verbosity not in VERBOSITIES:
         raise ConfigError(
             f"agent.verbosity must be one of {', '.join(VERBOSITIES)}"
+        )
+    if permission_mode not in PERMISSION_MODES:
+        raise ConfigError(
+            "agent.permission_mode must be one of " + ", ".join(PERMISSION_MODES)
         )
     if isinstance(budget, bool):
         raise ConfigError("tools.budget must be a positive integer")
@@ -220,6 +228,7 @@ def _validated(values: Mapping[str, Any]) -> Config:
         model=model.strip(),
         effort=effort,
         verbosity=verbosity,
+        permission_mode=permission_mode,
         tool_budget=budget,
         project_doc_max_bytes=project_doc_max_bytes,
         auto_next_steps=auto_next_steps,

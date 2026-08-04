@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterator
 
+from .context_files import FileMentionError, prepare_mentions
 from .ledger import Ledger
 from .media import ImageAttachment
 from .model import Event, ModelClient
@@ -108,7 +109,14 @@ class Agent:
         max_autonomous_turns: int = 0,
     ) -> Iterator[Step]:
         if prompt or images:
-            self.user(prompt or "Describe and inspect the attached image.", images)
+            try:
+                mentions = prepare_mentions(prompt or "", self.cwd)
+            except FileMentionError as exc:
+                yield Step(kind="error", text=f"file attachment: {exc}")
+                return
+            combined_images = _dedupe_images((*images, *mentions.images))
+            text = mentions.text or "Describe and inspect the attached image."
+            self.user(text, combined_images)
         autonomous_turns = 0
         tool_rounds = 0
         while tool_rounds < self.max_steps:
@@ -363,6 +371,17 @@ def _latest_assistant_text(items: list[dict]) -> str:
             if part.get("type") in ("output_text", "text")
         )
     return ""
+
+
+def _dedupe_images(images: tuple[ImageAttachment, ...]) -> tuple[ImageAttachment, ...]:
+    unique: list[ImageAttachment] = []
+    seen: set[Path] = set()
+    for image in images:
+        if image.path in seen:
+            continue
+        seen.add(image.path)
+        unique.append(image)
+    return tuple(unique)
 
 
 def _autonomous_prompt(next_steps: bool, next_idea: bool) -> str:

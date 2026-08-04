@@ -65,6 +65,14 @@ and autonomy can all be controlled without leaving the session. `/help` and
 `/hotkeys` show the complete live command surface. Long headless turns emit a
 heartbeat on stderr while preserving the final answer alone on stdout.
 
+Type `@` to fuzzy-complete a repository file; text is attached within a strict
+64 KiB total budget, `@path:10-40` selects a line range, and image mentions use
+the same quality-85 WebP vision path as `--image`. `!command` runs a local shell
+command and keeps its bounded result as context; `!!command` keeps it local.
+`/permissions` switches live between `auto`, `ask`, and `read-only`, while
+`/status`, `/diff`, `/review`, and `/init` cover the common repository-control
+flow without leaving the app.
+
 `/login chatgpt` launches the supported Codex browser sign-in and reuses its
 credential cache; `/login device` uses device-code sign-in. `/login openpaths`,
 `/login openrouter`, and `/login openai` securely prompt for an API key and save
@@ -82,6 +90,7 @@ an unrelated exported key cannot silently change providers.
 mjj exec --provider openpaths --model openpaths/auto-code "fix the tests"
 mjj exec --provider openrouter --model openrouter/auto "review this repo"
 mjj exec --image screenshot.png "match this design in the current app"
+mjj exec --permission-mode read-only @src/router.py "review this file"
 ```
 
 Images are orientation-corrected, bounded to a 2048-pixel edge, precompressed

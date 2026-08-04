@@ -20,6 +20,7 @@ provider = "openpaths"
 model = "gpt-project"
 effort = "medium"
 verbosity = "high"
+permission_mode = "ask"
 project_doc_max_bytes = 4096
 auto_next_steps = true
 auto_next_idea = false
@@ -47,6 +48,7 @@ paths = ["../skills"]
     assert config.provider == "openpaths"
     assert config.effort == "max"
     assert config.verbosity == "high"
+    assert config.permission_mode == "ask"
     assert config.tool_budget == 321
     assert config.project_doc_max_bytes == 4096
     assert config.auto_next_steps is True
@@ -68,6 +70,7 @@ def test_explicit_config_is_last_file_layer(tmp_path: Path):
     [
         ("[agent]\neffort='enormous'\n", "agent.effort"),
         ("[agent]\nprovider='mystery'\n", "agent.provider"),
+        ("[agent]\npermission_mode='reckless'\n", "agent.permission_mode"),
         ("[tools]\nbudget=0\n", "tools.budget"),
         ("[skills]\npaths='nope'\n", "skills.paths"),
         ("[agent]\nproject_doc_max_bytes=-1\n", "agent.project_doc_max_bytes"),

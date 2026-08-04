@@ -64,6 +64,7 @@ def _result(
 
 class ApplyPatchTool:
     name = "apply_patch"
+    requires_approval = True
     description = "Atomically apply a Codex *** Begin Patch file patch."
     parameters = {
         "type": "object",

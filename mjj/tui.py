@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 import html
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -24,7 +25,9 @@ from prompt_toolkit.shortcuts import prompt as secure_prompt
 from . import auth
 from .agent import Agent, Step, tool_progress
 from .config import EFFORTS, PROVIDERS, VERBOSITIES
+from .context_files import discover_project_files
 from .media import ImageAttachment, ImageInputError, prepare_image
+from .permissions import PermissionPolicy
 from .session import (
     Session,
     export_session,
@@ -51,6 +54,11 @@ COMMANDS = {
     "/usage": "show model and tool token usage",
     "/models": "show models available for the active provider",
     "/settings": "show current provider, model, reasoning, and autonomy",
+    "/status": "show model, permissions, session, tools, and Git status",
+    "/permissions": "set auto, ask, or read-only tool permissions",
+    "/init": "generate a repository-specific AGENTS.md",
+    "/review": "review working-tree changes without editing",
+    "/diff": "show the bounded current Git diff",
     "/auto": "set autonomy: off, steps, ideas, or full",
     "/session": "show current session information",
     "/history": "list recent sessions",
@@ -79,18 +87,41 @@ MODEL_PRESETS = {
 }
 
 
-class SlashCompleter(Completer):
+_AT_QUERY = re.compile(r"(?:^|\s)@([^\s]*)$")
+
+
+class WorkspaceCompleter(Completer):
+    def __init__(self, cwd: str | Path):
+        self.files = discover_project_files(cwd)
+
     def get_completions(self, document, complete_event):
         text = document.text_before_cursor
-        if not text.startswith("/") or " " in text:
+        if text.startswith("/") and " " not in text:
+            for command, description in COMMANDS.items():
+                if command.startswith(text):
+                    yield Completion(
+                        command,
+                        start_position=-len(text),
+                        display_meta=description,
+                    )
             return
-        for command, description in COMMANDS.items():
-            if command.startswith(text):
-                yield Completion(
-                    command,
-                    start_position=-len(text),
-                    display_meta=description,
-                )
+        match = _AT_QUERY.search(text)
+        if not match:
+            return
+        query = match.group(1).lower()
+        matches = [path for path in self.files if query in path.lower()]
+        matches.sort(key=lambda path: (not path.lower().startswith(query), len(path), path))
+        for path in matches[:50]:
+            if " " in path:
+                path = f'"{path}"'
+            yield Completion(path, start_position=-len(match.group(1)), display_meta="file")
+
+
+class SlashCompleter(WorkspaceCompleter):
+    """Compatibility name retained for callers of the original completer."""
+
+    def __init__(self, cwd: str | Path = "."):
+        super().__init__(cwd)
 
 
 @dataclass
@@ -101,12 +132,18 @@ class InteractiveApp:
     done: bool = False
 
     def __post_init__(self) -> None:
+        self.permission_policy = PermissionPolicy(
+            getattr(self.args, "permission_mode", "auto"),
+            prompt=lambda message: secure_prompt(message),
+        )
+        self.agent.approve = self.permission_policy
+        self.agent.ctx.approve = self.permission_policy
         self.bindings = self._bindings()
         history = auth.mjj_home() / "history"
         history.parent.mkdir(parents=True, exist_ok=True)
         self.session = PromptSession(
             history=FileHistory(str(history)),
-            completer=SlashCompleter(),
+            completer=WorkspaceCompleter(self.agent.cwd),
             complete_while_typing=True,
             key_bindings=self.bindings,
             bottom_toolbar=self._toolbar,
@@ -191,6 +228,9 @@ class InteractiveApp:
                 continue
             if line.startswith("/"):
                 self.command(line)
+                continue
+            if line.startswith("!"):
+                self._shell(line)
                 continue
             self.turn(line)
         if self.agent.session:
@@ -313,12 +353,36 @@ class InteractiveApp:
                         "model": self.agent.client.model,
                         "effort": self.agent.client.effort,
                         "verbosity": self.agent.client.verbosity,
+                        "permission_mode": self.permission_policy.mode,
                         "autonomy": self._autonomy_label(),
                         "auto_max_turns": self.args.auto_max_turns,
                     },
                     indent=2,
                 )
             )
+        elif command == "/status":
+            self._status()
+        elif command == "/permissions":
+            if value:
+                try:
+                    self.permission_policy.set(value)
+                except ValueError as exc:
+                    print(exc)
+                    return
+                self.args.permission_mode = value
+            print(f"permissions: {self.permission_policy.mode}")
+        elif command == "/init":
+            self._init()
+        elif command == "/review":
+            focus = f"\nAdditional review focus: {value}" if value else ""
+            self.turn(
+                "Review the current working tree. Find correctness, security, and "
+                "regression risks plus missing tests. Report findings in severity order "
+                "with precise file and line references. Do not modify files."
+                + focus
+            )
+        elif command == "/diff":
+            self._diff()
         elif command == "/auto":
             self._set_autonomy(value)
         elif command == "/session":
@@ -348,13 +412,89 @@ class InteractiveApp:
             )
             print("reloaded tools and skills")
         elif command == "/hotkeys":
-            print("←/→ effort · Shift+↑/↓ model · Alt+Enter newline · Ctrl+C interrupt")
+            print(
+                "←/→ effort · Shift+↑/↓ model · Alt+Enter newline · "
+                "@ file · ! shell+context · !! shell-only · Ctrl+C interrupt"
+            )
         elif command == "/clear":
             print("\x1b[2J\x1b[H", end="")
         elif command == "/new":
             self._new_session()
         else:
             print(f"unknown command {command}; type /help")
+
+    def _shell(self, line: str) -> None:
+        excluded = line.startswith("!!")
+        command = line[2 if excluded else 1 :].strip()
+        if not command:
+            print("usage: !COMMAND (send output to model) or !!COMMAND (local only)")
+            return
+        result = self.agent.registry.dispatch(
+            "shell",
+            json.dumps({"command": command, "shell": True}),
+            self.agent.ctx,
+        )
+        print(f"\x1b[2m  ↳ ! {command}\x1b[0m")
+        print(result.output)
+        if not excluded:
+            self.agent.user(
+                "<local_shell>\n"
+                f"<command>{command}</command>\n"
+                f"<output ok=\"{str(result.ok).lower()}\">\n{result.output}\n</output>\n"
+                "</local_shell>"
+            )
+
+    def _status(self) -> None:
+        session = inspect_session(self.agent.session.path) if self.agent.session else None
+        git = self.agent.registry.dispatch(
+            "shell",
+            json.dumps({"command": ["git", "status", "--short", "--branch"]}),
+            self.agent.ctx,
+        )
+        status = {
+            "cwd": str(self.agent.cwd),
+            "provider": self.provider,
+            "model": self.agent.client.model,
+            "effort": self.agent.client.effort,
+            "verbosity": self.agent.client.verbosity,
+            "permissions": self.permission_policy.mode,
+            "autonomy": self._autonomy_label(),
+            "session": session.id if session else "ephemeral",
+            "transcript_items": len(self.agent.items),
+            "tools": sorted(self.agent.registry.tools),
+            "project_docs": [
+                str(path) for path in self.agent.project_instructions.sources
+            ],
+            "usage": self.agent.client.usage.summary(),
+            "tool_usage": self.agent.ledger.summary(),
+            "git": git.output,
+        }
+        print(json.dumps(status, indent=2))
+
+    def _init(self) -> None:
+        target = Path(self.agent.cwd) / "AGENTS.md"
+        if target.exists():
+            print(f"AGENTS.md already exists: {target}")
+            return
+        self.turn(
+            "Inspect this repository and create a concise AGENTS.md in the current "
+            "directory. Document its real layout, coding conventions, focused test "
+            "commands, and validation expectations. Do not invent commands; verify "
+            "them from repository files before writing the scaffold."
+        )
+
+    def _diff(self) -> None:
+        commands = (
+            ("status", ["git", "status", "--short"]),
+            ("unstaged", ["git", "diff", "--no-ext-diff", "--"]),
+            ("staged", ["git", "diff", "--cached", "--no-ext-diff", "--"]),
+        )
+        for label, command in commands:
+            result = self.agent.registry.dispatch(
+                "shell", json.dumps({"command": command}), self.agent.ctx
+            )
+            print(f"--- {label} ---")
+            print(result.output or "(none)")
 
     def _set_choice(self, name: str, value: str, choices: tuple[str, ...]) -> None:
         current = getattr(self.agent.client, name)

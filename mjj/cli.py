@@ -16,10 +16,18 @@ from pathlib import Path
 
 from . import auth
 from .agent import Agent, render, render_exec
-from .config import ConfigError, EFFORTS, PROVIDERS, VERBOSITIES, load as load_config
+from .config import (
+    ConfigError,
+    EFFORTS,
+    PERMISSION_MODES,
+    PROVIDERS,
+    VERBOSITIES,
+    load as load_config,
+)
 from .ledger import Budget, Ledger
 from .model import ModelClient, probe
 from .media import ImageInputError, prepare_image
+from .permissions import PermissionPolicy
 from .search.cli import main as search_main
 from .search.index import build_index
 from .session import (
@@ -65,6 +73,10 @@ def _agent(args) -> Agent:
         project_doc_max_bytes=args.resolved_config.project_doc_max_bytes,
     )
     agent.items = items
+    permission_mode = getattr(args, "permission_mode", "auto")
+    if permission_mode != "auto":
+        agent.approve = PermissionPolicy(permission_mode)
+        agent.ctx.approve = agent.approve
     name = getattr(args, "name", None)
     if name and session:
         session.note(name=name)
@@ -77,7 +89,14 @@ def cmd_exec(args) -> int:
     except (OSError, ValueError) as exc:
         print(f"mjj exec: {exc}", file=sys.stderr)
         return 2
-    prompt = _exec_prompt(args.prompt)
+    positional = args.prompt
+    if isinstance(positional, list):
+        positional = " ".join(positional) or None
+    prompt = _exec_prompt(positional)
+    if args.permission_mode == "ask":
+        policy = PermissionPolicy("ask", prompt=_headless_approval_prompt)
+        agent.approve = policy
+        agent.ctx.approve = policy
     try:
         images = tuple(prepare_image(path) for path in args.images)
     except ImageInputError as exc:
@@ -121,6 +140,16 @@ def cmd_exec(args) -> int:
     if args.verbose:
         print(f"[{agent.ledger.summary()}]", file=sys.stderr)
     return code
+
+
+def _headless_approval_prompt(message: str) -> str:
+    if not sys.stdin.isatty():
+        return ""
+    try:
+        print(message, end="", file=sys.stderr, flush=True)
+        return sys.stdin.readline()
+    except (EOFError, KeyboardInterrupt):
+        return ""
 
 
 class _Heartbeat:
@@ -370,6 +399,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--model", default=config.model)
     parser.add_argument("--effort", default=config.effort, choices=EFFORTS)
     parser.add_argument("--verbosity", default=config.verbosity, choices=VERBOSITIES)
+    parser.add_argument(
+        "--permission-mode", default=config.permission_mode, choices=PERMISSION_MODES
+    )
     parser.add_argument("--tool-budget", type=int, default=config.tool_budget)
     parser.add_argument(
         "--auto-next-steps", action="store_true", default=config.auto_next_steps
@@ -384,11 +416,14 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command")
 
     run = sub.add_parser("exec", help="one headless run")
-    run.add_argument("prompt", nargs="?")
+    run.add_argument("prompt", nargs="*")
     run.add_argument("--provider", choices=PROVIDERS, default=argparse.SUPPRESS)
     run.add_argument("--model", default=argparse.SUPPRESS)
     run.add_argument("--effort", choices=EFFORTS, default=argparse.SUPPRESS)
     run.add_argument("--verbosity", choices=VERBOSITIES, default=argparse.SUPPRESS)
+    run.add_argument(
+        "--permission-mode", choices=PERMISSION_MODES, default=argparse.SUPPRESS
+    )
     run.add_argument("--auto-next-steps", action="store_true", default=argparse.SUPPRESS)
     run.add_argument("--auto-next-idea", action="store_true", default=argparse.SUPPRESS)
     run.add_argument("--auto-max-turns", type=int, default=argparse.SUPPRESS)
@@ -414,6 +449,9 @@ def main(argv: list[str] | None = None) -> int:
     chat.add_argument("--provider", choices=PROVIDERS, default=argparse.SUPPRESS)
     chat.add_argument("--model", default=argparse.SUPPRESS)
     chat.add_argument("--effort", choices=EFFORTS, default=argparse.SUPPRESS)
+    chat.add_argument(
+        "--permission-mode", choices=PERMISSION_MODES, default=argparse.SUPPRESS
+    )
     chat.add_argument("--auto-next-steps", action="store_true", default=argparse.SUPPRESS)
     chat.add_argument("--auto-next-idea", action="store_true", default=argparse.SUPPRESS)
     chat.add_argument("--auto-max-turns", type=int, default=argparse.SUPPRESS)

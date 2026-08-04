@@ -90,6 +90,16 @@ class Registry:
             return ToolResult.error(f"arguments were not valid JSON: {exc}")
         if not isinstance(args, dict):
             return ToolResult.error("arguments must be a JSON object")
+        if getattr(tool, "requires_approval", False) and ctx.approve is not None:
+            try:
+                approved = ctx.approve(name, args)
+            except Exception as exc:
+                return ToolResult.error(f"approval failed: {exc}")
+            if not approved:
+                return ToolResult.error(
+                    ctx.ledger.clip(name, f"tool denied by permission mode: {name}"),
+                    denied=True,
+                )
         try:
             return tool.run(args, ctx)
         except Exception as exc:  # a tool crash is a turn event, not a stack trace

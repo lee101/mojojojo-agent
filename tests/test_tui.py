@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from prompt_toolkit.document import Document
+
 from mjj.agent import Agent
 from mjj.model import ModelClient
 from mjj.tools.base import Registry
-from mjj.tui import InteractiveApp
+from mjj.tools.shell import ShellTool
+from mjj.tui import InteractiveApp, WorkspaceCompleter
 
 
 def _args():
@@ -15,6 +18,7 @@ def _args():
         auto_max_turns=0,
         disabled_tools=(),
         skill_paths=(),
+        permission_mode="auto",
     )
 
 
@@ -78,3 +82,86 @@ def test_tree_command_lists_branch_points(tmp_path, monkeypatch, capsys):
     rendered = capsys.readouterr().out
     assert "first prompt" in rendered
     assert "/tree ITEM" in rendered
+
+
+def test_workspace_completer_offers_slash_commands_and_fuzzy_files(tmp_path) -> None:
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "water_shader.py").write_text("", encoding="utf-8")
+    completer = WorkspaceCompleter(tmp_path)
+
+    slash = list(completer.get_completions(Document("/perm"), None))
+    files = list(completer.get_completions(Document("Review @water"), None))
+
+    assert [item.text for item in slash] == ["/permissions"]
+    assert [item.text for item in files] == ["src/water_shader.py"]
+
+
+def test_shell_shortcuts_control_whether_output_enters_context(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    monkeypatch.setenv("MJJ_HOME", str(tmp_path / "home"))
+    agent = Agent(
+        registry=Registry().add(ShellTool()),
+        client=ModelClient(model="auto", provider="auto"),
+        cwd=tmp_path,
+        instructions="test",
+    )
+    app = InteractiveApp(agent, _args())
+
+    app._shell("!printf included")
+    included_items = len(agent.items)
+    app._shell("!!printf local-only")
+
+    assert included_items == 1
+    assert len(agent.items) == 1
+    assert "included" in str(agent.items[0])
+    assert "local-only" not in str(agent.items[0])
+    rendered = capsys.readouterr().out
+    assert "included" in rendered and "local-only" in rendered
+
+
+def test_permissions_review_init_and_status_commands(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("MJJ_HOME", str(tmp_path / "home"))
+    agent = Agent(
+        registry=Registry().add(ShellTool()),
+        client=ModelClient(model="auto", provider="auto"),
+        cwd=tmp_path,
+        instructions="test",
+    )
+    args = _args()
+    app = InteractiveApp(agent, args)
+    turns: list[str] = []
+    monkeypatch.setattr(app, "turn", turns.append)
+
+    app.command("/permissions read-only")
+    app.command("/review focus on races")
+    app.command("/init")
+    app.command("/status")
+
+    assert app.permission_policy.mode == "read-only"
+    assert args.permission_mode == "read-only"
+    assert "Do not modify files" in turns[0] and "races" in turns[0]
+    assert "create a concise AGENTS.md" in turns[1]
+    output = capsys.readouterr().out
+    assert '"permissions": "read-only"' in output
+    assert '"git":' in output
+
+
+def test_init_does_not_overwrite_existing_agents_file(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("MJJ_HOME", str(tmp_path / "home"))
+    (tmp_path / "AGENTS.md").write_text("keep me", encoding="utf-8")
+    agent = Agent(
+        registry=Registry(),
+        client=ModelClient(),
+        cwd=tmp_path,
+        instructions="test",
+    )
+    app = InteractiveApp(agent, _args())
+    turns: list[str] = []
+    monkeypatch.setattr(app, "turn", turns.append)
+
+    app.command("/init")
+
+    assert turns == []
+    assert (tmp_path / "AGENTS.md").read_text(encoding="utf-8") == "keep me"
+    assert "already exists" in capsys.readouterr().out

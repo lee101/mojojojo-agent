@@ -4,10 +4,10 @@ import pytest
 
 from mjj import __version__
 from mjj import cli
-from mjj.cli import _exec_prompt, main
-from mjj.cli import _Heartbeat
 import io
 import time
+
+from mjj.cli import _Heartbeat, _exec_prompt, main
 
 
 def test_cli_reports_version(capsys) -> None:
@@ -42,6 +42,24 @@ def test_exec_accepts_codex_style_cd_after_subcommand(tmp_path, monkeypatch) -> 
     monkeypatch.setattr(cli, "cmd_exec", capture)
     assert main(["exec", "-C", str(tmp_path), "task"]) == 0
     assert seen["cwd"] == str(tmp_path)
+
+
+def test_exec_accepts_separate_file_mentions_and_prompt_words(monkeypatch) -> None:
+    seen = {}
+
+    def capture(args) -> int:
+        seen["prompt"] = args.prompt
+        seen["permissions"] = args.permission_mode
+        return 0
+
+    monkeypatch.setattr(cli, "cmd_exec", capture)
+    assert main(
+        ["exec", "--permission-mode", "read-only", "@src/app.py", "review", "this"]
+    ) == 0
+    assert seen == {
+        "prompt": ["@src/app.py", "review", "this"],
+        "permissions": "read-only",
+    }
 
 
 def test_exec_accepts_provider_model_effort_and_images_after_subcommand(monkeypatch) -> None:

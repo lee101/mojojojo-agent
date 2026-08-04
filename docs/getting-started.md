@@ -60,7 +60,10 @@ mjj
 
 Type `/` to discover commands. On an empty composer, left/right changes the
 reasoning level and Shift+Up/Down changes the model. Alt+Enter inserts a newline.
-Useful first commands are `/settings`, `/model`, `/effort`, `/auth`, and `/help`.
+Type `@` to attach a fuzzy-matched repository file, `!command` to run a shell
+command and retain its output as model context, or `!!command` to run it only
+locally. Useful first commands are `/status`, `/settings`, `/permissions`,
+`/review`, `/model`, `/effort`, `/auth`, and `/help`.
 
 For scripts and CI, use headless mode:
 
@@ -68,10 +71,17 @@ For scripts and CI, use headless mode:
 mjj exec "find the cause of the failing test, fix it, and run the focused tests"
 mjj exec --json "review the current diff"
 mjj exec -o final.txt "implement the requested endpoint"
+mjj exec --permission-mode read-only @src/app.py "review this file"
 ```
 
 The final answer goes to stdout. Progress and tool activity go to stderr, so
 command substitution and JSONL consumers receive predictable output.
+
+`@path`, `@path:START-END`, and quoted `@"path with spaces"` arguments attach
+bounded text context. Mentioned images are precompressed and sent to vision.
+Use `/init` to have the agent inspect a repository and generate an `AGENTS.md`,
+`/diff` for a bounded working-tree diff, and `/review [focus]` for a findings-first
+review that explicitly avoids edits.
 
 ## Providers, reasoning, and images
 

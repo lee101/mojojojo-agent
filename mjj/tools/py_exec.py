@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import ClassVar
 
 from ..exec import ExecutionResult, execute
 from .base import ToolContext, ToolResult
@@ -11,6 +12,7 @@ from .base import ToolContext, ToolResult
 @dataclass
 class PyTool:
     name: str = "py"
+    requires_approval: ClassVar[bool] = True
     description: str = "Run Python; pure code is local/JIT, unsafe code is isolated."
     parameters: dict = None  # type: ignore[assignment]
 

@@ -19,8 +19,8 @@ same code that ships in the [public repository](https://github.com/lee101/mojojo
   provider boundary, execution tiers, and hosted isolation.
 - [Search](search.md) — exact, lexical, and native vector retrieval.
 - [Execution](exec.md) — Mojo acceleration, local isolation, and remote fallback.
-- [Sessions and Pi Infinity parity](pi-parity.md) — workflow mappings and
-  deliberate architectural differences.
+- [Agent feature parity](pi-parity.md) — current Pi Infinity, Grok Infinity,
+  and Codex workflow mappings plus the remaining substantive gaps.
 
 ## Operate or contribute
 

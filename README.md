@@ -139,7 +139,7 @@ agent the compact workflow only when visual work calls for it. See the
 | --- | --- | --- |
 | find code | dump files into context | ranked `path:line` hits from a native int8 index |
 | understand a repository | read every file | reference-ranked symbol map, fitted to budget |
-| navigate symbols | require a fixed IDE stack | installed LSP when available, hybrid-index fallback otherwise |
+| navigate/refactor symbols | require a fixed IDE stack | installed LSP for calls/rename, hybrid-index fallback for reads |
 | display generated images | base64 in text or external viewer | metadata-only event; native Kitty or bounded ANSI UI |
 | run code | shell out to CPython | subset-compiled to Mojo, cached by content hash |
 | edit code | rewrite the file | atomic `apply_patch`, syntax gate, checkpoint, `+n/-n` summary |

@@ -93,20 +93,23 @@ class NavigateTool:
         )
         if server is not None:
             try:
+                lsp_position = (
+                    _lsp_position(path, position) if position is not None else None
+                )
                 if action in {"incoming_calls", "outgoing_calls"}:
-                    assert position is not None
+                    assert lsp_position is not None
                     raw = request_lsp_call_hierarchy(
                         server,
                         root=root,
                         path=path,
-                        position=position,
+                        position=lsp_position,
                         direction=action.removesuffix("_calls"),
                     )
                 else:
                     method, params = _request(
                         action,
                         path,
-                        position,
+                        lsp_position,
                         new_name=new_name.strip(),
                     )
                     raw = request_lsp(
@@ -118,7 +121,7 @@ class NavigateTool:
                     )
                 if action == "rename":
                     return self._rename(ctx, raw, new_name.strip(), server.name)
-                output, count = _render_lsp(action, raw, root, query)
+                output, count = _render_lsp(action, raw, root, query, path=path)
                 if output:
                     return self._result(
                         ctx,
@@ -306,7 +309,14 @@ def _request(
     return f"textDocument/{action}", params
 
 
-def _render_lsp(action: str, raw, root: Path, query: str) -> tuple[str, int]:
+def _render_lsp(
+    action: str,
+    raw,
+    root: Path,
+    query: str,
+    *,
+    path: Path | None = None,
+) -> tuple[str, int]:
     if raw is None:
         return "", 0
     if action == "hover":
@@ -318,7 +328,7 @@ def _render_lsp(action: str, raw, root: Path, query: str) -> tuple[str, int]:
     values = raw if isinstance(raw, list) else [raw]
     lines: list[str] = []
     if action == "symbols":
-        _flatten_symbols(values, lines, query.lower())
+        _flatten_symbols(values, lines, query.lower(), path)
     else:
         for item in values[:20]:
             location = _location(item, root)
@@ -327,7 +337,12 @@ def _render_lsp(action: str, raw, root: Path, query: str) -> tuple[str, int]:
     return "\n".join(dict.fromkeys(lines)), len(dict.fromkeys(lines))
 
 
-def _flatten_symbols(values: list, lines: list[str], query: str) -> None:
+def _flatten_symbols(
+    values: list,
+    lines: list[str],
+    query: str,
+    path: Path | None,
+) -> None:
     for item in values:
         if not isinstance(item, dict):
             continue
@@ -343,15 +358,17 @@ def _flatten_symbols(values: list, lines: list[str], query: str) -> None:
                 or location_range
             )
             start = range_value.get("start", {}) if isinstance(range_value, dict) else {}
+            line = int(start.get("line", 0))
+            character = int(start.get("character", 0))
+            column = _display_column(path, line, character) if path is not None else character + 1
             lines.append(
-                f"{int(start.get('line', 0)) + 1}:"
-                f"{int(start.get('character', 0)) + 1} {name}"
+                f"{line + 1}:{column} {name}"
             )
             if len(lines) >= 20:
                 return
         children = item.get("children")
         if isinstance(children, list):
-            _flatten_symbols(children, lines, query)
+            _flatten_symbols(children, lines, query, path)
         if len(lines) >= 20:
             return
 
@@ -369,10 +386,34 @@ def _location(item, root: Path) -> str | None:
     path = Path(unquote(parsed.path)).resolve()
     try:
         label = path.relative_to(root).as_posix()
+        inside = True
     except ValueError:
         label = str(path)
+        inside = False
     start = range_value.get("start", {})
-    return f"{label}:{int(start.get('line', 0)) + 1}:{int(start.get('character', 0)) + 1}"
+    line = int(start.get("line", 0))
+    character = int(start.get("character", 0))
+    column = _display_column(path, line, character) if inside else character + 1
+    return f"{label}:{line + 1}:{column}"
+
+
+def _display_column(path: Path, line: int, character: int) -> int:
+    """Translate an LSP UTF-16 column to a one-based code-point column."""
+    try:
+        if path.stat().st_size > MAX_LSP_FILE_BYTES:
+            return character + 1
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        text = lines[line]
+    except (OSError, IndexError):
+        return character + 1
+    units = 0
+    for index, value in enumerate(text):
+        if units == character:
+            return index + 1
+        units += len(value.encode("utf-16-le")) // 2
+        if units > character:
+            return character + 1
+    return len(text) + 1 if units == character else character + 1
 
 
 def _hover_text(contents) -> str:
@@ -566,6 +607,17 @@ def _lsp_offset(
     if units == character:
         return prefix + len(text)
     raise ValueError("rename edit character is outside the line")
+
+
+def _lsp_position(path: Path, position: dict) -> dict:
+    """Translate MJJ's code-point column to the UTF-16 units LSP requires."""
+    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    line = position["line"]
+    column = position["character"]
+    if line >= len(lines) or column > len(lines[line]):
+        raise ValueError("navigation position is outside the file")
+    units = len(lines[line][:column].encode("utf-16-le")) // 2
+    return {"line": line, "character": units}
 
 
 def _token_at(path: Path, zero_line: int, zero_column: int) -> str:

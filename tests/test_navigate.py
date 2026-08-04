@@ -383,3 +383,35 @@ def test_workspace_edit_positions_use_lsp_utf16_units() -> None:
     )
 
     assert updated == 'value = "😀"; new_name\n'
+
+
+def test_navigation_input_position_uses_lsp_utf16_units(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "module.py"
+    path.write_text("😀target()\n", encoding="utf-8")
+    seen = {}
+    monkeypatch.setattr(
+        navigate_module,
+        "server_for",
+        lambda _path: LspServer("python", "fixture-lsp", ("fixture",)),
+    )
+
+    def request(*_args, **kwargs):
+        seen.update(kwargs["params"]["position"])
+        return {
+            "uri": path.as_uri(),
+            "range": {
+                "start": {"line": 0, "character": 2},
+                "end": {"line": 0, "character": 8},
+            },
+        }
+
+    monkeypatch.setattr(navigate_module, "request_lsp", request)
+
+    result = NavigateTool().run(
+        {"action": "definition", "path": "module.py", "line": 1, "column": 2},
+        ToolContext(tmp_path, Ledger()),
+    )
+
+    assert result.ok
+    assert seen == {"line": 0, "character": 2}
+    assert result.output == "module.py:1:2"

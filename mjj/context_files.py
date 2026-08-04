@@ -203,7 +203,7 @@ def _read_text(
             raise FileMentionError(
                 f"line {start} in {path} is beyond the {MAX_RANGE_SCAN_BYTES // 1024} KiB scan limit"
             )
-        decoded = "\n".join(lines[start - 1 : end])
+        decoded = "\n".join(lines[start - 1:end])
     encoded = decoded.encode("utf-8")
     truncated = scan_truncated if start is None else False
     if len(encoded) > limit:

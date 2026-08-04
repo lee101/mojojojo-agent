@@ -172,7 +172,7 @@ def _frontmatter(text: str) -> tuple[str, str, str]:
         key, separator, value = line.partition(":")
         if separator and key.strip() in {"name", "description"}:
             metadata[key.strip()] = value.strip().strip("\"'")
-    return metadata.get("name", ""), metadata.get("description", ""), "\n".join(lines[end + 1 :])
+    return metadata.get("name", ""), metadata.get("description", ""), "\n".join(lines[end + 1:])
 
 
 def _truthy(value: str) -> bool:

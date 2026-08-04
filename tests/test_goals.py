@@ -64,9 +64,9 @@ def test_goal_store_is_workspace_scoped_atomic_and_bounded(tmp_path, monkeypatch
     workspace.mkdir()
     store = GoalStore(workspace)
 
-    goal = store.set("Ship the verified feature", session_id="session-1")
+    store.set("Ship the verified feature", session_id="session-1")
     for index in range(MAX_PROGRESS_ENTRIES + 5):
-        goal = store.record(f"checkpoint {index}", evidence=f"test {index}")
+        store.record(f"checkpoint {index}", evidence=f"test {index}")
 
     loaded = store.load()
     assert loaded is not None

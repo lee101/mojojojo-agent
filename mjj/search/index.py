@@ -12,7 +12,6 @@ import argparse
 import bisect
 import fnmatch
 import json
-import math
 import mmap
 import os
 import re

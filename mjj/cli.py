@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 
 from . import auth
-from .agent import Agent, render, render_exec
+from .agent import Agent, render_exec
 from .config import (
     ConfigError,
     EFFORTS,

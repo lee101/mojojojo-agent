@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..checkpoints import CheckpointError, store_for
-from ..syntax import SyntaxCheck, validate_path
+from ..syntax import validate_path
 from .base import ToolContext, ToolResult
 
 

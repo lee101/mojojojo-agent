@@ -7,6 +7,7 @@ native tier can borrow their storage instead of copying Python lists.
 
 from __future__ import annotations
 
+
 def quantize_i8_python(values: list[float], output: list[int]) -> float:
     """Write symmetric int8 values and return their quantisation scale."""
     peak = 0.0

@@ -18,6 +18,8 @@ from .lexical import tokenize
 
 
 DIMENSION = 256
+
+
 def _hash64(value: str) -> int:
     # crc32 is stable across processes and performs the byte loop in C. Two
     # independently seeded passes provide enough bits for a bucket and sign.

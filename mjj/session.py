@@ -253,19 +253,33 @@ def export_session(
                 for part in item.get("content") or []
                 if isinstance(part, dict)
             )
-            blocks.append(f'<section class="message {role}"><b>{role}</b><pre>{escape(text)}</pre></section>')
+            blocks.append(
+                f'<section class="message {role}"><b>{role}</b>'
+                f'<pre>{escape(text)}</pre></section>'
+            )
         elif item_type == "function_call":
             name = escape(str(item.get("name") or "tool"))
-            blocks.append(f'<section class="tool"><b>{name}</b><pre>{escape(str(item.get("arguments") or ""))}</pre></section>')
+            arguments = escape(str(item.get("arguments") or ""))
+            blocks.append(
+                f'<section class="tool"><b>{name}</b>'
+                f"<pre>{arguments}</pre></section>"
+            )
         elif item_type == "function_call_output":
-            blocks.append(f'<section class="tool result"><b>result</b><pre>{escape(str(item.get("output") or ""))}</pre></section>')
+            output = escape(str(item.get("output") or ""))
+            blocks.append(
+                '<section class="tool result"><b>result</b>'
+                f"<pre>{output}</pre></section>"
+            )
     title = escape(info.name or f"mjj session {info.id}")
     target.write_text(
         "<!doctype html><meta charset=utf-8><title>"
         + title
-        + "</title><style>body{max-width:920px;margin:40px auto;padding:0 20px;background:#0b0d0e;color:#e7ece8;font:15px system-ui}"
-        "section{border-left:3px solid #38413d;padding:8px 14px;margin:14px 0}.user{border-color:#bdff39}.assistant{border-color:#36d9ff}"
-        ".tool{border-color:#737b77;color:#c7cfca}pre{white-space:pre-wrap;overflow-wrap:anywhere;font:13px ui-monospace,monospace}</style>"
+        + "</title><style>body{max-width:920px;margin:40px auto;padding:0 20px;"
+        "background:#0b0d0e;color:#e7ece8;font:15px system-ui}"
+        "section{border-left:3px solid #38413d;padding:8px 14px;margin:14px 0}"
+        ".user{border-color:#bdff39}.assistant{border-color:#36d9ff}"
+        ".tool{border-color:#737b77;color:#c7cfca}pre{white-space:pre-wrap;"
+        "overflow-wrap:anywhere;font:13px ui-monospace,monospace}</style>"
         f"<h1>{title}</h1><p>{escape(str(source))}</p>"
         + "".join(blocks),
         encoding="utf-8",

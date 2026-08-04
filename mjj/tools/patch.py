@@ -161,7 +161,7 @@ def _parse(text: str) -> list[_Operation]:
 
 
 def _header_path(line: str, marker: str, line_number: int) -> str:
-    path = line[len(marker) :]
+    path = line[len(marker):]
     if not path:
         raise PatchError(f"line {line_number}: missing path")
     return path
@@ -344,7 +344,7 @@ def _apply_chunks(source: str, chunks: list[_Chunk], path: str) -> str:
             if at is None:
                 preview = next((line for line in chunk.old if line.strip()), "<blank>")
                 raise PatchError(f"context not found in {path}: {preview}")
-        lines[at : at + len(chunk.old)] = chunk.new
+        lines[at:at + len(chunk.old)] = chunk.new
         cursor = at + len(chunk.new)
 
     result = newline.join(lines)
@@ -374,7 +374,7 @@ def _find_block(
     for normalise in (lambda value: value, str.rstrip, str.strip):
         normal_wanted = [normalise(line) for line in wanted]
         for index in candidates:
-            if [normalise(line) for line in lines[index : index + len(wanted)]] == normal_wanted:
+            if [normalise(line) for line in lines[index:index + len(wanted)]] == normal_wanted:
                 return index
     return None
 

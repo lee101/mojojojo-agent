@@ -37,11 +37,22 @@ while True:
     if message['method'] == 'initialize':
         result = {'capabilities': {}}
     else:
-        send({'jsonrpc': '2.0', 'id': message['id'], 'method': 'workspace/configuration', 'params': {'items': [{}, {}]}})
+        send({
+            'jsonrpc': '2.0',
+            'id': message['id'],
+            'method': 'workspace/configuration',
+            'params': {'items': [{}, {}]},
+        })
         client_response = receive()
         if client_response.get('result') != [None, None]:
             raise SystemExit(4)
-        result = {'uri': message['params']['textDocument']['uri'], 'range': {'start': {'line': 6, 'character': 4}, 'end': {'line': 6, 'character': 8}}}
+        result = {
+            'uri': message['params']['textDocument']['uri'],
+            'range': {
+                'start': {'line': 6, 'character': 4},
+                'end': {'line': 6, 'character': 8},
+            },
+        }
     send({'jsonrpc': '2.0', 'id': message['id'], 'result': result})
 """
     )

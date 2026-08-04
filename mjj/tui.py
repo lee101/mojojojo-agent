@@ -645,7 +645,7 @@ class InteractiveApp:
 
     def _shell(self, line: str) -> None:
         excluded = line.startswith("!!")
-        command = line[2 if excluded else 1 :].strip()
+        command = line[2 if excluded else 1:].strip()
         if not command:
             print("usage: !COMMAND (send output to model) or !!COMMAND (local only)")
             return

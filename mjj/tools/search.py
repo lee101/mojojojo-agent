@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from ..search.index import RepositoryIndex, build_index
 from .base import ToolContext, ToolResult
 
@@ -121,7 +119,7 @@ class SearchTool:
                     scope=scope,
                 )
                 fallback = bool(all_hits)
-            candidates = all_hits[cursor : cursor + limit]
+            candidates = all_hits[cursor:cursor + limit]
             if cursor and not candidates:
                 hits = []
                 output = "no more matches"

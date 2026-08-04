@@ -14,6 +14,8 @@ same code that ships in the [public repository](https://github.com/lee101/mojojo
   prompt overhead.
 - [Durable goals](goals.md) — persistent objectives, bounded continuation,
   checkpoints, evidence-backed completion, and lifecycle controls.
+- [Reviewer and worker subagents](subagents.md) — parallel read-only review and
+  isolated, reviewable implementation commits.
 
 ## How it works
 

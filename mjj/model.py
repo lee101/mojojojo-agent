@@ -58,6 +58,14 @@ class Usage:
         out_details = doc.get("output_tokens_details") or {}
         self.reasoning_tokens += int(out_details.get("reasoning_tokens") or 0)
 
+    def merge(self, other: "Usage") -> None:
+        self.input_tokens += other.input_tokens
+        self.cached_input_tokens += other.cached_input_tokens
+        self.cache_write_tokens += other.cache_write_tokens
+        self.output_tokens += other.output_tokens
+        self.reasoning_tokens += other.reasoning_tokens
+        self.requests += other.requests
+
     @property
     def billable_input(self) -> int:
         return max(0, self.input_tokens - self.cached_input_tokens)
@@ -108,6 +116,7 @@ class ModelClient:
     # a long session keeps missing a cache it just populated, and the input
     # side of the bill is the largest number in this file.
     cache_key: str = ""
+    max_output_tokens: int = 0
     _compaction_disabled: bool = field(default=False, init=False, repr=False)
 
     def request_body(
@@ -132,6 +141,8 @@ class ModelClient:
             body["text"] = {"verbosity": self.verbosity}
         if self.cache_key:
             body["prompt_cache_key"] = self.cache_key
+        if self.max_output_tokens > 0:
+            body["max_output_tokens"] = self.max_output_tokens
         if self.compact_threshold > 0 and not self._compaction_disabled:
             body["context_management"] = [
                 {
@@ -165,6 +176,8 @@ class ModelClient:
             body["reasoning"] = {"effort": self.effort}
         else:
             body["reasoning_effort"] = self.effort
+        if self.max_output_tokens > 0:
+            body["max_tokens"] = self.max_output_tokens
         return {key: value for key, value in body.items() if value is not None}
 
     def stream(

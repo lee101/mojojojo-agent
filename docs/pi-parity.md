@@ -25,6 +25,7 @@ still missing.
 | Context compaction | automatic and manual | automatic Responses compaction with graceful backend fallback |
 | Continued autonomous work | Pi Infinity continuation flags | `--auto-next-steps`, `--auto-next-idea`, `/auto` |
 | Persistent goals | Codex `/goal` and Grok background objectives | `/goal`, `mjj goal`, `--goal`; atomic workspace state, bounded checkpoints, evidence-backed completion |
+| Reviewer/worker subagents | Grok delegated workers and review agents | `delegate`: four concurrent bounded children, read-only review, isolated worker commits, deterministic merge |
 | Skills and project context | skills and context files | scoped `SKILL.md` plus bounded hierarchical `AGENTS.md` |
 | Runtime reload | `/reload` | `/reload` for tools and skills |
 | Shell and coding tools | read/write/edit/bash/grep/find/ls | read/list/search/navigate/apply-patch/shell/Python/native execution |
@@ -39,8 +40,6 @@ These are feature gaps, not presentation preferences:
 
 - **MCP and external integrations.** Grok and Codex expose MCP. MJJ now has
   installed-LSP navigation but no authenticated external tool-server runtime.
-- **Subagents.** Grok can manage reviewer/worker agents. MJJ backgrounds local
-  commands and compiler checks but still runs one model worker per session.
 - **Interactive TUI steering.** Hosted runs accept follow-ups while active; the
   inline terminal still waits for the current response before reading input.
 - **Package/plugin runtime.** Pi extensions/packages and Grok/Codex plugins can

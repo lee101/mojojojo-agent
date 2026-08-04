@@ -14,6 +14,7 @@ from .base import Registry, Tool, ToolContext, ToolResult  # noqa: F401
 MODULES = (
     "fs",
     "shell",
+    "delegate",
     "patch",
     "checkpoint",
     "search",

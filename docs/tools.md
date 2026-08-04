@@ -195,6 +195,14 @@ mark the goal complete/blocked with an evidence message. Goal state is atomic,
 workspace-scoped, and independent of transcript compaction or branching. See
 [durable goals](goals.md).
 
+## `delegate`
+
+`delegate` runs up to four independent reviewer or worker agents concurrently.
+Reviewers are read-only. Workers edit an isolated snapshot and return a
+reviewable Git commit instead of mutating the parent checkout. Child tool
+rounds, output tokens, and tool results are bounded; results rejoin the parent
+transcript in request order. See [reviewer and worker subagents](subagents.md).
+
 ## Scoped project instructions
 
 Startup loads bounded `AGENTS.md` files from repository root to the working

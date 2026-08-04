@@ -70,6 +70,7 @@ class Agent:
             )
             self.instructions = compose(SYSTEM_PROMPT, self.project_instructions)
         self.ctx = ToolContext(cwd=self.cwd, ledger=self.ledger, approve=self.approve)
+        self.ctx.state["model-client"] = self.client
         if self.goal_store is not None:
             self.bind_goal_store(self.goal_store)
         if self.session and not self.client.cache_key:
@@ -455,6 +456,10 @@ def tool_progress(step: Step, *, verbose: bool = False) -> str:
         )
     if step.name == "goal":
         return f"updating goal: {args.get('action', 'status')}"
+    if step.name == "delegate":
+        tasks = args.get("tasks")
+        count = len(tasks) if isinstance(tasks, list) else 0
+        return f"delegating {count} bounded task{'' if count == 1 else 's'}"
     if step.name == "apply_patch":
         return "editing files"
     if step.name == "checkpoint":

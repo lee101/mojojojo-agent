@@ -39,6 +39,23 @@ def test_compaction_can_be_disabled():
     assert "context_management" not in body
 
 
+def test_output_token_ceiling_is_sent_to_both_api_shapes():
+    credential = Credential(
+        "api_key",
+        "test",
+        "https://example.test/v1",
+        provider="openpaths",
+        api_style="chat_completions",
+    )
+    client = ModelClient(max_output_tokens=321)
+
+    responses = client.request_body([], "brief", [], API_CREDENTIAL)
+    chat = client.chat_request_body([], "brief", [], credential)
+
+    assert responses["max_output_tokens"] == 321
+    assert chat["max_tokens"] == 321
+
+
 def test_unsupported_compaction_degrades_to_plain_request(monkeypatch):
     client = ModelClient(resolver=Resolver(), max_retries=1)
     bodies = []

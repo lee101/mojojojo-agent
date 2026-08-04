@@ -22,6 +22,7 @@ network service, or optional compiler.
 | OpenCode exposes installed language servers | `navigate` provides definition, references, hover, and symbols through stdio LSP, with the hybrid index as its no-server fallback | 115 schema tokens |
 | OpenCode discovers formatters; Hermes queues background work and steering | `check format=true` is approval-gated and checkpointed; shell jobs return pollable IDs; hosted steering queues user guidance at safe model boundaries | 64 parameter-schema tokens |
 | Codex keeps verifiable objectives alive across turns | Workspace-scoped goals persist independently of sessions, inject a bounded contract, retain 50 checkpoints, and expose their tool only while active | 0 schema tokens outside a goal |
+| Grok/Hermes use reviewer and worker agents | `delegate` runs four bounded model workers concurrently; reviewers are read-only and workers return isolated, snapshot-relative Git commits in deterministic order | 112 schema tokens |
 
 The map deliberately reuses MJJ's incremental search chunks instead of adding
 NetworkX, SQLite, another parser cache, or an always-running service. With the
@@ -44,12 +45,9 @@ the map itself works in the dependency-free fallback.
 
 1. **MCP and external tool servers.** This needs capability discovery,
    authentication boundaries, schema budgets, and hosted tenant isolation.
-2. **Reviewer/worker subagents.** Shell and compiler work can run in the
-   background, but independent model workers still need explicit budgets,
-   workspace ownership, and deterministic transcript merge ordering.
-3. **LSP refactors and call hierarchy.** Navigation is read-only today. Rename,
+2. **LSP refactors and call hierarchy.** Navigation is read-only today. Rename,
    code actions, and workspace edits should reuse checkpoints and approval.
-4. **Plugin runtime and structured plans.** Portable skills and durable goals
+3. **Plugin runtime and structured plans.** Portable skills and durable goals
    cover workflows and resumable objectives, not in-process event hooks,
    configurable keymaps, or editable dependency-aware plan state.
 
@@ -69,3 +67,7 @@ HTTP API and transcript only, so it adds no model tool-schema tokens.
 
 These figures measure harness output and latency, not model task success. They
 must be regenerated when the corpus, backend, or machine changes.
+
+The `delegate` schema is 447 minified JSON bytes, or 112 tokens under MJJ's
+four-characters-per-token estimator. That is a wire-size measurement, not a
+claim about model quality or parallel speedup.

@@ -252,6 +252,11 @@ must attach evidence when it marks the objective complete or blocked. Inspect
 or control the state without a model call using `mjj goal`, `mjj goal pause`,
 `mjj goal resume`, and `mjj goal clear`. See [the goal guide](docs/goals.md).
 
+The agent can also fan out bounded `delegate` work: read-only reviewers inspect
+in parallel, while implementation workers operate on isolated snapshots and
+return reviewable Git commits without touching the parent checkout. See the
+[subagent guide](docs/subagents.md).
+
 Headless runs keep the final answer alone on stdout and send tool progress to
 stderr, so shell capture stays clean. `--json` emits JSONL events,
 `--ephemeral` skips session persistence, and `-o result.txt` also writes the

@@ -48,3 +48,4 @@ def test_update_plan_rejects_multiple_steps_in_progress(tmp_path):
 
     assert not result.ok
     assert "at most one" in result.output
+    assert context.ledger.tool_calls == 1

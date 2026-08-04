@@ -14,7 +14,7 @@ MAX_STEP_CHARS = 500
 
 class UpdatePlanTool:
     name = "update_plan"
-    description = "Set the current multi-step task plan; keep exactly one step in progress"
+    description = "Set a multi-step task plan with at most one step in progress"
     parameters = {
         "type": "object",
         "properties": {
@@ -40,27 +40,33 @@ class UpdatePlanTool:
     def run(self, args: dict, ctx: ToolContext) -> ToolResult:
         raw_plan = args.get("plan")
         if not isinstance(raw_plan, list) or len(raw_plan) > MAX_STEPS:
-            return ToolResult.error(f"plan must be an array of at most {MAX_STEPS} steps")
+            return self._error(
+                ctx, f"plan must be an array of at most {MAX_STEPS} steps"
+            )
         plan: list[dict[str, str]] = []
         for item in raw_plan:
             if not isinstance(item, dict):
-                return ToolResult.error("each plan item must be an object")
+                return self._error(ctx, "each plan item must be an object")
             step = item.get("step")
             status = item.get("status")
             if not isinstance(step, str) or not step.strip():
-                return ToolResult.error("each plan step must be non-empty")
+                return self._error(ctx, "each plan step must be non-empty")
             if len(step) > MAX_STEP_CHARS:
-                return ToolResult.error(
+                return self._error(
+                    ctx,
                     f"plan steps must not exceed {MAX_STEP_CHARS} characters"
                 )
             if status not in STATUSES:
-                return ToolResult.error("plan status must be pending, in_progress, or completed")
+                return self._error(
+                    ctx,
+                    "plan status must be pending, in_progress, or completed",
+                )
             plan.append({"step": step.strip(), "status": status})
         if sum(item["status"] == "in_progress" for item in plan) > 1:
-            return ToolResult.error("at most one plan step may be in_progress")
+            return self._error(ctx, "at most one plan step may be in_progress")
         explanation = args.get("explanation", "")
         if not isinstance(explanation, str):
-            return ToolResult.error("explanation must be a string")
+            return self._error(ctx, "explanation must be a string")
         state = {"explanation": explanation.strip()[:1000], "plan": plan}
         ctx.state["plan"] = state
         counts = {status: 0 for status in STATUSES}
@@ -76,6 +82,10 @@ class UpdatePlanTool:
             output=ctx.ledger.clip("update_plan", json.dumps(summary, separators=(",", ":"))),
             meta={"plan": state},
         )
+
+    @staticmethod
+    def _error(ctx: ToolContext, text: str) -> ToolResult:
+        return ToolResult.error(ctx.ledger.clip("update_plan", text))
 
 
 TOOLS = [UpdatePlanTool()]

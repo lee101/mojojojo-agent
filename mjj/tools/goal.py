@@ -28,7 +28,7 @@ class GoalTool:
     def run(self, args: dict, ctx: ToolContext) -> ToolResult:
         store = ctx.state.get("goal-store")
         if not isinstance(store, GoalStore):
-            return ToolResult.error("no goal store is bound to this run")
+            return self._error(ctx, "no goal store is bound to this run")
         action = str(args.get("action") or "")
         message = str(args.get("message") or "")
         evidence = str(args.get("evidence") or "")
@@ -36,21 +36,23 @@ class GoalTool:
             if action == "status":
                 goal = store.load()
                 if goal is None:
-                    return ToolResult.error("no active goal")
+                    return self._error(ctx, "no active goal")
             elif action == "progress":
                 goal = store.record(message, evidence=evidence)
             elif action in ("complete", "blocked"):
                 if not message.strip():
-                    return ToolResult.error(
+                    return self._error(
+                        ctx,
                         f"goal {action} requires a concise evidence-backed message"
                     )
-                goal = store.transition(action, message)
+                goal = store.transition(action, message, evidence=evidence)
             else:
-                return ToolResult.error(
+                return self._error(
+                    ctx,
                     "action must be status, progress, complete, or blocked"
                 )
         except ValueError as exc:
-            return ToolResult.error(str(exc))
+            return self._error(ctx, str(exc))
         public = {
             "id": goal.id,
             "status": goal.status,
@@ -63,6 +65,10 @@ class GoalTool:
             output=ctx.ledger.clip("goal", json.dumps(public, ensure_ascii=False)),
             meta={"goal_status": goal.status, "goal_id": goal.id},
         )
+
+    @staticmethod
+    def _error(ctx: ToolContext, text: str) -> ToolResult:
+        return ToolResult.error(ctx.ledger.clip("goal", text))
 
 
 TOOLS = [GoalTool()]

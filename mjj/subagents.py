@@ -76,6 +76,14 @@ class SubagentRunner:
         tool_budget: int = 1_200,
         agent_factory: Callable[..., Agent] = Agent,
     ) -> None:
+        if not 1 <= max_steps <= 200:
+            raise ValueError("subagent max_steps must be between 1 and 200")
+        if not 1 <= max_output_tokens <= 100_000:
+            raise ValueError(
+                "subagent max_output_tokens must be between 1 and 100000"
+            )
+        if tool_budget <= 0:
+            raise ValueError("subagent tool_budget must be positive")
         self.parent_client = parent_client
         self.max_steps = max_steps
         self.max_output_tokens = max_output_tokens
@@ -86,12 +94,40 @@ class SubagentRunner:
         ordered = list(tasks)
         if not ordered:
             return []
+        if len(ordered) > MAX_TASKS:
+            raise ValueError(f"subagent runner accepts at most {MAX_TASKS} tasks")
+        for index, task in enumerate(ordered, 1):
+            if not isinstance(task, SubagentTask):
+                raise ValueError(f"subagent task {index} must be a SubagentTask")
+            if task.role not in ROLES:
+                raise ValueError(
+                    f"subagent task {index} role must be one of: {', '.join(ROLES)}"
+                )
+            if not isinstance(task.prompt, str) or not task.prompt.strip():
+                raise ValueError(f"subagent task {index} prompt must be non-empty")
+            if len(task.prompt) > MAX_PROMPT_CHARS:
+                raise ValueError(
+                    f"subagent task {index} prompt exceeds {MAX_PROMPT_CHARS} characters"
+                )
         with ThreadPoolExecutor(
             max_workers=min(MAX_TASKS, len(ordered)),
             thread_name_prefix="mjj-subagent",
         ) as pool:
             futures = [pool.submit(self._one, task, cwd) for task in ordered]
-            return [future.result() for future in futures]
+            results = []
+            for task, future in zip(ordered, futures):
+                try:
+                    results.append(future.result())
+                except Exception as exc:
+                    results.append(
+                        SubagentResult(
+                            identifier=uuid.uuid4().hex[:10],
+                            role=task.role,
+                            ok=False,
+                            error=f"{type(exc).__name__}: {exc}",
+                        )
+                    )
+            return results
 
     def _one(self, task: SubagentTask, cwd: Path) -> SubagentResult:
         identifier = uuid.uuid4().hex[:10]
@@ -324,10 +360,10 @@ def _role_prompt(task: SubagentTask) -> str:
         )
     else:
         contract = (
-        "Act as an implementation worker in an isolated Git worktree. Make only "
-        "the requested changes, run focused checks, and report changed files and "
-        "verification. Do not commit or change branches; the harness captures your "
-        "delta as a reviewable commit."
+            "Act as an implementation worker in an isolated Git worktree. Make only "
+            "the requested changes, run focused checks, and report changed files and "
+            "verification. Do not commit or change branches; the harness captures your "
+            "delta as a reviewable commit."
         )
     return f"{contract}\n\nTask:\n{task.prompt}"
 

@@ -69,6 +69,6 @@ The `delegate` schema is 447 minified JSON bytes, or 112 tokens under MJJ's
 four-characters-per-token estimator. That is a wire-size measurement, not a
 claim about model quality or parallel speedup.
 
-The `update_plan` schema is 504 minified JSON bytes, or 126 tokens under the
+The `update_plan` schema is 493 minified JSON bytes, or 124 tokens under the
 same estimator. MCP adds no schema when unconfigured; configured servers pay
 only for their capped discovered schemas.

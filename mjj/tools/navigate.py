@@ -402,7 +402,10 @@ def _display_column(path: Path, line: int, character: int) -> int:
     try:
         if path.stat().st_size > MAX_LSP_FILE_BYTES:
             return character + 1
-        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        source = path.read_text(encoding="utf-8", errors="replace")
+        lines = source.splitlines()
+        if source.endswith(("\n", "\r")):
+            lines.append("")
         text = lines[line]
     except (OSError, IndexError):
         return character + 1
@@ -611,7 +614,10 @@ def _lsp_offset(
 
 def _lsp_position(path: Path, position: dict) -> dict:
     """Translate MJJ's code-point column to the UTF-16 units LSP requires."""
-    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    source = path.read_text(encoding="utf-8", errors="replace")
+    lines = source.splitlines()
+    if source.endswith(("\n", "\r")):
+        lines.append("")
     line = position["line"]
     column = position["character"]
     if line >= len(lines) or column > len(lines[line]):

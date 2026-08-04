@@ -75,6 +75,32 @@ def test_goal_store_is_workspace_scoped_atomic_and_bounded(tmp_path, monkeypatch
     assert len(loaded.progress) == MAX_PROGRESS_ENTRIES
     assert loaded.progress[0]["message"] == "checkpoint 5"
     assert stat.S_IMODE(store.path.stat().st_mode) == 0o600
+    assert stat.S_IMODE(store.path.parent.stat().st_mode) == 0o700
+
+
+def test_loaded_goal_progress_is_rebounded_and_sanitized(tmp_path, monkeypatch):
+    monkeypatch.setenv("MJJ_HOME", str(tmp_path / "home"))
+    store = GoalStore(tmp_path)
+    goal = store.set("Keep state bounded")
+    document = goal.public()
+    document["progress"] = [
+        {
+            "at": "not-a-time",
+            "kind": "invented",
+            "message": "m" * 10_000,
+            "evidence": "e" * 10_000,
+            "untrusted": "discard me",
+        }
+    ]
+    store.path.write_text(json.dumps(document), encoding="utf-8")
+
+    loaded = store.load()
+
+    assert loaded is not None
+    assert len(loaded.progress[0]["message"]) == 2_000
+    assert len(loaded.progress[0]["evidence"]) == 2_000
+    assert loaded.progress[0]["kind"] == "checkpoint"
+    assert "untrusted" not in loaded.progress[0]
 
 
 def test_corrupt_goal_state_degrades_to_no_goal(tmp_path, monkeypatch):
@@ -102,6 +128,33 @@ def test_goal_tool_requires_evidence_message_before_completion(tmp_path, monkeyp
     assert denied.ok is False
     assert completed.ok is True
     assert store.load().status == "complete"
+
+
+def test_goal_tool_records_separate_completion_evidence_and_accounts_errors(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("MJJ_HOME", str(tmp_path / "home"))
+    store = GoalStore(tmp_path)
+    store.set("Finish safely")
+    agent = Agent(registry=Registry(), cwd=tmp_path, instructions="test")
+    agent.bind_goal_store(store)
+
+    denied = agent.registry.dispatch("goal", '{"action":"complete"}', agent.ctx)
+    completed = agent.registry.dispatch(
+        "goal",
+        json.dumps(
+            {
+                "action": "complete",
+                "message": "all checks passed",
+                "evidence": "270 tests passed",
+            }
+        ),
+        agent.ctx,
+    )
+
+    assert not denied.ok and completed.ok
+    assert agent.ledger.tool_calls == 2
+    assert store.load().progress[-1]["evidence"] == "270 tests passed"
 
 
 def test_active_goal_continues_then_stops_when_model_marks_complete(

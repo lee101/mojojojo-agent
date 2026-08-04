@@ -21,7 +21,9 @@ max_tools = 32
 file. `env_vars` forwards only named variables from MJJ's environment; an
 `env = { NAME = "value" }` table is also supported, but environment forwarding
 keeps secrets out of files. `mjj config` reports environment key names and
-never their values.
+never their values. Child servers receive only a minimal process environment
+(`PATH`, home-directory, locale, and temporary-directory settings) plus those
+explicit entries; unrelated credentials from the MJJ process are not inherited.
 
 MJJ implements the stable MCP `initialize`, `tools/list`, and `tools/call`
 surface. Discovery is capped by `max_tools`, individual input schemas larger
@@ -40,4 +42,5 @@ restarts configured servers and refreshes their tool inventory.
 MCP calls use the normal permission policy: Auto permits them, Ask confirms
 each call, and Read-only denies them. Configuring a stdio server authorizes MJJ
 to start that local command during tool discovery, so only configure commands
-you trust. The multi-user hosted server does not load local MCP configuration.
+you trust: the process can still access files allowed to the MJJ user. The
+multi-user hosted server does not load local MCP configuration.

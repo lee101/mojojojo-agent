@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 
 from mjj.ledger import CHARS_PER_TOKEN, Budget, Ledger, estimate_tokens
-from mjj.tools.base import ToolContext
+from mjj.tools.base import Registry, ToolContext, ToolResult
 
 
 def ledger(**budgets) -> Ledger:
@@ -117,3 +117,45 @@ def test_summary_does_not_allocate_the_withheld_output():
     led = ledger(default=1)
     led.clip("read", "x" * 10_000_000)
     assert "~2499999 tokens withheld" in led.summary()
+
+
+class _CrashingTool:
+    name = "crash"
+    description = "Crash with adversarial output."
+    parameters = {"type": "object"}
+
+    def run(self, _args: dict, _ctx: ToolContext) -> ToolResult:
+        raise RuntimeError("failure\n" * 10_000)
+
+
+def test_registry_generated_errors_always_pass_through_ledger(tmp_path):
+    led = ledger(default=12)
+    context = ToolContext(tmp_path, led)
+    registry = Registry().add(_CrashingTool())
+
+    malformed = registry.dispatch("crash", "{", context)
+    crashed = registry.dispatch("crash", "{}", context)
+    unknown = registry.dispatch("missing", "{}", context)
+
+    assert not malformed.ok and not crashed.ok and not unknown.ok
+    assert len(crashed.output) <= 12 * CHARS_PER_TOKEN
+    assert led.tool_calls == 3
+    assert led.drops
+
+
+def test_project_instruction_discovery_failure_is_a_bounded_tool_error(
+    tmp_path, monkeypatch
+):
+    led = ledger(default=10)
+    context = ToolContext(tmp_path, led)
+    registry = Registry().add(_CrashingTool())
+
+    def fail(_args):
+        raise OSError("unreadable\n" * 10_000)
+
+    monkeypatch.setattr(context, "discover_project_docs", fail)
+    result = registry.dispatch("crash", "{}", context)
+
+    assert not result.ok
+    assert len(result.output) <= 10 * CHARS_PER_TOKEN
+    assert led.tool_calls == 1

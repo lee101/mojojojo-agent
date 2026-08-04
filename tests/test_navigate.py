@@ -415,3 +415,31 @@ def test_navigation_input_position_uses_lsp_utf16_units(tmp_path, monkeypatch) -
     assert result.ok
     assert seen == {"line": 0, "character": 2}
     assert result.output == "module.py:1:2"
+
+
+def test_navigation_accepts_position_at_trailing_empty_line(
+    tmp_path, monkeypatch
+) -> None:
+    path = tmp_path / "module.py"
+    path.write_text("target()\n", encoding="utf-8")
+    seen = {}
+    monkeypatch.setattr(
+        navigate_module,
+        "server_for",
+        lambda _path: LspServer("python", "fixture-lsp", ("fixture",)),
+    )
+
+    def request(*_args, **kwargs):
+        seen.update(kwargs["params"]["position"])
+        return None
+
+    monkeypatch.setattr(navigate_module, "request_lsp", request)
+
+    result = NavigateTool().run(
+        {"action": "definition", "path": "module.py", "line": 2, "column": 1},
+        ToolContext(tmp_path, Ledger()),
+    )
+
+    assert seen == {"line": 1, "character": 0}
+    assert not result.ok
+    assert "no identifier" in result.output

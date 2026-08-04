@@ -181,6 +181,19 @@ def test_project_rules_get_budget_priority_over_user_rules(tmp_path: Path) -> No
     assert docs.truncated
 
 
+def test_injected_environment_home_controls_default_mjj_home(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    home = tmp_path / "home"
+    (repo / ".git").mkdir(parents=True)
+    (home / ".mjj").mkdir(parents=True)
+    (home / ".mjj" / "AGENTS.md").write_text("personal")
+
+    docs = load(repo, include_user=True, environ={"HOME": str(home)})
+
+    assert docs.text == "personal"
+    assert docs.sources == ((home / ".mjj" / "AGENTS.md").resolve(),)
+
+
 def test_agent_can_exclude_service_account_user_rules(tmp_path: Path, monkeypatch) -> None:
     repo = tmp_path / "repo"
     home = tmp_path / "home"
@@ -200,6 +213,35 @@ def test_agent_can_exclude_service_account_user_rules(tmp_path: Path, monkeypatc
     assert "tenant project rules" in agent.instructions
     assert "service account secret rules" not in agent.instructions
     assert agent.project_instructions.sources == ((repo / "CLAUDE.md").resolve(),)
+
+
+def test_agent_project_doc_budget_is_shared_with_lazy_discovery(
+    tmp_path: Path, monkeypatch
+) -> None:
+    repo = tmp_path / "repo"
+    nested = repo / "src"
+    (repo / ".git").mkdir(parents=True)
+    nested.mkdir()
+    (repo / "AGENTS.md").write_text("root")
+    (nested / "AGENTS.md").write_text("nested rules")
+    target = nested / "module.py"
+    target.write_text("value = 1\n")
+    monkeypatch.setenv("MJJ_HOME", str(tmp_path / "empty-home"))
+    monkeypatch.setenv("HOME", str(tmp_path / "empty-home"))
+    agent = Agent(
+        registry=build_registry(only=["fs"]),
+        cwd=repo,
+        project_doc_max_bytes=10,
+    )
+
+    result = agent.registry.dispatch(
+        "read", '{"path":"src/module.py"}', agent.ctx
+    )
+
+    assert "nested" in result.output
+    assert "nested rules" not in result.output
+    assert agent.project_instructions.bytes_read == 4
+    assert agent.ctx.state["scoped-project-docs"].remaining == 0
 
 
 def test_nested_project_docs_are_injected_once_on_first_tool_access(tmp_path: Path) -> None:

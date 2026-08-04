@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import time
 import uuid
@@ -25,7 +26,11 @@ MAX_PROGRESS_ENTRIES = 50
 def goals_dir() -> Path:
     root = Path(os.environ.get("MJJ_HOME") or "~/.mjj").expanduser()
     path = root / "goals"
-    path.mkdir(parents=True, exist_ok=True)
+    path.mkdir(parents=True, exist_ok=True, mode=0o700)
+    try:
+        path.chmod(0o700)
+    except OSError:
+        pass
     return path
 
 
@@ -57,7 +62,7 @@ class Goal:
             created=float(value.get("created") or time.time()),
             updated=float(value.get("updated") or time.time()),
             session_id=str(value.get("session_id") or ""),
-            progress=[item for item in progress[-MAX_PROGRESS_ENTRIES:] if isinstance(item, dict)],
+            progress=_bounded_progress(progress),
         )
 
     def public(self) -> dict:
@@ -110,9 +115,12 @@ class GoalStore:
         return goal
 
     def save(self, goal: Goal) -> Goal:
+        goal.progress = _bounded_progress(goal.progress)
         goal.updated = time.time()
         encoded = json.dumps(goal.public(), ensure_ascii=False, indent=2) + "\n"
-        temporary = self.path.with_suffix(f".{os.getpid()}.tmp")
+        temporary = self.path.with_suffix(
+            f".{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp"
+        )
         try:
             descriptor = os.open(
                 temporary,
@@ -135,7 +143,13 @@ class GoalStore:
                 pass
         return goal
 
-    def transition(self, status: str, message: str = "") -> Goal:
+    def transition(
+        self,
+        status: str,
+        message: str = "",
+        *,
+        evidence: str = "",
+    ) -> Goal:
         if status not in GOAL_STATUSES:
             raise ValueError("goal status must be one of: " + ", ".join(GOAL_STATUSES))
         goal = self.load()
@@ -143,7 +157,7 @@ class GoalStore:
             raise ValueError("no goal exists for this workspace")
         goal.status = status
         if message.strip():
-            self._append(goal, message, kind=status)
+            self._append(goal, message, evidence=evidence, kind=status)
         return self.save(goal)
 
     def record(self, message: str, *, evidence: str = "") -> Goal:
@@ -180,3 +194,31 @@ class GoalStore:
             entry["evidence"] = evidence.strip()[:MAX_PROGRESS_CHARS]
         goal.progress.append(entry)
         goal.progress = goal.progress[-MAX_PROGRESS_ENTRIES:]
+
+
+def _bounded_progress(value: object) -> list[dict]:
+    if not isinstance(value, list):
+        return []
+    bounded = []
+    allowed_kinds = {"checkpoint", *GOAL_STATUSES}
+    for raw in value[-MAX_PROGRESS_ENTRIES:]:
+        if not isinstance(raw, dict):
+            continue
+        message = str(raw.get("message") or "").strip()[:MAX_PROGRESS_CHARS]
+        if not message:
+            continue
+        try:
+            at = float(raw.get("at") or time.time())
+        except (TypeError, ValueError):
+            at = time.time()
+        if not math.isfinite(at):
+            at = time.time()
+        kind = str(raw.get("kind") or "checkpoint")
+        if kind not in allowed_kinds:
+            kind = "checkpoint"
+        entry = {"at": at, "kind": kind, "message": message}
+        evidence = str(raw.get("evidence") or "").strip()[:MAX_PROGRESS_CHARS]
+        if evidence:
+            entry["evidence"] = evidence
+        bounded.append(entry)
+    return bounded

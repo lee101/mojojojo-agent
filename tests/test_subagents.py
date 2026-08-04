@@ -73,6 +73,45 @@ def test_parallel_runner_returns_input_order(monkeypatch, tmp_path) -> None:
     assert [result.answer for result in results] == ["first", "second"]
 
 
+def test_parallel_runner_isolates_one_crashed_task(monkeypatch, tmp_path) -> None:
+    runner = SubagentRunner(ModelClient())
+
+    def one(task, cwd):
+        if task.prompt == "broken":
+            raise OSError("session storage unavailable")
+        return SubagentResult("ok", task.role, True, answer=task.prompt)
+
+    monkeypatch.setattr(runner, "_one", one)
+    results = runner.run(
+        [SubagentTask("broken"), SubagentTask("healthy")],
+        tmp_path,
+    )
+
+    assert [result.ok for result in results] == [False, True]
+    assert "session storage unavailable" in results[0].error
+    assert results[1].answer == "healthy"
+
+
+def test_subagent_runner_rejects_unbounded_configuration() -> None:
+    with pytest.raises(ValueError, match="max_steps"):
+        SubagentRunner(ModelClient(), max_steps=0)
+    with pytest.raises(ValueError, match="at most 4"):
+        SubagentRunner(ModelClient()).run(
+            [SubagentTask(str(index)) for index in range(5)],
+            Path.cwd(),
+        )
+    with pytest.raises(ValueError, match="role"):
+        SubagentRunner(ModelClient()).run(
+            [SubagentTask("review", "manager")],
+            Path.cwd(),
+        )
+    with pytest.raises(ValueError, match="prompt exceeds"):
+        SubagentRunner(ModelClient()).run(
+            [SubagentTask("x" * (16 * 1024 + 1))],
+            Path.cwd(),
+        )
+
+
 def test_worker_commit_excludes_parent_baseline_changes(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("MJJ_HOME", str(tmp_path / "home"))
     root = _repo(tmp_path)

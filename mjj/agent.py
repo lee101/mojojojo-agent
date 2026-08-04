@@ -25,6 +25,7 @@ from .prompt import SYSTEM_PROMPT
 from .project_docs import (
     DEFAULT_MAX_BYTES,
     ProjectInstructions,
+    ScopedProjectDocs,
     compose,
     load as load_project_docs,
 )
@@ -72,7 +73,19 @@ class Agent:
                 include_user=self.include_user_instructions,
             )
             self.instructions = compose(SYSTEM_PROMPT, self.project_instructions)
-        self.ctx = ToolContext(cwd=self.cwd, ledger=self.ledger, approve=self.approve)
+        nested_budget = max(
+            0, self.project_doc_max_bytes - self.project_instructions.bytes_read
+        )
+        self.ctx = ToolContext(
+            cwd=self.cwd,
+            ledger=self.ledger,
+            approve=self.approve,
+            state={
+                "scoped-project-docs": ScopedProjectDocs(
+                    self.cwd, max_bytes=nested_budget
+                )
+            },
+        )
         self.ctx.state["model-client"] = self.client
         if self.goal_store is not None:
             self.bind_goal_store(self.goal_store)

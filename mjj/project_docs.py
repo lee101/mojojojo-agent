@@ -219,7 +219,7 @@ def _user_instruction(
 ) -> Path | None:
     raw_home = environ.get("HOME") or environ.get("USERPROFILE")
     home = Path(raw_home).expanduser() if raw_home else Path.home()
-    mjj_home = Path(environ.get("MJJ_HOME") or "~/.mjj").expanduser()
+    mjj_home = Path(environ.get("MJJ_HOME") or home / ".mjj").expanduser()
     primary = mjj_home / "AGENTS.md"
     if primary.is_file():
         return primary

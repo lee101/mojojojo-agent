@@ -103,24 +103,38 @@ class Registry:
     def dispatch(self, name: str, arguments: str, ctx: ToolContext) -> ToolResult:
         tool = self.tools.get(name)
         if tool is None:
-            return ToolResult.error(f"unknown tool {name!r}")
+            return ToolResult.error(ctx.ledger.clip(name, f"unknown tool {name!r}"))
         try:
             args = json.loads(arguments) if arguments.strip() else {}
         except ValueError as exc:
-            return ToolResult.error(f"arguments were not valid JSON: {exc}")
+            return ToolResult.error(
+                ctx.ledger.clip(name, f"arguments were not valid JSON: {exc}")
+            )
         if not isinstance(args, dict):
-            return ToolResult.error("arguments must be a JSON object")
+            return ToolResult.error(
+                ctx.ledger.clip(name, "arguments must be a JSON object")
+            )
         if getattr(tool, "requires_approval", False) and ctx.approve is not None:
             try:
                 approved = ctx.approve(name, args)
             except Exception as exc:
-                return ToolResult.error(f"approval failed: {exc}")
+                return ToolResult.error(
+                    ctx.ledger.clip(name, f"approval failed: {exc}")
+                )
             if not approved:
                 return ToolResult.error(
                     ctx.ledger.clip(name, f"tool denied by permission mode: {name}"),
                     denied=True,
                 )
-        scoped_docs = ctx.discover_project_docs(args)
+        try:
+            scoped_docs = ctx.discover_project_docs(args)
+        except Exception as exc:
+            return ToolResult.error(
+                ctx.ledger.clip(
+                    name,
+                    f"project instruction discovery failed: {type(exc).__name__}: {exc}",
+                )
+            )
         try:
             result = tool.run(args, ctx)
             if scoped_docs.text:
@@ -130,7 +144,9 @@ class Registry:
                 ]
             return result
         except Exception as exc:  # a tool crash is a turn event, not a stack trace
-            return ToolResult.error(f"{type(exc).__name__}: {exc}")
+            return ToolResult.error(
+                ctx.ledger.clip(name, f"{type(exc).__name__}: {exc}")
+            )
 
     def close(self) -> None:
         """Close unique optional backends without making shutdown fragile."""

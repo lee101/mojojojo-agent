@@ -6,7 +6,7 @@ from pathlib import Path
 
 from mjj.config import MCPServerConfig
 from mjj.ledger import Budget, Ledger
-from mjj.mcp import _bounded_schema, _tool_name
+from mjj.mcp import _bounded_schema, _subprocess_environment, _tool_name
 from mjj.tools import build_registry
 from mjj.tools.base import ToolContext
 
@@ -133,4 +133,78 @@ def test_mcp_names_and_schemas_fit_model_wire_limits():
     assert _bounded_schema(oversized) == {
         "type": "object",
         "additionalProperties": True,
+    }
+
+
+def test_mcp_environment_forwards_only_basics_and_explicit_values(
+    tmp_path: Path, monkeypatch
+):
+    monkeypatch.setenv("UNRELATED_SECRET", "must-not-leak")
+    monkeypatch.setenv("PATH", "/safe/bin")
+    config = MCPServerConfig(
+        name="safe-env",
+        command=(sys.executable, "server.py"),
+        env=(("EXPLICIT_TOKEN", "allowed"),),
+    )
+
+    environment = _subprocess_environment(config)
+
+    assert environment["PATH"] == "/safe/bin"
+    assert environment["EXPLICIT_TOKEN"] == "allowed"
+    assert "UNRELATED_SECRET" not in environment
+
+
+def test_mcp_subprocess_does_not_receive_unlisted_secret(tmp_path, monkeypatch):
+    server = tmp_path / "env_mcp.py"
+    server.write_text(
+        r'''
+import json
+import os
+import sys
+
+for line in sys.stdin:
+    message = json.loads(line)
+    if "id" not in message:
+        continue
+    method = message.get("method")
+    if method == "initialize":
+        result = {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}}}
+    elif method == "tools/list":
+        result = {"tools": [{"name": "environment", "inputSchema": {"type": "object"}}]}
+    elif method == "tools/call":
+        result = {"content": [{"type": "text", "text": json.dumps({
+            "unlisted": os.environ.get("UNRELATED_SECRET"),
+            "explicit": os.environ.get("EXPLICIT_TOKEN"),
+            "has_path": bool(os.environ.get("PATH")),
+        })}]}
+    else:
+        result = {}
+    print(json.dumps({"jsonrpc": "2.0", "id": message["id"], "result": result}), flush=True)
+''',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("UNRELATED_SECRET", "must-not-leak")
+    config = MCPServerConfig(
+        name="safe-env",
+        command=(sys.executable, str(server)),
+        env=(("EXPLICIT_TOKEN", "allowed"),),
+        startup_timeout=2,
+        tool_timeout=2,
+    )
+    registry = build_registry(only=["mcp"], mcp_servers=(config,))
+    try:
+        result = registry.dispatch(
+            "mcp__safe-env__environment",
+            "{}",
+            ToolContext(tmp_path, Ledger()),
+        )
+    finally:
+        registry.close()
+
+    assert result.ok
+    environment = json.loads(result.output)
+    assert environment == {
+        "unlisted": None,
+        "explicit": "allowed",
+        "has_path": True,
     }

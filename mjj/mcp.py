@@ -30,6 +30,27 @@ MAX_STDERR_CHARS = 8 * 1024
 MAX_MESSAGE_CHARS = 8 * 1024 * 1024
 MAX_SERVER_SCHEMA_BYTES = 32 * 1024
 MAX_TOTAL_SCHEMA_BYTES = 64 * 1024
+_BASE_ENV_KEYS = {
+    "APPDATA",
+    "COMSPEC",
+    "HOME",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "LOCALAPPDATA",
+    "LOGNAME",
+    "PATH",
+    "PATHEXT",
+    "SHELL",
+    "SYSTEMROOT",
+    "TEMP",
+    "TERM",
+    "TMP",
+    "TMPDIR",
+    "USER",
+    "USERPROFILE",
+    "WINDIR",
+}
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9_-]+")
 
 
@@ -58,8 +79,7 @@ class MCPClient:
                 )
             return self.request(method, params, timeout=remaining)
 
-        environment = os.environ.copy()
-        environment.update(dict(self.config.env))
+        environment = _subprocess_environment(self.config)
         try:
             self.process = subprocess.Popen(
                 list(self.config.command),
@@ -346,6 +366,17 @@ def discover_mcp_tools(
 def _component(value: str) -> str:
     normalized = _SAFE_NAME.sub("_", value).strip("_")
     return (normalized or "tool")[:64]
+
+
+def _subprocess_environment(config: MCPServerConfig) -> dict[str, str]:
+    """Forward process basics plus only the variables explicitly configured."""
+    environment = {
+        key: value
+        for key, value in os.environ.items()
+        if key.upper() in _BASE_ENV_KEYS
+    }
+    environment.update(dict(config.env))
+    return environment
 
 
 def _tool_name(server: str, remote: str) -> str:

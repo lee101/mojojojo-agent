@@ -91,7 +91,10 @@ available in every mode. The CLI flag is `--permission-mode` and the interactive
 equivalent is `/permissions`.
 Loop and goal modes never change this policy.
 
-Providers are `auto`, `openpaths`, `openrouter`, `openai`, and `custom`.
+Providers are `auto`, `deepseek`, `openpaths`, `openrouter`, `openai`, and `custom`.
+DeepSeek uses its OpenAI-compatible API with `DEEPSEEK_API_KEY` (or
+`MJJ_DEEPSEEK_API_KEY`) and defaults to `deepseek-v4-flash`; select
+`deepseek-v4-pro` for capability-first work.
 `custom` reads `MJJ_BASE_URL`, `MJJ_API_KEY`, `MJJ_API_STYLE` (`responses` or
 `chat_completions`), and an optional `MJJ_DEFAULT_MODEL`.
 

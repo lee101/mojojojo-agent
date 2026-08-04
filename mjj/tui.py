@@ -124,7 +124,7 @@ COMMANDS = {
     "/help": "show commands and keyboard shortcuts",
     "/commands": "alias for /help",
     "/model": "choose a model with arrows or set it by name",
-    "/provider": "show or set auto/openpaths/openrouter/openai/custom",
+    "/provider": "show or set auto/deepseek/openpaths/openrouter/openai/custom",
     "/effort": "show or set reasoning effort",
     "/reasoning": "alias for /effort",
     "/verbosity": "show or set response verbosity",
@@ -179,6 +179,7 @@ MODEL_PRESETS = {
         "gpt-5.3-codex",
         *AUTO_MODEL_IDS,
     ),
+    "deepseek": ("deepseek-v4-flash", "deepseek-v4-pro"),
     "openpaths": (
         "auto",
         "grok-4.5",
@@ -201,8 +202,8 @@ VALUE_CHOICES = {
     "/auto": ("off", "steps", "ideas", "full", "forever"),
     "/loop": ("off", "steps", "ideas", "full", "forever"),
     "/goal": ("pause", "resume", "complete", "blocked", "clear", "set"),
-    "/login": ("chatgpt", "device", "openpaths", "openrouter", "openai", "custom"),
-    "/logout": ("chatgpt", "openpaths", "openrouter", "openai", "custom"),
+    "/login": ("chatgpt", "device", "deepseek", "openpaths", "openrouter", "openai", "custom"),
+    "/logout": ("chatgpt", "deepseek", "openpaths", "openrouter", "openai", "custom"),
 }
 
 
@@ -1186,8 +1187,8 @@ class InteractiveApp:
                 return
             print("ChatGPT sign-in complete" if code == 0 else f"ChatGPT sign-in failed ({code})")
             return
-        if provider not in ("openpaths", "openrouter", "openai", "custom"):
-            print("login provider must be chatgpt, device, openpaths, openrouter, openai or custom")
+        if provider not in ("deepseek", "openpaths", "openrouter", "openai", "custom"):
+            print("login provider must be chatgpt, device, deepseek, openpaths, openrouter, openai or custom")
             return
         try:
             key = secure_prompt(f"{provider} API key: ", is_password=True).strip()

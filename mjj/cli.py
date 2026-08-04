@@ -658,7 +658,7 @@ def main(argv: list[str] | None = None) -> int:
 
     login = sub.add_parser("login", help="authenticate ChatGPT or save an API key")
     login.add_argument(
-        "login_provider", choices=("chatgpt", "openpaths", "openrouter", "openai", "custom"),
+        "login_provider", choices=("chatgpt", "deepseek", "openpaths", "openrouter", "openai", "custom"),
         nargs="?", default="chatgpt",
     )
     login.add_argument(
@@ -668,7 +668,7 @@ def main(argv: list[str] | None = None) -> int:
 
     logout = sub.add_parser("logout", help="remove a saved login")
     logout.add_argument(
-        "login_provider", choices=("chatgpt", "openpaths", "openrouter", "openai", "custom"),
+        "login_provider", choices=("chatgpt", "deepseek", "openpaths", "openrouter", "openai", "custom"),
         nargs="?", default="chatgpt",
     )
     logout.set_defaults(func=cmd_logout)

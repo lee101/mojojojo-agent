@@ -177,6 +177,23 @@ def test_saved_provider_key_is_private_and_resolvable(tmp_path, monkeypatch):
     assert auth.remove_provider_key("openrouter") is False
 
 
+def test_deepseek_uses_compatible_chat_api(tmp_path, monkeypatch):
+    monkeypatch.setenv("MJJ_HOME", str(tmp_path))
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "ds-secret")
+
+    credential = auth.CredentialResolver(provider="deepseek").resolve()
+
+    assert credential == auth.Credential(
+        kind="api_key",
+        token="ds-secret",
+        base_url="https://api.deepseek.com",
+        source="env:DEEPSEEK_API_KEY",
+        provider="deepseek",
+        api_style="chat_completions",
+        default_model="deepseek-v4-flash",
+    )
+
+
 @pytest.mark.parametrize("malformed", ["[]", '{"providers": []}'])
 def test_saving_provider_key_repairs_malformed_auth_document(
     tmp_path, monkeypatch, malformed

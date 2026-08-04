@@ -118,8 +118,12 @@ OPENPATHS_BASE_URL = os.environ.get(
 OPENROUTER_BASE_URL = os.environ.get(
     "MJJ_OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"
 )
+DEEPSEEK_BASE_URL = os.environ.get(
+    "MJJ_DEEPSEEK_BASE_URL", "https://api.deepseek.com"
+)
 
 PROVIDER_DEFAULTS = {
+    "deepseek": (DEEPSEEK_BASE_URL, "chat_completions", "deepseek-v4-flash"),
     "openai": (API_BASE_URL, "responses", "gpt-5.6-sol"),
     "openpaths": (OPENPATHS_BASE_URL, "chat_completions", "openpaths/auto-code"),
     "openrouter": (OPENROUTER_BASE_URL, "chat_completions", "openrouter/auto"),
@@ -438,6 +442,7 @@ def _stored_provider_keys() -> dict[str, str]:
 
 def provider_key(provider: str) -> tuple[str, str]:
     names = {
+        "deepseek": ("MJJ_DEEPSEEK_API_KEY", "DEEPSEEK_API_KEY"),
         "openpaths": ("MJJ_OPENPATHS_API_KEY", "OPENPATHS_API_KEY"),
         "openrouter": ("MJJ_OPENROUTER_API_KEY", "OPENROUTER_API_KEY"),
         "openai": ("MJJ_OPENAI_API_KEY", "OPENAI_API_KEY"),
@@ -470,6 +475,7 @@ def provider_credential(provider: str) -> Credential:
         key, source = provider_key(provider)
     if not key:
         variable = {
+            "deepseek": "DEEPSEEK_API_KEY",
             "openpaths": "OPENPATHS_API_KEY",
             "openrouter": "OPENROUTER_API_KEY",
             "openai": "OPENAI_API_KEY",
@@ -584,7 +590,7 @@ def describe() -> dict:
                 "available": bool(provider_key(name)[0]),
                 "source": provider_key(name)[1] or None,
             }
-            for name in ("openpaths", "openrouter", "openai")
+            for name in ("deepseek", "openpaths", "openrouter", "openai")
         },
         "saved_providers": sorted(stored),
     }

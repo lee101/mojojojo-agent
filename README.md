@@ -94,6 +94,7 @@ change:
 
 ```bash
 mjj exec --provider openpaths --model auto-code "repair the build"
+mjj exec --provider deepseek --model deepseek-v4-flash "repair the build"
 mjj exec --provider openai --model auto-fast "rename this field safely"
 mjj exec --provider openrouter --model auto-openai "review this migration"
 ```

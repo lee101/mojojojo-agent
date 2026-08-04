@@ -18,7 +18,7 @@ except ImportError:  # pragma: no cover - Python 3.10
 
 EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
 VERBOSITIES = ("low", "medium", "high")
-PROVIDERS = ("auto", "openpaths", "openrouter", "openai", "custom")
+PROVIDERS = ("auto", "deepseek", "openpaths", "openrouter", "openai", "custom")
 MAX_MCP_SERVERS = 16
 MAX_PLUGINS = 8
 PLUGIN_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")

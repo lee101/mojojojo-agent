@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 import urllib.error
 import urllib.request
@@ -22,7 +23,7 @@ from dataclasses import dataclass, field
 from typing import Any, Iterator
 
 from .auth import AuthError, Credential, CredentialResolver
-from .model_routes import resolve_model
+from .model_routes import closest_effort, resolve_model, supported_efforts
 from .prompt import for_model as prompt_for_model
 from .prompt_cache import CACHE_MODES, PromptCacheOptimizer
 
@@ -43,6 +44,29 @@ class ModelError(RuntimeError):
         super().__init__(message)
         self.status = status
         self.retryable = retryable
+
+
+def _body_effort(body: dict) -> str:
+    reasoning = body.get("reasoning")
+    if isinstance(reasoning, dict):
+        return str(reasoning.get("effort") or "")
+    return str(body.get("reasoning_effort") or "")
+
+
+def _supported_efforts_from_error(
+    exc: ModelError, body: dict
+) -> tuple[str, ...] | None:
+    """Learn model capabilities from a provider's structured 400 message."""
+    if exc.status != 400 or not _body_effort(body):
+        return None
+    message = str(exc)
+    if "unsupported" not in message.lower() or "effort" not in message.lower():
+        return None
+    tail = message.lower().split("supported values", 1)
+    if len(tail) != 2:
+        return None
+    values = re.findall(r"['\"](none|minimal|low|medium|high|xhigh|max)['\"]", tail[1])
+    return tuple(dict.fromkeys(values)) or None
 
 
 @dataclass
@@ -129,6 +153,13 @@ class ModelClient:
     )
     _compaction_disabled: bool = field(default=False, init=False, repr=False)
     _cache_controls_disabled: bool = field(default=False, init=False, repr=False)
+    _effort_overrides: dict[str, tuple[str, ...]] = field(
+        default_factory=dict, init=False, repr=False
+    )
+    _reported_effort_adjustments: set[tuple[str, str, str]] = field(
+        default_factory=set, init=False, repr=False
+    )
+    last_effective_effort: str = field(default="", init=False)
 
     def __post_init__(self) -> None:
         if self.cache_mode not in CACHE_MODES:
@@ -156,7 +187,7 @@ class ModelClient:
             "stream": True,
             "store": False,
             "reasoning": {
-                "effort": self.effective_effort(),
+                "effort": self.effective_effort(model),
                 "summary": self.summary,
             },
         }
@@ -199,8 +230,13 @@ class ModelClient:
     def effective_model(self, credential: Credential) -> str:
         return resolve_model(self.model, credential.provider, credential.default_model)
 
-    def effective_effort(self) -> str:
-        return self.effort
+    def effective_effort(self, model: str = "") -> str:
+        supported = self._effort_overrides.get(model) or (
+            supported_efforts(model) if model else None
+        )
+        effective = closest_effort(self.effort, supported) if supported else self.effort
+        self.last_effective_effort = effective
+        return effective
 
     def cache_status(self) -> dict:
         status = self.cache_optimizer.status()
@@ -236,9 +272,9 @@ class ModelClient:
             "stream": True,
         }
         if credential.provider == "openrouter":
-            body["reasoning"] = {"effort": self.effective_effort()}
+            body["reasoning"] = {"effort": self.effective_effort(model)}
         else:
-            body["reasoning_effort"] = self.effective_effort()
+            body["reasoning_effort"] = self.effective_effort(model)
         if (
             not self._cache_controls_disabled
             and credential.provider in {"openpaths", "openrouter"}
@@ -294,6 +330,26 @@ class ModelClient:
                     observe_cache=attempt == 0,
                 )
             )
+            requested_effort = self.effort.strip().lower()
+            sent_effort = _body_effort(body)
+            adjustment = (str(body.get("model", "")), requested_effort, sent_effort)
+            if (
+                sent_effort != requested_effort
+                and adjustment not in self._reported_effort_adjustments
+            ):
+                self._reported_effort_adjustments.add(adjustment)
+                yield Event(
+                    "mjj.effort_adjusted",
+                    {
+                        "model": adjustment[0],
+                        "requested": requested_effort,
+                        "effective": sent_effort,
+                        "message": (
+                            f"reasoning {requested_effort} → {sent_effort} "
+                            f"for {adjustment[0]}"
+                        ),
+                    },
+                )
             try:
                 for event in self._stream_once(credential, body):
                     if event.type in {
@@ -305,6 +361,14 @@ class ModelClient:
                     yield event
                 return
             except ModelError as exc:
+                supported = _supported_efforts_from_error(exc, body)
+                if supported:
+                    model = str(body.get("model", ""))
+                    previous = _body_effort(body)
+                    effective = closest_effort(previous, supported)
+                    if effective != previous:
+                        self._effort_overrides[model] = supported
+                        continue
                 attempt += 1
                 if _compaction_unsupported(exc, body):
                     # Older models and the ChatGPT backend may lag the public

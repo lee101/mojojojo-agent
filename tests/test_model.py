@@ -112,6 +112,44 @@ def test_unsupported_cache_controls_degrade_to_compatible_request(monkeypatch):
     assert "prompt_cache_options" not in bodies[1]
 
 
+def test_known_model_uses_closest_supported_reasoning_effort():
+    client = ModelClient(model="gpt-5.6-sol", effort="minimal")
+
+    body = client.request_body([], "brief", [], API_CREDENTIAL)
+
+    assert body["reasoning"]["effort"] == "low"
+    assert client.effort == "minimal"
+    assert client.last_effective_effort == "low"
+
+
+def test_unsupported_effort_is_learned_and_retried_transparently(monkeypatch):
+    client = ModelClient(
+        resolver=Resolver(), model="future-reasoner", effort="minimal", max_retries=0
+    )
+    bodies = []
+
+    def once(_credential, body):
+        bodies.append(body)
+        if len(bodies) == 1:
+            raise ModelError(
+                "HTTP 400: Unsupported value for reasoning.effort. "
+                "Supported values are: 'none', 'low', 'medium', and 'high'.",
+                status=400,
+            )
+        yield Event("response.completed", {"response": {"usage": {}}})
+
+    monkeypatch.setattr(client, "_stream_once", once)
+    events = list(client.stream([], "brief"))
+
+    assert [body["reasoning"]["effort"] for body in bodies] == ["minimal", "low"]
+    assert [event.type for event in events] == [
+        "mjj.effort_adjusted",
+        "response.completed",
+    ]
+    assert events[0].data["requested"] == "minimal"
+    assert events[0].data["effective"] == "low"
+
+
 def test_transient_retry_does_not_refresh_credentials(monkeypatch):
     resolver = Resolver()
     client = ModelClient(resolver=resolver, max_retries=1)

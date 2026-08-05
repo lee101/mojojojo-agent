@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+EFFORT_ORDER = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
+
 
 @dataclass(frozen=True)
 class AutoModel:
@@ -117,3 +119,30 @@ def resolve_model(model: str, provider: str, default: str) -> str:
 def describe_model(model: str) -> str:
     route = auto_model(model)
     return route.purpose if route else ""
+
+
+def closest_effort(requested: str, supported: tuple[str, ...]) -> str:
+    """Keep the caller's intent while selecting a value the model accepts."""
+    requested = requested.strip().lower()
+    allowed = tuple(value for value in supported if value in EFFORT_ORDER)
+    if not allowed or requested in allowed:
+        return requested
+    try:
+        target = EFFORT_ORDER.index(requested)
+    except ValueError:
+        return requested
+    # Prefer more reasoning when two supported values are equally close.
+    return min(
+        allowed,
+        key=lambda value: (
+            abs(EFFORT_ORDER.index(value) - target),
+            -EFFORT_ORDER.index(value),
+        ),
+    )
+
+
+def supported_efforts(model: str) -> tuple[str, ...] | None:
+    leaf = model.strip().lower().rsplit("/", 1)[-1]
+    if leaf == "gpt-5.6" or leaf.startswith("gpt-5.6-"):
+        return ("none", "low", "medium", "high", "xhigh", "max")
+    return None

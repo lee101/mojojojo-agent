@@ -1024,6 +1024,10 @@ class InteractiveApp:
                         "provider": self.provider,
                         "model": self.agent.client.model,
                         "effort": self.agent.client.effort,
+                        "effective_effort": (
+                            self.agent.client.last_effective_effort
+                            or self.agent.client.effort
+                        ),
                         "verbosity": self.agent.client.verbosity,
                         "cache": self.agent.client.cache_status(),
                         "permission_mode": self.permission_policy.mode,

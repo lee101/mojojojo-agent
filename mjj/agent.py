@@ -288,7 +288,7 @@ class Agent:
 
     def _consume(self, event: Event, calls: list[dict]) -> Step | None:
         kind = event.type
-        if kind in {"mjj.retry", "mjj.request_fallback"}:
+        if kind in {"mjj.retry", "mjj.request_fallback", "mjj.effort_adjusted"}:
             return Step(
                 kind="status",
                 text=event.data.get("message", ""),

@@ -472,9 +472,9 @@ def tool_progress(step: Step, *, verbose: bool = False) -> str:
         args = {}
     if step.name == "skill":
         return (
-            f"loading workflow {args['name']}"
+            f"workflow {args['name']}"
             if args.get("name")
-            else "checking available workflows"
+            else "workflows"
         )
     if step.name == "goal":
         return f"updating goal: {args.get('action', 'status')}"
@@ -496,18 +496,17 @@ def tool_progress(step: Step, *, verbose: bool = False) -> str:
         )
     if step.name == "shell":
         if args.get("job"):
-            return f"polling shell job {args['job']}"
+            return f"shell {args['job']}"
         command = args.get("command", "")
         if isinstance(command, list):
             command = " ".join(str(part) for part in command)
-        prefix = "queueing" if args.get("background") else "running"
-        return f"{prefix} {str(command)[:180]}"
+        return str(command)[:180]
     if step.name == "read":
         return f"reading {args.get('path', '')}".rstrip()
     if step.name == "list":
-        return f"listing {args.get('path', '.')}"
+        return f"list {args.get('path') or '.'}"
     if step.name == "search":
-        return f"searching for {args.get('query', '')}".rstrip()
+        return f"search {args.get('query', '')}".rstrip()
     if step.name == "navigate":
         return f"{args.get('action', 'navigating')} {args.get('path', '')}".rstrip()
     if step.name == "check":

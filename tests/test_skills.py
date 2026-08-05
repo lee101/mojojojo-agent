@@ -55,6 +55,28 @@ def test_no_name_returns_compact_catalog(tmp_path: Path):
     ]
 
 
+def test_catalog_is_reused_when_loading_a_workflow(tmp_path: Path, monkeypatch):
+    write_skill(tmp_path / ".agents" / "skills", "one", "First workflow")
+    ctx = ToolContext(tmp_path, Ledger())
+    tool = SkillTool(include_user=False)
+    calls = 0
+
+    from mjj.tools import skills as skills_tool
+
+    original = skills_tool.discover
+
+    def counted(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(skills_tool, "discover", counted)
+
+    assert tool.run({}, ctx).ok
+    assert tool.run({"name": "one"}, ctx).ok
+    assert calls == 1
+
+
 def test_hosted_mode_does_not_discover_user_skills(tmp_path: Path, monkeypatch):
     home = tmp_path / "mjj-home"
     write_skill(home / "skills", "host-secret")

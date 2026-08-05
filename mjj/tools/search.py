@@ -81,8 +81,9 @@ class SearchTool:
         scope = ""
         requested_path = args.get("path")
         if requested_path is not None:
-            if not isinstance(requested_path, str) or not requested_path:
-                return self._error(ctx, "path must be a non-empty string")
+            if not isinstance(requested_path, str):
+                return self._error(ctx, "path must be a string")
+            requested_path = requested_path.strip() or "."
             target = ctx.resolve(requested_path)
             try:
                 scope = target.relative_to(root).as_posix()

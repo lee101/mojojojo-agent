@@ -347,6 +347,18 @@ def test_search_tool_rejects_workspace_escape(tmp_path: Path) -> None:
     assert ledger.tool_calls == 1
 
 
+def test_search_treats_blank_path_as_workspace_root(tmp_path: Path) -> None:
+    _write_fixture(tmp_path)
+
+    result = SearchTool().run(
+        {"query": "user", "path": ""},
+        ToolContext(cwd=tmp_path, ledger=Ledger()),
+    )
+
+    assert result.ok
+    assert "app.py:" in result.output
+
+
 def test_auto_exact_search_skips_vector_scan(tmp_path: Path, monkeypatch) -> None:
     _write_fixture(tmp_path)
     index = build_index(tmp_path)

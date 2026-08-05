@@ -35,11 +35,20 @@ class SkillTool:
             not isinstance(requested, str) or not requested.strip()
         ):
             return self._result(ctx, "name must be a non-empty string", ok=False)
-        skills = discover(
-            ctx.cwd,
-            include_user=self.include_user,
-            extra_paths=self.extra_paths,
+        cache_key = (
+            "skills",
+            str(ctx.cwd.resolve()),
+            self.include_user,
+            tuple(str(path) for path in self.extra_paths),
         )
+        skills = ctx.state.get(cache_key)
+        if not isinstance(skills, list):
+            skills = discover(
+                ctx.cwd,
+                include_user=self.include_user,
+                extra_paths=self.extra_paths,
+            )
+            ctx.state[cache_key] = skills
         if requested is None:
             if not skills:
                 return self._result(ctx, "no skills found")

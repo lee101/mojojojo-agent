@@ -255,8 +255,9 @@ class ListTool:
 
     def run(self, args: dict, ctx: ToolContext) -> ToolResult:
         path_arg = args.get("path", ".")
-        if not isinstance(path_arg, str) or not path_arg:
-            return _result(ctx, self.name, "path must be a non-empty string", ok=False)
+        if not isinstance(path_arg, str):
+            return _result(ctx, self.name, "path must be a string", ok=False)
+        path_arg = path_arg.strip() or "."
         try:
             depth = _integer(args, "depth", 2)
         except ValueError as exc:

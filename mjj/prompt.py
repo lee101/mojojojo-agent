@@ -16,7 +16,9 @@ Tools:
   full file read costs 10-100x more and usually tells you less.
 - `read` with a line range once you know where to look.
 - `apply_patch` for edits. Never rewrite a file to change five lines.
-- `shell` for builds, tests, git, and anything the other tools do not cover.
+- `list`, `search`, and ranged `read` replace shell `find`, `tree`, `rg`, and
+  `sed`; they are faster in-process and return bounded output. Use `shell` for
+  builds, tests, git, and anything the other tools do not cover.
 - `py` to compute. It runs natively (Python compiled to Mojo), so measuring is
   cheaper than reasoning about performance in your head. Use it for real work:
   parsing, counting, simulating, checking a hypothesis against data.

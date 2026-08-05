@@ -792,7 +792,7 @@ class InteractiveApp:
             self.activity.clear()
             print_formatted_text(
                 ANSI(
-                    "\x1b[2m◆ working · commands and output update below · "
+                    "\x1b[2mworking · "
                     "Enter steers · Tab queues · Ctrl+T details\x1b[0m"
                 )
             )
@@ -869,19 +869,21 @@ class InteractiveApp:
                 self.activity.append(step)
             if step.kind == "text":
                 if not text_open:
-                    print_formatted_text(ANSI("\x1b[38;5;45m●\x1b[0m "), end="")
                     text_open = True
                 print(step.text, end="", flush=True)
             elif step.kind == "tool_call":
                 if text_open:
                     print()
                     text_open = False
-                label = _tool_label(step)
-                print_formatted_text(ANSI(f"\x1b[2m  ↳ {label}\x1b[0m"))
+                if step.name != "skill" or self.transcript_expanded:
+                    label = _tool_label(step)
+                    print_formatted_text(ANSI(f"\x1b[2m  {label}\x1b[0m"))
             elif step.kind == "tool_result":
                 if text_open:
                     print()
                     text_open = False
+                if step.name == "skill" and not self.transcript_expanded:
+                    continue
                 if not step.meta.get("ok", True):
                     print_formatted_text(ANSI(f"\x1b[31m    {step.text}\x1b[0m"))
                 elif step.meta.get("terminal_image"):
@@ -952,7 +954,7 @@ class InteractiveApp:
                 detail = (
                     f" · {last_usage.meta.get('seconds', 0):g}s · {last_usage.text}"
                 )
-            print_formatted_text(ANSI(f"\x1b[2m■ ready{detail}\x1b[0m"))
+            print_formatted_text(ANSI(f"\x1b[2mready{detail}\x1b[0m"))
 
     def _show_activity(self) -> None:
         state = "full" if self.transcript_expanded else "compact"
@@ -962,7 +964,7 @@ class InteractiveApp:
             return
         for step in self.activity:
             if step.kind == "tool_call":
-                print(f"  ↳ {_tool_label(step)}")
+                print(f"  {_tool_label(step)}")
             else:
                 body = step.text if self.transcript_expanded else _result_preview(step.text)
                 print(body or "    (no output)")

@@ -464,7 +464,8 @@ def test_tool_results_have_compact_preview_and_ctrl_t_full_transcript(
 
     app._render(iter(steps))
     compact = capsys.readouterr().out
-    assert "running pytest -q" in compact
+    assert "pytest -q" in compact
+    assert "↳" not in compact
     assert "one" in compact and "… 1 more lines" in compact
     assert "four" not in compact
 
@@ -535,7 +536,7 @@ def test_render_finishes_with_visible_ready_time_and_usage(
     )
 
     output = capsys.readouterr().out
-    assert "■ ready · 1.25s · 1 req · in 10 · out 4" in output
+    assert "ready · 1.25s · 1 req · in 10 · out 4" in output
 
 
 def test_plan_and_mcp_commands_show_live_tool_state(tmp_path, monkeypatch, capsys):

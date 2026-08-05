@@ -86,6 +86,16 @@ def test_list_is_sorted_gitignore_aware_and_depth_limited(tmp_path):
     assert "    visible.py" in result.output
 
 
+def test_list_treats_blank_path_as_workspace_root(tmp_path):
+    (tmp_path / "visible.txt").write_text("")
+
+    result = ListTool().run({"path": "", "depth": 1}, context(tmp_path))
+
+    assert result.ok
+    assert result.output.startswith("./")
+    assert "visible.txt" in result.output
+
+
 def test_list_collapses_large_directories_to_counts(tmp_path):
     crowded = tmp_path / "crowded"
     crowded.mkdir()

@@ -38,7 +38,7 @@ from .tools.goal import GoalTool
 class Step:
     """What the caller sees while a turn runs."""
 
-    kind: str  # reasoning | text | tool_call | tool_result | compaction | autonomous | goal | steering | usage | error
+    kind: str  # reasoning | text | tool_call | tool_result | status | compaction | autonomous | goal | steering | usage | error
     text: str = ""
     name: str = ""
     meta: dict = field(default_factory=dict)
@@ -288,6 +288,12 @@ class Agent:
 
     def _consume(self, event: Event, calls: list[dict]) -> Step | None:
         kind = event.type
+        if kind in {"mjj.retry", "mjj.request_fallback"}:
+            return Step(
+                kind="status",
+                text=event.data.get("message", ""),
+                meta=event.data,
+            )
         if kind == "response.reasoning_summary_text.delta":
             return Step(kind="reasoning", text=event.delta)
         if kind == "response.output_text.delta":

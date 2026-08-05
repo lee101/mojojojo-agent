@@ -369,6 +369,33 @@ def test_shift_arrows_change_reasoning_and_toolbar_shows_live_state(
     assert agent.client.model == "auto-code"
 
 
+def test_tool_results_have_compact_preview_and_ctrl_t_full_transcript(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    monkeypatch.setenv("MJJ_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(
+        "mjj.tui.print_formatted_text",
+        lambda value, end="\n": print(str(value), end=end),
+    )
+    app = InteractiveApp(
+        Agent(registry=Registry(), cwd=tmp_path, instructions="test"), _args()
+    )
+    steps = [
+        Step(kind="tool_call", name="shell", text='{"command":["pytest","-q"]}'),
+        Step(kind="tool_result", name="shell", text="one\ntwo\nthree\nfour"),
+    ]
+
+    app._render(iter(steps))
+    compact = capsys.readouterr().out
+    assert "running pytest -q" in compact
+    assert "one" in compact and "… 1 more lines" in compact
+    assert "four" not in compact
+
+    app.transcript_expanded = True
+    app._show_activity()
+    assert "four" in capsys.readouterr().out
+
+
 def test_help_and_hotkey_aliases_report_the_live_surface(
     tmp_path, monkeypatch, capsys
 ) -> None:

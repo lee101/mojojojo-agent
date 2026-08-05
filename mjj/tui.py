@@ -10,6 +10,7 @@ agent usable in minimal installations.
 from __future__ import annotations
 
 import base64
+import asyncio
 import getpass
 import hashlib
 import html
@@ -28,6 +29,7 @@ try:
     from prompt_toolkit.application import Application
     from prompt_toolkit.completion import Completer, Completion
     from prompt_toolkit.formatted_text import ANSI, HTML, FormattedText
+    from prompt_toolkit.filters import Condition
     from prompt_toolkit.history import FileHistory, InMemoryHistory
     from prompt_toolkit.input import DummyInput
     from prompt_toolkit.key_binding import KeyBindings
@@ -35,6 +37,7 @@ try:
     from prompt_toolkit.layout.controls import FormattedTextControl
     from prompt_toolkit.output import DummyOutput
     from prompt_toolkit.shortcuts import prompt as secure_prompt
+    from prompt_toolkit.patch_stdout import patch_stdout
     from prompt_toolkit.styles import Style
 
     RICH_TUI = True
@@ -62,13 +65,16 @@ except ImportError:
         def __init__(self) -> None:
             self.bindings = []
 
-        def add(self, *keys):
+        def add(self, *keys, **_kwargs):
             def register(function):
                 self.bindings.append(type("Binding", (), {"keys": keys})())
                 return function
             return register
 
     KeyBindings = _KeyBindings
+
+    def Condition(function):
+        return function
 
     class FileHistory:
         def __init__(self, filename: str) -> None:
@@ -536,6 +542,8 @@ class InteractiveApp:
     args: object
     attachments: list[ImageAttachment] = field(default_factory=list)
     done: bool = False
+    activity: list[Step] = field(default_factory=list, repr=False)
+    transcript_expanded: bool = False
 
     def __post_init__(self) -> None:
         self.permission_policy = PermissionPolicy(
@@ -621,7 +629,23 @@ class InteractiveApp:
         def newline(event) -> None:
             event.current_buffer.insert_text("\n")
 
+        @bindings.add("c-t")
+        def transcript(event) -> None:
+            self.transcript_expanded = not self.transcript_expanded
+            event.app.run_in_terminal(self._show_activity)
+            event.app.invalidate()
+
+        @bindings.add("tab", filter=Condition(lambda: self._turn_active))
+        def queue_steering(event) -> None:
+            # During a run Tab is an explicit "queue this" action. Enter also
+            # submits, which keeps steering usable in terminals that consume Tab.
+            event.current_buffer.validate_and_handle()
+
         return bindings
+
+    @property
+    def _turn_active(self) -> bool:
+        return bool(getattr(self, "turn_active", False))
 
     def _cycle_effort(self, direction: int) -> None:
         self.agent.client.effort = _cycle_choice(
@@ -668,7 +692,7 @@ class InteractiveApp:
             f" · reasoning <b>{html.escape(self.agent.client.effort)}</b>"
             f" · provider {html.escape(self.provider)}"
             f"{auto}{goal_label}{plan_label}{images} · "
-            f"{html.escape(cwd)}   /model choose · Shift+↑/↓ reasoning "
+            f"{html.escape(cwd)}   /model choose · Shift+↑/↓ reasoning · Ctrl+T details "
         )
 
     def run(self) -> int:
@@ -724,23 +748,60 @@ class InteractiveApp:
     def turn(self, text: str) -> None:
         images = tuple(self.attachments)
         self.attachments.clear()
-        print_formatted_text(ANSI("\x1b[2m◆ working · ctrl-c interrupts\x1b[0m"))
+        self.activity.clear()
+        print_formatted_text(ANSI("\x1b[2m◆ working · commands and output update below · Ctrl+T details\x1b[0m"))
         try:
-            self._render(
-                self.agent.run(
-                    text,
-                    images=images,
-                    auto_next_steps=self.args.auto_next_steps,
-                    auto_next_idea=self.args.auto_next_idea,
-                    max_autonomous_turns=self.args.auto_max_turns,
-                )
+            steps = self.agent.run(
+                text,
+                images=images,
+                auto_next_steps=self.args.auto_next_steps,
+                auto_next_idea=self.args.auto_next_idea,
+                max_autonomous_turns=self.args.auto_max_turns,
             )
+            if RICH_TUI and sys.stdin.isatty() and sys.stdout.isatty():
+                asyncio.run(self._interactive_render(steps))
+            else:
+                self._render(steps)
         except KeyboardInterrupt:
             print_formatted_text(ANSI("\x1b[33m■ interrupted\x1b[0m"))
+
+    async def _interactive_render(self, steps) -> None:
+        """Render in a worker while the foreground prompt accepts steering."""
+        self.turn_active = True
+        worker = asyncio.create_task(asyncio.to_thread(self._render, steps))
+        try:
+            with patch_stdout(raw=True):
+                while not worker.done():
+                    prompt = asyncio.create_task(
+                        self.session.prompt_async(
+                            HTML("<ansicyan>↪</ansicyan> steer <ansigray>(Enter send · Tab queue · Ctrl+T details)</ansigray> ")
+                        )
+                    )
+                    done, _ = await asyncio.wait(
+                        {worker, prompt}, return_when=asyncio.FIRST_COMPLETED
+                    )
+                    if worker in done:
+                        prompt.cancel()
+                        try:
+                            await prompt
+                        except asyncio.CancelledError:
+                            pass
+                        break
+                    guidance = prompt.result().strip()
+                    if guidance:
+                        if self.agent.steer(guidance):
+                            print_formatted_text(ANSI("\x1b[38;5;45m  ↪ steering queued\x1b[0m"))
+                        else:
+                            print_formatted_text(ANSI("\x1b[31m  steering queue full\x1b[0m"))
+            await worker
+        finally:
+            self.turn_active = False
 
     def _render(self, steps) -> None:
         text_open = False
         for step in steps:
+            if step.kind in {"tool_call", "tool_result"}:
+                self.activity.append(step)
             if step.kind == "text":
                 if not text_open:
                     print_formatted_text(ANSI("\x1b[38;5;45m●\x1b[0m "), end="")
@@ -760,12 +821,18 @@ class InteractiveApp:
                     print_formatted_text(ANSI(f"\x1b[31m    {step.text}\x1b[0m"))
                 elif step.meta.get("terminal_image"):
                     self._render_image_event(step)
+                elif self.transcript_expanded:
+                    print(step.text or "(no output)")
                 elif step.name == "update_plan":
                     summary = _plan_summary(step)
                     print_formatted_text(ANSI(f"\x1b[2m    ✓ {summary}\x1b[0m"))
                 elif step.name in {"apply_patch", "checkpoint", "check"}:
                     summary = _compact_result(step.text)
                     print_formatted_text(ANSI(f"\x1b[2m    ✓ {summary}\x1b[0m"))
+                else:
+                    preview = _result_preview(step.text)
+                    if preview:
+                        print_formatted_text(ANSI(f"\x1b[2m{preview}\x1b[0m"))
             elif step.kind == "autonomous":
                 if text_open:
                     print()
@@ -776,6 +843,18 @@ class InteractiveApp:
                         f"{step.meta.get('turn', 0)}\x1b[0m"
                     )
                 )
+            elif step.kind == "status":
+                if text_open:
+                    print()
+                    text_open = False
+                if step.meta.get("attempt"):
+                    detail = (
+                        f"retry {step.meta['attempt']}/{step.meta.get('max_retries', '?')} "
+                        f"in {step.meta.get('delay', 0):g}s · {step.text}"
+                    )
+                else:
+                    detail = step.text
+                print_formatted_text(ANSI(f"\x1b[33m  ↻ {detail}\x1b[0m"))
             elif step.kind == "goal":
                 if text_open:
                     print()
@@ -798,6 +877,19 @@ class InteractiveApp:
                 print_formatted_text(ANSI(f"\x1b[31merror: {step.text}\x1b[0m"))
         if text_open:
             print()
+
+    def _show_activity(self) -> None:
+        state = "full" if self.transcript_expanded else "compact"
+        print_formatted_text(ANSI(f"\x1b[38;5;45m── tool transcript · {state} ──\x1b[0m"))
+        if not self.activity:
+            print("  no tool activity yet")
+            return
+        for step in self.activity:
+            if step.kind == "tool_call":
+                print(f"  ↳ {_tool_label(step)}")
+            else:
+                body = step.text if self.transcript_expanded else _result_preview(step.text)
+                print(body or "    (no output)")
 
     def command(self, line: str) -> None:
         command, _, value = line.partition(" ")
@@ -1136,6 +1228,7 @@ class InteractiveApp:
             "Shift+↑/↓: reasoning higher/lower · F3 or Alt+R: next reasoning\n"
             "empty ←/→: reasoning lower/higher\n"
             "F4 or Alt+V: next verbosity · Alt+Enter: newline · Ctrl+C: interrupt\n"
+            "while working: Enter sends steering · Tab queues it · Ctrl+T toggles full tool output\n"
             "↑/↓: prompts from this directory · Ctrl+R: search prompt history\n"
             "@file: attach context · !command: include output · !!command: local only"
         )
@@ -1432,6 +1525,15 @@ def _tool_label(step: Step) -> str:
 def _compact_result(text: str, limit: int = 160) -> str:
     line = " ".join(text.split())
     return line if len(line) <= limit else line[: limit - 1] + "…"
+
+
+def _result_preview(text: str, lines: int = 3, width: int = 240) -> str:
+    """Small useful preview; the ledger has already bounded the source text."""
+    parts = text.splitlines()
+    shown = [f"    {line[:width]}" for line in parts[:lines]]
+    if len(parts) > lines:
+        shown.append(f"    … {len(parts) - lines} more lines · Ctrl+T for full output")
+    return "\n".join(shown)
 
 
 def _plan_summary(step: Step) -> str:

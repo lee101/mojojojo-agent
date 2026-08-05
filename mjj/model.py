@@ -271,6 +271,7 @@ class ModelClient:
         tools = tools or []
         attempt = 0
         auth_failures = 0
+        emitted_response = False
         while True:
             credential = self.resolver.resolve(
                 force=auth_failures == 1,
@@ -294,7 +295,9 @@ class ModelClient:
                 )
             )
             try:
-                yield from self._stream_once(credential, body)
+                for event in self._stream_once(credential, body):
+                    emitted_response = True
+                    yield event
                 return
             except ModelError as exc:
                 attempt += 1
@@ -310,10 +313,98 @@ class ModelClient:
                 if exc.status == 401:
                     auth_failures += 1
                 if not exc.retryable or attempt > self.max_retries:
+                    if exc.retryable and not emitted_response:
+                        yield Event(
+                            "mjj.request_fallback",
+                            {"message": "stream unavailable; retrying as one request"},
+                        )
+                        yield from self._request_once(credential, body)
+                        return
                     raise
+                yield Event(
+                    "mjj.retry",
+                    {
+                        "attempt": attempt,
+                        "max_retries": self.max_retries,
+                        "message": str(exc),
+                        "delay": 0.5 * (2 ** (attempt - 1)),
+                    },
+                )
                 # 0.5s, 1s, 2s, 4s. Server-side rate limits on the max plan
                 # clear on the order of seconds, not minutes.
                 time.sleep(0.5 * (2 ** (attempt - 1)))
+
+    def _request_once(self, credential: Credential, body: dict) -> Iterator[Event]:
+        """Non-streaming compatibility path used only before any delta arrived."""
+        request_body = dict(body)
+        request_body["stream"] = False
+        endpoint = (
+            "/chat/completions"
+            if credential.api_style == "chat_completions"
+            else "/responses"
+        )
+        req = urllib.request.Request(
+            credential.base_url.rstrip("/") + endpoint,
+            data=json.dumps(request_body).encode(),
+            method="POST",
+        )
+        for key, value in credential.headers.items():
+            req.add_header(key, value)
+        req.add_header("Content-Type", "application/json")
+        req.add_header("Accept", "application/json")
+        try:
+            with urllib.request.urlopen(req, timeout=READ_TIMEOUT) as resp:
+                document = json.load(resp)
+        except urllib.error.HTTPError as exc:
+            detail = exc.read(4096).decode("utf-8", "replace").strip()
+            raise ModelError(
+                f"HTTP {exc.code}: {detail[:600]}", status=exc.code
+            ) from exc
+        except (urllib.error.URLError, TimeoutError, ValueError) as exc:
+            raise ModelError(f"request fallback failed: {exc}") from exc
+        if credential.api_style == "chat_completions":
+            yield from self._normalize_chat_response(document)
+            return
+        for item in document.get("output") or []:
+            yield Event("response.output_item.done", {"item": item})
+        usage = document.get("usage") or {}
+        self.usage.add(usage)
+        self._record_cache_usage(usage)
+        yield Event("response.completed", {"response": {"usage": usage}})
+
+    def _normalize_chat_response(self, document: dict) -> Iterator[Event]:
+        choices = document.get("choices") or []
+        message = (choices[0].get("message") or {}) if choices else {}
+        for index, call in enumerate(message.get("tool_calls") or []):
+            function = call.get("function") or {}
+            yield Event(
+                "response.output_item.done",
+                {
+                    "item": {
+                        "type": "function_call",
+                        "call_id": call.get("id") or f"call_{index}",
+                        "name": function.get("name", ""),
+                        "arguments": function.get("arguments", "{}"),
+                    }
+                },
+            )
+        content = message.get("content")
+        if content and not message.get("tool_calls"):
+            yield Event("response.output_text.delta", {"delta": content})
+            yield Event(
+                "response.output_item.done",
+                {
+                    "item": {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": content}],
+                    }
+                },
+            )
+        usage = _chat_usage(document.get("usage") or {})
+        self.usage.add(usage)
+        self._record_cache_usage(usage)
+        yield Event("response.completed", {"response": {"usage": usage}})
 
     def _stream_once(self, credential: Credential, body: dict) -> Iterator[Event]:
         if credential.api_style == "chat_completions":

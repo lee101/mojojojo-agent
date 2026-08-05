@@ -130,6 +130,45 @@ def test_transient_retry_does_not_refresh_credentials(monkeypatch):
     assert resolver.calls == [(False, False), (False, False)]
 
 
+def test_retry_status_and_request_fallback_when_stream_never_starts(monkeypatch):
+    client = ModelClient(resolver=Resolver(), max_retries=1)
+    calls = []
+
+    def stream_once(_credential, _body):
+        raise ModelError("stream transport timeout", retryable=True)
+        yield  # pragma: no cover
+
+    def request_once(_credential, body):
+        calls.append(body["stream"])
+        yield Event("response.completed", {"response": {"usage": {}}})
+
+    monkeypatch.setattr(client, "_stream_once", stream_once)
+    monkeypatch.setattr(client, "_request_once", request_once)
+    monkeypatch.setattr("mjj.model.time.sleep", lambda _seconds: None)
+
+    events = list(client.stream([], "brief"))
+
+    assert [event.type for event in events] == [
+        "mjj.retry",
+        "mjj.request_fallback",
+        "response.completed",
+    ]
+    assert calls == [True]
+
+
+def test_partial_stream_is_never_replayed_as_a_request(monkeypatch):
+    client = ModelClient(resolver=Resolver(), max_retries=0)
+
+    def stream_once(_credential, _body):
+        yield Event("response.output_text.delta", {"delta": "started"})
+        raise ModelError("connection lost", retryable=True)
+
+    monkeypatch.setattr(client, "_stream_once", stream_once)
+
+    with pytest.raises(ModelError, match="connection lost"):
+        list(client.stream([], "brief"))
+
+
 def test_repeated_401_refreshes_then_falls_back(monkeypatch):
     resolver = Resolver()
     client = ModelClient(resolver=resolver, max_retries=3)

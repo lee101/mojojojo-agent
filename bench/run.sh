@@ -9,6 +9,7 @@ if command -v flock >/dev/null 2>&1; then
 fi
 
 cd "$root"
+uv run python bench/startup_bench.py
 uv run python bench/search_bench.py
 uv run python bench/retrieval_bench.py
 uv run python bench/allocation_bench.py

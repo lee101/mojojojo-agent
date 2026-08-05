@@ -451,8 +451,17 @@ class WorkspaceCompleter(Completer):
         *,
         provider: str | Callable[[], str] = "auto",
     ):
-        self.files = discover_project_files(cwd)
+        self.cwd = Path(cwd)
+        self._files: tuple[str, ...] | None = None
         self._provider = provider
+
+    @property
+    def files(self) -> tuple[str, ...]:
+        # Normal typing and slash completion do not need a repository walk.
+        # Defer it until the first @file or image completion request.
+        if self._files is None:
+            self._files = discover_project_files(self.cwd)
+        return self._files
 
     @property
     def provider(self) -> str:
@@ -564,6 +573,8 @@ class InteractiveApp:
         )
         self.agent.approve = self.permission_policy
         self.agent.ctx.approve = self.permission_policy
+        goal = self.agent.current_goal()
+        self._goal_status = goal.status if goal is not None else ""
         self.bindings = self._bindings()
         history, self.history_warning = _history_for_workspace(self.agent.cwd)
         prompt_io = {}
@@ -689,8 +700,7 @@ class InteractiveApp:
         limit = self.args.auto_max_turns
         loop_value = f"{autonomy}:{limit}" if limit else autonomy
         auto = f" · loop {loop_value}" if autonomy != "off" else ""
-        goal = self.agent.current_goal()
-        goal_label = f" · goal {goal.status}" if goal is not None else ""
+        goal_label = f" · goal {self._goal_status}" if self._goal_status else ""
         plan_state = self.agent.ctx.state.get("plan")
         plan_items = plan_state.get("plan", []) if isinstance(plan_state, dict) else []
         completed = sum(
@@ -917,6 +927,7 @@ class InteractiveApp:
                     print()
                     text_open = False
                 status = step.meta.get("status", "active")
+                self._goal_status = str(status)
                 turn = step.meta.get("turn", 0)
                 suffix = f" · continuation {turn}" if turn else ""
                 print_formatted_text(
@@ -1542,11 +1553,13 @@ class InteractiveApp:
             if action == "pause":
                 goal = store.transition("paused", message)
                 self.agent.bind_goal_store(store)
+                self._goal_status = goal.status
                 print(goal.summary())
                 return
             if action == "resume":
                 goal = store.transition("active", message)
                 self.agent.bind_goal_store(store)
+                self._goal_status = goal.status
                 print(goal.summary())
                 self.turn("Resume the active goal from its latest verified checkpoint.")
                 return
@@ -1556,11 +1569,13 @@ class InteractiveApp:
                     return
                 goal = store.transition(action, message)
                 self.agent.bind_goal_store(store)
+                self._goal_status = goal.status
                 print(goal.summary())
                 return
             if action == "clear":
                 removed = store.clear()
                 self.agent.bind_goal_store(store)
+                self._goal_status = ""
                 print("goal cleared" if removed else "no goal for this workspace")
                 return
             objective = message if action == "set" else value
@@ -1575,6 +1590,7 @@ class InteractiveApp:
             print(f"goal: {exc}")
             return
         self.agent.bind_goal_store(store)
+        self._goal_status = goal.status
         print(goal.summary())
         self.turn("Begin the active goal now and establish its first checkpoint.")
 

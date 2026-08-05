@@ -13,6 +13,23 @@ uv tool install 'mojojojo-agent[full]'  # rich TUI and normalized vision
 The standalone release executable includes `full` so its user-facing keyboard
 and image behavior stays consistent on Windows, Linux, and macOS. Imports remain
 lazy: headless commands do not initialize the composer or pixel decoder.
+Native-library probing is also lazy, and file completion does not walk the
+workspace until the user types an `@file` or image completion.
+
+## Startup measurement
+
+Run `python bench/startup_bench.py` to launch fresh child processes under a
+temporary MJJ home. On the 2026-08-05 audit host, seven measured runs produced:
+
+| case | median | p95 |
+| --- | ---: | ---: |
+| `--version` | 65.020 ms | 115.214 ms |
+| `--help` | 164.927 ms | 165.346 ms |
+| dependency-free UI start and `/exit` | 315.486 ms | 315.984 ms |
+
+Interactive terminals print a bootstrap status before project context and the
+rich composer load. These are complete-process latency measurements, not model
+response-time claims.
 
 ## Dependency audit
 

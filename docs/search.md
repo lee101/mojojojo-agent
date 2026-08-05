@@ -157,10 +157,10 @@ Writes go to a sibling temporary file, are flushed, and replace the old index
 atomically. Corrupt, truncated, wrong-root, wrong-version, and wrong-dimension
 files are rebuilt.
 
-`mjj/search/vectors.py` looks for the library named by
-`MJJ_MOJO_EMBED_LIB`, the adjacent checkout
-`../mojo-embed/build/libmojo_embed.so`, a packaged copy, then the system
-library path. Its `embed_search_i8` C ABI scans the vector and factor regions
+`mjj/search/vectors.py` loads the native backend only when a vector matrix is
+opened. It looks for the library named by `MJJ_MOJO_EMBED_LIB`, MJJ's own
+`build/libmjj_search.so`, the adjacent `../mojo-embed` checkout, a packaged
+copy, then the system library path. Its C ABI scans the vector and factor regions
 directly from the mmap with no NumPy or row copies. If the library is missing
 or its buffers cannot be bound, the same exact dot-product ranking runs using
 stdlib Python arrays. Search continues; only latency changes.
@@ -187,33 +187,31 @@ source-context reads, and formatting. The `rg` comparison is
 the ranked evidence with reading its complete top-result file. Returned tokens
 use the harness's dependency-free four-characters-per-token estimate.
 
-Measured on 2026-08-04 with CPython 3.12.3, Linux 6.8, an Intel Xeon E5-2697
-v4, and the dependency-free Python vector fallback:
+Measured on 2026-08-05 on the audit host with the repository-local Mojo
+`mjj_search_i8_mmap` backend:
 
 ```text
 Corpus: `/nvme0n1-disk/code/mojojojo`
-Index: 270 files, 3377 chunks, python backend; query time is median of 7 runs.
+Index: 271 files, 3383 chunks, mojo-embed backend; query time is median of 5 runs.
 
 | Case | MJJ time | rg time | MJJ tokens | rg tokens |
 |---|---:|---:|---:|---:|
-| Fresh index build | 4756.03 ms | — | — | — |
-| Unchanged incremental index | 22.09 ms | — | — | — |
-| `errInsufficientCredits` | 9.97 ms | 9.35 ms | 56 | 64 |
-| `workerBootstrap` | 9.91 ms | 9.37 ms | 39 | 42 |
-| `mojojail` | 124.86 ms | 10.11 ms | 132 | 850 |
-| `billed_ms` | 112.70 ms | 10.58 ms | 131 | 498 |
+| Fresh index build | 3556.69 ms | — | — | — |
+| Unchanged incremental index | 20.67 ms | — | — | — |
+| `errInsufficientCredits` | 11.08 ms | 10.42 ms | 56 | 64 |
+| `workerBootstrap` | 10.83 ms | 10.91 ms | 39 | 42 |
+| `mojojail` | 10.56 ms | 9.31 ms | 132 | 850 |
+| `billed_ms` | 10.85 ms | 9.75 ms | 131 | 498 |
 
 | Naming-variant case | MJJ time | MJJ tokens | rg tokens | Top result | Top-file read tokens |
 |---|---:|---:|---:|---|---:|
-| `worker_bootstrap` | 127.11 ms | 243 | 0 | `vector_scaling.go` | 1685 |
+| `worker_bootstrap` | 12.58 ms | 243 | 0 | `vector_scaling.go` | 1791 |
 ```
 
-Decisive literal queries now skip BM25/vector work and land within about 1 ms
-of raw `rg` on this run. Broad queries retain the hybrid ranking and withhold
-718 and 367 estimated tokens respectively, but are roughly 12× slower than
-`rg` on the Python vector fallback. The naming variant has no literal `rg` hit,
-still ranks `vector_scaling.go` first, and returns 1442 fewer estimated tokens
-than reading that file.
+Decisive literal queries skip BM25/vector work. Broad queries retain the hybrid
+ranking while withholding 718 and 367 estimated tokens in the two broad rows.
+The naming variant has no literal `rg` hit, still ranks `vector_scaling.go`
+first, and returns 1548 fewer estimated tokens than reading that file.
 
 `bench/retrieval_bench.py` adds an adversarial 120-match corpus, ignored and
 2 MiB files, a binary decoy, cursored pages, and schema accounting. On the same

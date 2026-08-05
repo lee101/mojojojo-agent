@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from types import SimpleNamespace
 
 from PIL import Image
@@ -397,6 +398,22 @@ def test_auto_model_picker_prioritizes_stable_task_aliases() -> None:
         "auto-cheap",
         "auto-best",
     )
+
+
+def test_workspace_files_are_discovered_only_when_file_completion_is_used(
+    tmp_path, monkeypatch
+) -> None:
+    calls = []
+    monkeypatch.setattr(
+        "mjj.tui.discover_project_files",
+        lambda cwd: calls.append(Path(cwd)) or ("app.py",),
+    )
+    completer = WorkspaceCompleter(tmp_path)
+
+    list(completer.get_completions(Document("/mo"), None))
+    assert calls == []
+    list(completer.get_completions(Document("@app"), None))
+    assert calls == [tmp_path]
 
 
 def test_shift_arrows_change_reasoning_and_toolbar_shows_live_state(

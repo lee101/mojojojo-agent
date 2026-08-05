@@ -14,39 +14,17 @@ import threading
 import time
 from pathlib import Path
 
-from . import auth
-from .agent import Agent, render_exec
-from .config import (
-    ConfigError,
-    EFFORTS,
-    PERMISSION_MODES,
-    PROVIDERS,
-    VERBOSITIES,
-    load as load_config,
-)
-from .goals import GoalStore
-from .ledger import Budget, Ledger
-from .model import ModelClient, probe
-from .media import ImageInputError, prepare_image
-from .permissions import PermissionPolicy
-from .plugins import plugin_inventory
-from .search.cli import main as search_main
-from .search.index import build_index
-from .session import (
-    Session,
-    export_session,
-    fork_session,
-    import_session,
-    list_sessions,
-    resume,
-)
-from .skills import discover
-from .tools import build_registry
 from .version import __version__
-from .visualize import KINDS, PALETTES, VisualizerError, generate_visualizer
 
 
 LOOP_MODES = ("off", "steps", "ideas", "full", "forever")
+
+
+def plugin_inventory():
+    """Lazy compatibility seam retained for CLI tests and embedders."""
+    from .plugins import plugin_inventory as inventory
+
+    return inventory()
 
 
 def _apply_loop_mode(args) -> None:
@@ -60,7 +38,15 @@ def _apply_loop_mode(args) -> None:
     args.auto_next_idea = mode in ("ideas", "full")
 
 
-def _agent(args) -> Agent:
+def _agent(args):
+    from . import auth
+    from .agent import Agent
+    from .goals import GoalStore
+    from .ledger import Budget, Ledger
+    from .model import ModelClient
+    from .permissions import PermissionPolicy
+    from .session import Session, fork_session, resume
+    from .tools import build_registry
     items: list[dict] = []
     cwd = Path(args.cwd).resolve()
     if getattr(args, "fork", None) is not None:
@@ -118,6 +104,9 @@ def _agent(args) -> Agent:
 
 
 def cmd_exec(args) -> int:
+    from .agent import render_exec
+    from .media import ImageInputError, prepare_image
+    from .permissions import PermissionPolicy
     try:
         agent = _agent(args)
     except (OSError, ValueError) as exc:
@@ -239,17 +228,25 @@ def _exec_prompt(positional: str | None, max_stdin_chars: int = 1_048_576) -> st
 
 
 def cmd_repl(args) -> int:
-    from .tui import run
-
+    if sys.stdout.isatty():
+        print(
+            f"\x1b[2m◆ starting mjj · {args.provider}/{args.model}"
+            " · loading project context…\x1b[0m",
+            flush=True,
+        )
     try:
         agent = _agent(args)
     except (OSError, ValueError) as exc:
         print(f"mjj: {exc}", file=sys.stderr)
         return 2
+    from .tui import run
+
     return run(agent, args)
 
 
 def cmd_auth(args) -> int:
+    from . import auth
+    from .model import probe
     status = auth.describe()
     if args.probe:
         status["probe"] = probe(args.model, provider=args.provider)
@@ -258,6 +255,7 @@ def cmd_auth(args) -> int:
 
 
 def cmd_login(args) -> int:
+    from . import auth
     if args.login_provider == "chatgpt":
         try:
             return auth.login_chatgpt(device=args.device)
@@ -278,6 +276,7 @@ def cmd_login(args) -> int:
 
 
 def cmd_logout(args) -> int:
+    from . import auth
     if args.login_provider == "chatgpt":
         try:
             return auth.logout_chatgpt()
@@ -290,6 +289,7 @@ def cmd_logout(args) -> int:
 
 
 def cmd_tools(args) -> int:
+    from .tools import build_registry
     registry = build_registry(
         disabled=args.disabled_tools,
         skill_paths=args.skill_paths,
@@ -336,6 +336,7 @@ def cmd_plugins(args) -> int:
 
 
 def cmd_search(args) -> int:
+    from .search.cli import main as search_main
     argv = [
         args.query,
         args.path,
@@ -355,6 +356,7 @@ def cmd_search(args) -> int:
 
 
 def cmd_index(args) -> int:
+    from .search.index import build_index
     root = Path(args.root or args.cwd).resolve()
     try:
         index = build_index(root, force=args.force)
@@ -371,6 +373,7 @@ def cmd_index(args) -> int:
 
 
 def cmd_skills(args) -> int:
+    from .skills import discover
     skills = discover(Path(args.cwd), extra_paths=args.skill_paths)
     if args.json:
         print(
@@ -411,6 +414,7 @@ def cmd_config(args) -> int:
 
 
 def cmd_sessions(args) -> int:
+    from .session import list_sessions
     sessions = list_sessions(limit=args.limit)
     if args.json:
         print(
@@ -436,6 +440,7 @@ def cmd_sessions(args) -> int:
 
 
 def cmd_goal(args) -> int:
+    from .goals import GoalStore
     store = GoalStore(args.cwd)
     words = list(args.goal_args)
     if not words:
@@ -475,6 +480,7 @@ def cmd_goal(args) -> int:
 
 
 def cmd_export(args) -> int:
+    from .session import export_session
     try:
         path = export_session(args.session, args.output)
     except OSError as exc:
@@ -485,6 +491,7 @@ def cmd_export(args) -> int:
 
 
 def cmd_import(args) -> int:
+    from .session import import_session
     try:
         session, items = import_session(args.input)
     except (OSError, ValueError) as exc:
@@ -496,6 +503,7 @@ def cmd_import(args) -> int:
 
 
 def cmd_visualize(args) -> int:
+    from .visualize import VisualizerError, generate_visualizer
     try:
         result = generate_visualizer(
             args.output,
@@ -516,6 +524,20 @@ def cmd_visualize(args) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
+    if argv == ["--version"]:
+        print(f"mjj {__version__}")
+        raise SystemExit(0)
+
+    from .config import (
+        ConfigError,
+        EFFORTS,
+        PERMISSION_MODES,
+        PROVIDERS,
+        VERBOSITIES,
+        load as load_config,
+    )
+    from .visualize import KINDS, PALETTES
+
     bootstrap = argparse.ArgumentParser(add_help=False)
     bootstrap.add_argument("-C", "--cd", "--cwd", dest="cwd", default=".")
     bootstrap.add_argument("--config")

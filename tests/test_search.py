@@ -16,6 +16,7 @@ from mjj.search.lexical import LexicalIndex, term_frequencies, tokenize
 from mjj.search.vectors import (
     Int8Vectors,
     _hash64,
+    _library_candidates,
     encode,
     encode_tokens,
     quantize,
@@ -168,6 +169,18 @@ def test_python_vector_scan_finds_naming_variant() -> None:
     hits = matrix.search_text("refreshAccessToken", 2)
     assert hits[0][0] == 0
     assert matrix.backend_name == "python"
+
+
+def test_repository_mojo_search_build_is_preferred_to_optional_peer() -> None:
+    candidates = _library_candidates()
+    local = next(
+        i
+        for i, path in enumerate(candidates)
+        if "/build/libmjj_search.so" in path
+    )
+    peer = next(i for i, path in enumerate(candidates) if "/mojo-embed/build/" in path)
+
+    assert local < peer
 
 
 def _write_fixture(root: Path) -> None:

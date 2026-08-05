@@ -122,17 +122,22 @@ def _library_candidates() -> list[str]:
         candidates.append(configured)
     repository = Path(__file__).resolve().parents[2]
     development_build = repository.parent / "mojo-embed" / "build"
+    local_build = repository / "build"
     package = Path(__file__).parent
-    for library_name in (
+    library_names = (
+        "mjj_search.dll",
+        "libmjj_search.so",
+        "libmjj_search.dylib",
         "mojo_embed.dll",
         "libmojo_embed.so",
         "libmojo_embed.dylib",
-    ):
-        candidates.append(str(development_build / library_name))
-        candidates.append(str(package / library_name))
-    discovered = ctypes.util.find_library("mojo_embed")
-    if discovered:
-        candidates.append(discovered)
+    )
+    for directory in (local_build, development_build, package):
+        candidates.extend(str(directory / name) for name in library_names)
+    for name in ("mjj_search", "mojo_embed"):
+        discovered = ctypes.util.find_library(name)
+        if discovered:
+            candidates.append(discovered)
     return candidates
 
 
@@ -176,7 +181,18 @@ class MojoBackend:
         return self.library is not None
 
 
-BACKEND = MojoBackend()
+_BACKEND: MojoBackend | None = None
+_BACKEND_LOCK = threading.Lock()
+
+
+def _default_backend() -> MojoBackend:
+    """Load the optional shared library only when a vector matrix needs it."""
+    global _BACKEND
+    if _BACKEND is None:
+        with _BACKEND_LOCK:
+            if _BACKEND is None:
+                _BACKEND = MojoBackend()
+    return _BACKEND
 
 
 def _address(buffer, c_type) -> tuple[int, object]:
@@ -209,7 +225,7 @@ class Int8Vectors:
         self.count = data_size // dim
         if len(self.factors) != self.count:
             raise ValueError("one vector factor is required per row")
-        self.backend = BACKEND if backend is None else backend
+        self.backend = _default_backend() if backend is None else backend
         self._ids = array("q", range(self.count))
         self._scratch = array("f", [0.0]) * self.count
         self._lock = threading.Lock()

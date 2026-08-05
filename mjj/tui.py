@@ -544,6 +544,8 @@ class InteractiveApp:
     done: bool = False
     activity: list[Step] = field(default_factory=list, repr=False)
     transcript_expanded: bool = False
+    pending_prompts: list[str] = field(default_factory=list, repr=False)
+    queue_submission: bool = field(default=False, repr=False)
 
     def __post_init__(self) -> None:
         self.permission_policy = PermissionPolicy(
@@ -636,9 +638,10 @@ class InteractiveApp:
             event.app.invalidate()
 
         @bindings.add("tab", filter=Condition(lambda: self._turn_active))
-        def queue_steering(event) -> None:
-            # During a run Tab is an explicit "queue this" action. Enter also
-            # submits, which keeps steering usable in terminals that consume Tab.
+        def queue_follow_up(event) -> None:
+            # Enter steers the active run. Tab intentionally schedules a fresh
+            # turn, so a new request cannot accidentally rewrite current work.
+            self.queue_submission = True
             event.current_buffer.validate_and_handle()
 
         return bindings
@@ -748,22 +751,33 @@ class InteractiveApp:
     def turn(self, text: str) -> None:
         images = tuple(self.attachments)
         self.attachments.clear()
-        self.activity.clear()
-        print_formatted_text(ANSI("\x1b[2m◆ working · commands and output update below · Ctrl+T details\x1b[0m"))
-        try:
-            steps = self.agent.run(
-                text,
-                images=images,
-                auto_next_steps=self.args.auto_next_steps,
-                auto_next_idea=self.args.auto_next_idea,
-                max_autonomous_turns=self.args.auto_max_turns,
+        prompts = [(text, images)]
+        while prompts:
+            prompt, prompt_images = prompts.pop(0)
+            self.activity.clear()
+            print_formatted_text(
+                ANSI(
+                    "\x1b[2m◆ working · commands and output update below · "
+                    "Enter steers · Tab queues · Ctrl+T details\x1b[0m"
+                )
             )
-            if RICH_TUI and sys.stdin.isatty() and sys.stdout.isatty():
-                asyncio.run(self._interactive_render(steps))
-            else:
-                self._render(steps)
-        except KeyboardInterrupt:
-            print_formatted_text(ANSI("\x1b[33m■ interrupted\x1b[0m"))
+            try:
+                steps = self.agent.run(
+                    prompt,
+                    images=prompt_images,
+                    auto_next_steps=self.args.auto_next_steps,
+                    auto_next_idea=self.args.auto_next_idea,
+                    max_autonomous_turns=self.args.auto_max_turns,
+                )
+                if RICH_TUI and sys.stdin.isatty() and sys.stdout.isatty():
+                    asyncio.run(self._interactive_render(steps))
+                else:
+                    self._render(steps)
+            except KeyboardInterrupt:
+                print_formatted_text(ANSI("\x1b[33m■ interrupted\x1b[0m"))
+            if self.pending_prompts:
+                prompts.extend((queued, ()) for queued in self.pending_prompts)
+                self.pending_prompts.clear()
 
     async def _interactive_render(self, steps) -> None:
         """Render in a worker while the foreground prompt accepts steering."""
@@ -772,6 +786,7 @@ class InteractiveApp:
         try:
             with patch_stdout(raw=True):
                 while not worker.done():
+                    self.queue_submission = False
                     prompt = asyncio.create_task(
                         self.session.prompt_async(
                             HTML("<ansicyan>↪</ansicyan> steer <ansigray>(Enter send · Tab queue · Ctrl+T details)</ansigray> ")
@@ -789,13 +804,26 @@ class InteractiveApp:
                         break
                     guidance = prompt.result().strip()
                     if guidance:
-                        if self.agent.steer(guidance):
-                            print_formatted_text(ANSI("\x1b[38;5;45m  ↪ steering queued\x1b[0m"))
-                        else:
-                            print_formatted_text(ANSI("\x1b[31m  steering queue full\x1b[0m"))
+                        self._accept_live_input(guidance, queued=self.queue_submission)
             await worker
         finally:
             self.turn_active = False
+
+    def _accept_live_input(self, text: str, *, queued: bool) -> bool:
+        if queued:
+            self.pending_prompts.append(text)
+            print_formatted_text(
+                ANSI(
+                    f"\x1b[38;5;45m  ⇥ follow-up queued "
+                    f"({len(self.pending_prompts)})\x1b[0m"
+                )
+            )
+            return True
+        accepted = self.agent.steer(text)
+        message = "  ↪ steering sent" if accepted else "  steering queue full"
+        color = "\x1b[38;5;45m" if accepted else "\x1b[31m"
+        print_formatted_text(ANSI(f"{color}{message}\x1b[0m"))
+        return accepted
 
     def _render(self, steps) -> None:
         text_open = False

@@ -271,7 +271,7 @@ class ModelClient:
         tools = tools or []
         attempt = 0
         auth_failures = 0
-        emitted_response = False
+        emitted_content = False
         while True:
             credential = self.resolver.resolve(
                 force=auth_failures == 1,
@@ -296,7 +296,12 @@ class ModelClient:
             )
             try:
                 for event in self._stream_once(credential, body):
-                    emitted_response = True
+                    if event.type in {
+                        "response.output_text.delta",
+                        "response.reasoning_summary_text.delta",
+                        "response.output_item.done",
+                    }:
+                        emitted_content = True
                     yield event
                 return
             except ModelError as exc:
@@ -312,8 +317,13 @@ class ModelClient:
                     continue
                 if exc.status == 401:
                     auth_failures += 1
+                # Once semantic output is visible, replaying the request can
+                # duplicate text or execute a tool twice. Surface the broken
+                # stream and let the next user turn recover explicitly.
+                if emitted_content:
+                    raise
                 if not exc.retryable or attempt > self.max_retries:
-                    if exc.retryable and not emitted_response:
+                    if exc.retryable:
                         yield Event(
                             "mjj.request_fallback",
                             {"message": "stream unavailable; retrying as one request"},

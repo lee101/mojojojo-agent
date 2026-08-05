@@ -157,9 +157,12 @@ def test_retry_status_and_request_fallback_when_stream_never_starts(monkeypatch)
 
 
 def test_partial_stream_is_never_replayed_as_a_request(monkeypatch):
-    client = ModelClient(resolver=Resolver(), max_retries=0)
+    client = ModelClient(resolver=Resolver(), max_retries=4)
+    calls = 0
 
     def stream_once(_credential, _body):
+        nonlocal calls
+        calls += 1
         yield Event("response.output_text.delta", {"delta": "started"})
         raise ModelError("connection lost", retryable=True)
 
@@ -167,6 +170,7 @@ def test_partial_stream_is_never_replayed_as_a_request(monkeypatch):
 
     with pytest.raises(ModelError, match="connection lost"):
         list(client.stream([], "brief"))
+    assert calls == 1
 
 
 def test_repeated_401_refreshes_then_falls_back(monkeypatch):

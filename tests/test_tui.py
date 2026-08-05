@@ -396,6 +396,26 @@ def test_tool_results_have_compact_preview_and_ctrl_t_full_transcript(
     assert "four" in capsys.readouterr().out
 
 
+def test_live_enter_steers_while_tab_queues_a_follow_up(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    monkeypatch.setenv("MJJ_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(
+        "mjj.tui.print_formatted_text",
+        lambda value, end="\n": print(str(value), end=end),
+    )
+    agent = Agent(registry=Registry(), cwd=tmp_path, instructions="test")
+    app = InteractiveApp(agent, _args())
+
+    assert app._accept_live_input("fix this first", queued=False)
+    assert agent.steering.get_nowait() == "fix this first"
+    assert app._accept_live_input("then document it", queued=True)
+    assert app.pending_prompts == ["then document it"]
+    output = capsys.readouterr().out
+    assert "steering sent" in output
+    assert "follow-up queued (1)" in output
+
+
 def test_help_and_hotkey_aliases_report_the_live_surface(
     tmp_path, monkeypatch, capsys
 ) -> None:

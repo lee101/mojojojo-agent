@@ -129,6 +129,7 @@ from .tools import build_registry
 COMMANDS = {
     "/help": "show commands and keyboard shortcuts",
     "/commands": "alias for /help",
+    "/tips": "show the short interactive workflow guide",
     "/model": "choose a model with arrows or set it by name",
     "/provider": "show or set auto/deepseek/openpaths/openrouter/openai/custom",
     "/effort": "show or set reasoning effort",
@@ -698,13 +699,17 @@ class InteractiveApp:
             if isinstance(item, dict)
         )
         plan_label = f" · plan {completed}/{len(plan_items)}" if plan_items else ""
+        queued = (
+            f" · queued {len(self.pending_prompts)}" if self.pending_prompts else ""
+        )
         return HTML(
             " <b>mjj</b> · model <b>"
             f"{html.escape(self.agent.client.model)}</b>"
             f" · reasoning <b>{html.escape(self.agent.client.effort)}</b>"
             f" · provider {html.escape(self.provider)}"
-            f"{auto}{goal_label}{plan_label}{images} · "
-            f"{html.escape(cwd)}   /model choose · Shift+↑/↓ reasoning · Ctrl+T details "
+            f"{auto}{goal_label}{plan_label}{images}{queued} · "
+            f"{html.escape(cwd)}   Enter send · / commands · "
+            "Shift+↑/↓ reasoning · Ctrl+T details "
         )
 
     def run(self) -> int:
@@ -740,8 +745,10 @@ class InteractiveApp:
                 f"\x1b[38;5;45m│\x1b[0m  model {self.agent.client.model}"
                 f"  ·  reasoning {self.agent.client.effort}"
                 f"  ·  provider {self.provider}\n"
-                f"\x1b[38;5;45m╰─\x1b[0m  /model picker · / commands · "
-                f"{input_hint}"
+                f"\x1b[38;5;45m│\x1b[0m  Enter sends · / opens commands · "
+                f"{input_hint}\n"
+                f"\x1b[38;5;45m╰─\x1b[0m  while working: Enter steers now · "
+                "Tab queues next · Ctrl+T shows full tool output · /tips"
             )
         )
         if not RICH_TUI:
@@ -761,8 +768,17 @@ class InteractiveApp:
         images = tuple(self.attachments)
         self.attachments.clear()
         prompts = [(text, images)]
+        first_prompt = True
         while prompts:
             prompt, prompt_images = prompts.pop(0)
+            if not first_prompt:
+                print_formatted_text(
+                    ANSI(
+                        f"\x1b[38;5;45m⇥ starting queued follow-up"
+                        f" · {len(prompts)} still queued\x1b[0m"
+                    )
+                )
+            first_prompt = False
             self.activity.clear()
             print_formatted_text(
                 ANSI(
@@ -836,6 +852,8 @@ class InteractiveApp:
 
     def _render(self, steps) -> None:
         text_open = False
+        last_usage: Step | None = None
+        failed = False
         for step in steps:
             if step.kind in {"tool_call", "tool_result"}:
                 self.activity.append(step)
@@ -892,6 +910,8 @@ class InteractiveApp:
                 else:
                     detail = step.text
                 print_formatted_text(ANSI(f"\x1b[33m  ↻ {detail}\x1b[0m"))
+            elif step.kind == "usage":
+                last_usage = step
             elif step.kind == "goal":
                 if text_open:
                     print()
@@ -908,12 +928,20 @@ class InteractiveApp:
                     text_open = False
                 print_formatted_text(ANSI("\x1b[38;5;45m  ↪ steering applied\x1b[0m"))
             elif step.kind == "error":
+                failed = True
                 if text_open:
                     print()
                     text_open = False
                 print_formatted_text(ANSI(f"\x1b[31merror: {step.text}\x1b[0m"))
         if text_open:
             print()
+        if not failed:
+            detail = ""
+            if last_usage is not None:
+                detail = (
+                    f" · {last_usage.meta.get('seconds', 0):g}s · {last_usage.text}"
+                )
+            print_formatted_text(ANSI(f"\x1b[2m■ ready{detail}\x1b[0m"))
 
     def _show_activity(self) -> None:
         state = "full" if self.transcript_expanded else "compact"
@@ -935,6 +963,8 @@ class InteractiveApp:
             self.done = True
         elif command in ("/help", "/commands"):
             self._show_help()
+        elif command == "/tips":
+            self._show_tips()
         elif command in ("/effort", "/reasoning"):
             self._set_choice("effort", value, EFFORTS)
         elif command == "/verbosity":
@@ -1371,6 +1401,21 @@ class InteractiveApp:
             "while working: Enter sends steering · Tab queues it · Ctrl+T toggles full tool output\n"
             "↑/↓: prompts from this directory · Ctrl+R: search prompt history\n"
             "@file: attach context · !command: include output · !!command: local only"
+        )
+
+    @staticmethod
+    def _show_tips() -> None:
+        print(
+            "Send work\n"
+            "  Type a request and press Enter. Use @path to attach a file and "
+            "Alt+Enter for a newline.\n\n"
+            "While the agent works\n"
+            "  Enter sends guidance into the active task at its next safe boundary.\n"
+            "  Tab queues a separate follow-up task to run afterward.\n"
+            "  Ctrl+T toggles full tool output; Ctrl+C interrupts.\n\n"
+            "Useful starts\n"
+            "  /plan TASK plans read-only before approval. /review checks changes.\n"
+            "  /status explains the session. /help lists every command."
         )
 
     def _attach(self, value: str) -> None:

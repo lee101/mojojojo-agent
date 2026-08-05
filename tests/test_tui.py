@@ -485,12 +485,40 @@ def test_help_and_hotkey_aliases_report_the_live_surface(
 
     app.command("/commands")
     app.command("/keys")
+    app.command("/tips")
 
     output = capsys.readouterr().out
     assert "/model" in output and "/reasoning" in output
     assert "F2 or Alt+M" in output
     assert "F3 or Alt+R" in output
     assert "F4 or Alt+V" in output
+    assert "Tab queues a separate follow-up" in output
+    assert "Enter sends guidance into the active task" in output
+
+
+def test_render_finishes_with_visible_ready_time_and_usage(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    monkeypatch.setenv("MJJ_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(
+        "mjj.tui.print_formatted_text",
+        lambda value, end="\n": print(str(value), end=end),
+    )
+    app = InteractiveApp(
+        Agent(registry=Registry(), cwd=tmp_path, instructions="test"), _args()
+    )
+
+    app._render(
+        iter(
+            [
+                Step(kind="text", text="Done."),
+                Step(kind="usage", text="1 req · in 10 · out 4", meta={"seconds": 1.25}),
+            ]
+        )
+    )
+
+    output = capsys.readouterr().out
+    assert "■ ready · 1.25s · 1 req · in 10 · out 4" in output
 
 
 def test_plan_and_mcp_commands_show_live_tool_state(tmp_path, monkeypatch, capsys):

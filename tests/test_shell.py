@@ -6,7 +6,7 @@ from pathlib import Path
 
 from mjj.ledger import Budget, Ledger
 from mjj.tools.base import ToolContext
-from mjj.tools.shell import ShellTool, _safe
+from mjj.tools.shell import ShellTool, _safe, describe_jobs, stop_jobs
 
 
 def test_background_shell_returns_immediately_and_can_be_polled(tmp_path) -> None:
@@ -54,6 +54,27 @@ def test_background_shell_timeout_is_reported_on_poll(tmp_path) -> None:
     assert not completed.ok
     assert completed.meta["timed_out"] is True
     assert completed.meta["exit_code"] == 124
+
+
+def test_background_jobs_can_be_listed_and_stopped(tmp_path) -> None:
+    ctx = context(tmp_path)
+    queued = ShellTool().run(
+        {
+            "command": [sys.executable, "-c", "import time; time.sleep(30)"],
+            "background": True,
+        },
+        ctx,
+    )
+    identifier = queued.meta["job"]
+
+    assert any(identifier in line and "running" in line for line in describe_jobs(ctx))
+    assert stop_jobs(ctx) == 1
+    ctx.state["shell-jobs"][identifier].thread.join(timeout=3)
+    completed = ShellTool().run({"job": identifier}, ctx)
+
+    assert not completed.ok
+    assert "stopped by operator" in completed.output
+    assert stop_jobs(ctx) == 0
 
 
 def context(tmp_path: Path, approve=None, *, budget: int = 1600) -> ToolContext:

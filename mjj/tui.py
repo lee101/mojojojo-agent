@@ -154,8 +154,13 @@ COMMANDS = {
     "/auto": "compatibility alias for /loop",
     "/loop": "repeat steps or ideas; 'forever' runs until interrupted",
     "/goal": "inspect, set, pause, resume, complete, or clear a durable goal",
-    "/plan": "show or clear the current structured task plan",
+    "/plan": "plan read-only, then explicitly approve implementation",
+    "/compact": "request server-side conversation compaction now",
+    "/ps": "list background shell jobs",
+    "/stop": "stop running background shell jobs",
     "/mcp": "show configured MCP tools and startup warnings",
+    "/skills": "list discovered reusable workflows",
+    "/plugins": "list installed and enabled tool plugins",
     "/session": "show current session information",
     "/history": "list recent sessions",
     "/resume": "resume a saved session by id or path",
@@ -166,6 +171,8 @@ COMMANDS = {
     "/export": "export the session to HTML or JSONL",
     "/import": "import and resume a JSONL session",
     "/copy": "copy the last assistant response with OSC 52",
+    "/raw": "toggle full tool output in the inline transcript",
+    "/rollout": "print the append-only session transcript path",
     "/reload": "reload tools and discovered skills",
     "/hotkeys": "show keyboard shortcuts",
     "/keys": "alias for /hotkeys",
@@ -208,6 +215,8 @@ VALUE_CHOICES = {
     "/auto": ("off", "steps", "ideas", "full", "forever"),
     "/loop": ("off", "steps", "ideas", "full", "forever"),
     "/goal": ("pause", "resume", "complete", "blocked", "clear", "set"),
+    "/plan": ("approve", "cancel", "clear"),
+    "/raw": ("on", "off", "toggle"),
     "/login": ("chatgpt", "device", "deepseek", "openpaths", "openrouter", "openai", "custom"),
     "/logout": ("chatgpt", "deepseek", "openpaths", "openrouter", "openai", "custom"),
 }
@@ -1021,12 +1030,13 @@ class InteractiveApp:
         elif command == "/goal":
             self._goal(value)
         elif command == "/plan":
-            if value == "clear":
-                self.agent.ctx.state.pop("plan", None)
-                print("structured plan cleared")
-            else:
-                plan = self.agent.ctx.state.get("plan")
-                print(json.dumps(plan, indent=2) if plan else "no structured plan yet")
+            self._plan(value)
+        elif command == "/compact":
+            self._compact()
+        elif command == "/ps":
+            self._background_jobs()
+        elif command == "/stop":
+            self._stop_background_jobs()
         elif command == "/mcp":
             tools = sorted(
                 name for name in self.agent.registry.tools if name.startswith("mcp__")
@@ -1034,6 +1044,10 @@ class InteractiveApp:
             for warning in self.agent.registry.warnings:
                 print(f"warning: {warning}")
             print("\n".join(tools) if tools else "no MCP tools available")
+        elif command == "/skills":
+            self._skills()
+        elif command == "/plugins":
+            self._plugins()
         elif command == "/session":
             self._show_session()
         elif command == "/history":
@@ -1054,6 +1068,15 @@ class InteractiveApp:
             self._import(value)
         elif command == "/copy":
             self._copy_last()
+        elif command == "/raw":
+            try:
+                self.transcript_expanded = _toggle(value, self.transcript_expanded)
+            except ValueError as exc:
+                print(exc)
+                return
+            print(f"full tool output: {'on' if self.transcript_expanded else 'off'}")
+        elif command == "/rollout":
+            print(self.agent.session.path if self.agent.session else "ephemeral session")
         elif command == "/reload":
             self.agent.registry.close()
             self.agent.registry = build_registry(
@@ -1096,6 +1119,8 @@ class InteractiveApp:
             )
 
     def _status(self) -> None:
+        from .tools.shell import describe_jobs
+
         session = inspect_session(self.agent.session.path) if self.agent.session else None
         git = self.agent.registry.dispatch(
             "shell",
@@ -1126,9 +1151,96 @@ class InteractiveApp:
             ],
             "usage": self.agent.client.usage.summary(),
             "tool_usage": self.agent.ledger.summary(),
+            "background_jobs": describe_jobs(self.agent.ctx),
             "git": git.output,
         }
         print(json.dumps(status, indent=2))
+
+    def _plan(self, value: str) -> None:
+        state = self.agent.ctx.state
+        if value == "clear":
+            state.pop("plan", None)
+            print("structured plan cleared")
+            return
+        if value == "approve":
+            previous = state.pop("plan-permission-mode", None)
+            if previous is None:
+                print("no plan is awaiting approval")
+                return
+            self.permission_policy.set(str(previous))
+            self.args.permission_mode = str(previous)
+            self.turn(
+                "The plan is approved. Implement it completely, validate the result, "
+                "and report the outcome."
+            )
+            return
+        if value == "cancel":
+            previous = state.pop("plan-permission-mode", None)
+            if previous is not None:
+                self.permission_policy.set(str(previous))
+                self.args.permission_mode = str(previous)
+            state.pop("plan", None)
+            print("plan mode cancelled")
+            return
+        if value:
+            state.setdefault("plan-permission-mode", self.permission_policy.mode)
+            self.permission_policy.set("read-only")
+            self.args.permission_mode = "read-only"
+            self.turn(
+                "Plan this task without modifying files or external state. Inspect what "
+                "you need, maintain a concise structured plan with update_plan, identify "
+                "risks and validation, then stop for explicit approval.\n\nTask: " + value
+            )
+            print("plan ready · /plan approve to implement · /plan cancel to discard")
+            return
+        plan = state.get("plan")
+        waiting = " · awaiting approval" if "plan-permission-mode" in state else ""
+        print((json.dumps(plan, indent=2) if plan else "no structured plan yet") + waiting)
+
+    def _compact(self) -> None:
+        previous = self.agent.client.compact_threshold
+        self.agent.client.compact_threshold = 1
+        try:
+            self.turn(
+                "Compact the conversation context now, preserving the active objective, "
+                "decisions, workspace state, and unfinished work."
+            )
+        finally:
+            self.agent.client.compact_threshold = previous
+
+    def _background_jobs(self) -> None:
+        from .tools.shell import describe_jobs
+
+        jobs = describe_jobs(self.agent.ctx)
+        print("\n".join(jobs) if jobs else "no background shell jobs")
+
+    def _stop_background_jobs(self) -> None:
+        from .tools.shell import stop_jobs
+
+        stopped = stop_jobs(self.agent.ctx)
+        print(f"stopped {stopped} background job{'' if stopped == 1 else 's'}")
+
+    def _skills(self) -> None:
+        from .skills import discover
+
+        skills = discover(self.agent.cwd, extra_paths=self.args.skill_paths)
+        lines = [
+            f"{skill.qualified_name} · {skill.description} · {skill.path}"
+            for skill in skills
+        ]
+        print("\n".join(lines) if lines else "no skills found")
+
+    def _plugins(self) -> None:
+        from .plugins import plugin_inventory
+
+        enabled = set(self.args.plugins)
+        plugins = plugin_inventory()
+        lines = [
+            f"{'on ' if plugin.name in enabled else 'off'} · {plugin.name} · "
+            f"{plugin.distribution or plugin.value}"
+            for plugin in plugins
+        ]
+        print("\n".join(lines) if lines else "no mojojojo.tools plugins installed")
 
     def _init(self) -> None:
         target = Path(self.agent.cwd) / "AGENTS.md"
@@ -1595,6 +1707,17 @@ def _cycle_choice(current: str, choices: tuple[str, ...], direction: int) -> str
         return choices[0] if direction >= 0 else choices[-1]
     index = choices.index(current)
     return choices[(index + direction) % len(choices)]
+
+
+def _toggle(value: str, current: bool) -> bool:
+    normalized = value.strip().lower()
+    if normalized in {"", "toggle"}:
+        return not current
+    if normalized in {"on", "true", "1"}:
+        return True
+    if normalized in {"off", "false", "0"}:
+        return False
+    raise ValueError("value must be on, off, or toggle")
 
 
 def _select_choice(

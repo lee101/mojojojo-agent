@@ -30,6 +30,7 @@ def _args():
         auto_max_turns=0,
         disabled_tools=(),
         skill_paths=(),
+        plugins=(),
         permission_mode="auto",
     )
 
@@ -71,6 +72,65 @@ def test_auto_command_updates_live_autonomy_controls(tmp_path, monkeypatch, caps
     assert args.auto_max_turns == 3
     output = capsys.readouterr().out
     assert "autonomy: full" in output and "max turns: 3" in output
+
+
+def test_plan_mode_is_read_only_until_explicit_approval(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    monkeypatch.setenv("MJJ_HOME", str(tmp_path / "home"))
+    agent = Agent(registry=Registry(), cwd=tmp_path, instructions="test")
+    args = _args()
+    app = InteractiveApp(agent, args)
+    turns = []
+    monkeypatch.setattr(app, "turn", turns.append)
+
+    app.command("/plan replace the parser")
+
+    assert app.permission_policy.mode == "read-only"
+    assert args.permission_mode == "read-only"
+    assert agent.ctx.state["plan-permission-mode"] == "auto"
+    assert "Plan this task" in turns[-1]
+
+    app.command("/plan approve")
+
+    assert app.permission_policy.mode == "auto"
+    assert args.permission_mode == "auto"
+    assert "Implement it completely" in turns[-1]
+    assert "plan ready" in capsys.readouterr().out
+
+
+def test_manual_compaction_restores_automatic_threshold(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("MJJ_HOME", str(tmp_path / "home"))
+    agent = Agent(registry=Registry(), cwd=tmp_path, instructions="test")
+    app = InteractiveApp(agent, _args())
+    original = agent.client.compact_threshold
+    observed = []
+    monkeypatch.setattr(
+        app,
+        "turn",
+        lambda _prompt: observed.append(agent.client.compact_threshold),
+    )
+
+    app.command("/compact")
+
+    assert observed == [1]
+    assert agent.client.compact_threshold == original
+
+
+def test_raw_command_controls_expanded_tool_output(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("MJJ_HOME", str(tmp_path / "home"))
+    app = InteractiveApp(
+        Agent(registry=Registry(), cwd=tmp_path, instructions="test"), _args()
+    )
+
+    app.command("/raw on")
+    assert app.transcript_expanded is True
+    app.command("/raw off")
+    assert app.transcript_expanded is False
+    app.command("/raw maybe")
+    assert "value must be on, off, or toggle" in capsys.readouterr().out
 
 
 def test_loop_forever_is_an_unlimited_full_autonomy_alias(

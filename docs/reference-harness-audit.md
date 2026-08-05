@@ -54,6 +54,35 @@ is published beside any correctness result.
 | Codex/Grok MCP and extension surfaces | MCP and trusted Python tools are opt-in, namespaced, permission-preserving, and bounded |
 | Aider's post-edit checks | atomic patches receive syntax validation; compiler and formatter work can continue without blocking the turn loop |
 
+## Codex workflow parity audit
+
+Audited against local Codex commit `f5371bce8729` on 2026-08-05. “Parity” here
+means the same coding job has a supported path; it does not mean reproducing
+Codex branding, hosted account surfaces, or every full-screen widget.
+
+| Codex workflow | MJJ equivalent | status |
+| --- | --- | --- |
+| live steering and queued input | Enter steers; Tab queues ordered follow-up turns | equivalent |
+| command progress and expandable transcript | compact tool previews; Ctrl-T toggles full bounded output; ledger spills recover clipped raw output | equivalent |
+| model, effort, verbosity, and provider selection | `/model`, `/effort`, `/verbosity`, `/provider` plus hotkeys | equivalent |
+| permissions and plan approval | `/permissions`; `/plan TASK` enforces read-only until `/plan approve` | equivalent |
+| session new/resume/fork/rename/export | `/new`, `/resume`, `/fork`, `/name`, `/export`, `/import`, `/tree` | equivalent |
+| manual and automatic compaction | `/compact` plus Responses context management | equivalent with provider fallback |
+| review, diff, and undo | `/review`, `/diff`, automatic checkpoints, `/undo` | equivalent |
+| background terminals | background `shell`, polling, `/ps`, and `/stop` | equivalent |
+| goals, plans, and delegated workers | `/goal`, `update_plan`, and bounded `delegate` | equivalent |
+| project rules, mentions, images, skills, plugins, MCP | scoped `AGENTS.md`, `@file`, image commands, lazy skills/plugins/MCP | equivalent |
+| side questions (`/side`, `/btw`) | forked sessions via `/fork` or bounded delegated research | workflow equivalent, no ephemeral pane |
+| raw/copy-friendly history | inline terminal scrollback, Ctrl-T, `/copy`, `/export` | workflow equivalent |
+| IDE selection bridge | `@file`, LSP navigation, and explicit image/file attachment | manual equivalent |
+| themes, keymap editor, Vim mode, pets, status-line designer | terminal and prompt-toolkit defaults | intentionally omitted: presentation-only |
+| Desktop app link, feedback upload, account limits, memories service | hosted/product-specific services | intentionally omitted from the local harness |
+| elevated OS sandbox setup | MJJ permission policy and hosted no-compiler sandbox boundary | intentionally different security boundary |
+
+The audit rejects literal command-count parity: exposing unused commands has
+permanent discovery and maintenance cost. A missing workflow is a gap; a
+different spelling or a product-only surface is not.
+
 MJJ intentionally keeps one patch format, one transcript protocol, a
 dependency-free Python base, and no mandatory index daemon. It does not copy
 unbounded project-rule loading, whole provider SDK stacks, or UI/theme systems
@@ -61,15 +90,10 @@ that do not improve the coding loop.
 
 ## Next comparisons
 
-1. **Interactive TUI steering.** Hosted steering exists; compare Codex
-   `steer_input` and Grok's prompt queue before adding concurrent inline input.
-2. **Plan approval UX.** MJJ has bounded plan state, but not a read-only planning
-   mode with explicit approval. Preserve permissions at the enforcement layer,
-   not only in a prompt.
-3. **Plugin lifecycle hooks.** Add events or commands only when a concrete job
+1. **Plugin lifecycle hooks.** Add events or commands only when a concrete job
    cannot fit the current skills, MCP, or tool-entry-point boundaries without
    permanent prompt cost.
-4. **Prompt suggestions and side questions.** Claude generates cache-aware next
+2. **Prompt suggestions and side questions.** Claude generates cache-aware next
    prompts and keeps `/btw` questions out of the main transcript. Evaluate both
    against their extra request cost before adding a model-backed UI feature.
 

@@ -6,7 +6,7 @@ import os
 import subprocess
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..platforms import command_name, display_command, split_command
@@ -75,6 +75,10 @@ class _ShellJob:
     identifier: str
     thread: threading.Thread | None = None
     outcome: "_CommandOutcome | None" = None
+    process: subprocess.Popen | None = None
+    command: str = ""
+    started: float = field(default_factory=time.monotonic)
+    stopped: bool = False
 
 
 @dataclass(frozen=True)
@@ -401,11 +405,12 @@ def _start_shell_job(
     while f"s{sequence}" in jobs:
         sequence += 1
     identifier = f"s{sequence}"
-    job = _ShellJob(identifier)
+    job = _ShellJob(identifier, command=shown)
     jobs[identifier] = job
 
     def run() -> None:
-        job.outcome = _execute(
+        job.outcome = _execute_job(
+            job,
             argv,
             cwd=cwd,
             use_shell=use_shell,
@@ -418,6 +423,93 @@ def _start_shell_job(
     )
     job.thread.start()
     return identifier
+
+
+def _execute_job(
+    job: _ShellJob,
+    argv: str | list[str],
+    *,
+    cwd: Path,
+    use_shell: bool,
+    timeout: float,
+    shown: str,
+) -> _CommandOutcome:
+    started = time.monotonic()
+    try:
+        process = subprocess.Popen(
+            argv,
+            cwd=cwd,
+            shell=use_shell,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            errors="replace",
+            env=os.environ.copy(),
+        )
+        job.process = process
+        if job.stopped and process.poll() is None:
+            process.terminate()
+        output, _ = process.communicate(timeout=timeout)
+        elapsed = time.monotonic() - started
+        note = "stopped by operator" if job.stopped else None
+        return _CommandOutcome(
+            _with_status(output, note, process.returncode),
+            process.returncode == 0 and not job.stopped,
+            process.returncode,
+            False,
+            elapsed,
+        )
+    except subprocess.TimeoutExpired:
+        process.kill()
+        output, _ = process.communicate()
+        elapsed = time.monotonic() - started
+        return _CommandOutcome(
+            _with_status(output, f"timed out after {timeout:g}s", 124),
+            False,
+            124,
+            True,
+            elapsed,
+        )
+    except OSError as exc:
+        elapsed = time.monotonic() - started
+        return _CommandOutcome(
+            f"could not run {shown}: {exc}", False, 127, False, elapsed
+        )
+    finally:
+        job.process = None
+
+
+def describe_jobs(ctx: ToolContext) -> list[str]:
+    """Return bounded operator-facing state without adding model schema cost."""
+    jobs = ctx.state.get("shell-jobs", {})
+    if not isinstance(jobs, dict):
+        return []
+    lines = []
+    for identifier, job in jobs.items():
+        if not isinstance(job, _ShellJob):
+            continue
+        running = job.thread is not None and job.thread.is_alive()
+        status = "running" if running else "stopped" if job.stopped else "done"
+        seconds = time.monotonic() - job.started
+        lines.append(f"{identifier} · {status} · {seconds:.1f}s · {job.command[:160]}")
+    return lines[:32]
+
+
+def stop_jobs(ctx: ToolContext) -> int:
+    """Terminate live background processes; completed jobs remain pollable."""
+    jobs = ctx.state.get("shell-jobs", {})
+    if not isinstance(jobs, dict):
+        return 0
+    stopped = 0
+    for job in jobs.values():
+        if not isinstance(job, _ShellJob) or job.thread is None or not job.thread.is_alive():
+            continue
+        job.stopped = True
+        process = job.process
+        if process is not None and process.poll() is None:
+            process.terminate()
+        stopped += 1
+    return stopped
 
 
 def _timeout_output(output: str | bytes | None) -> str:

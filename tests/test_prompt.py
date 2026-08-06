@@ -7,6 +7,8 @@ def test_model_family_recognizes_provider_qualified_models() -> None:
     assert model_family("gpt-5.6-sol") == "codex"
     assert model_family("grok-4.5") == "grok"
     assert model_family("x-ai/grok-4.5") == "grok"
+    assert model_family("deepseek-v4-flash") == "deepseek"
+    assert model_family("openpaths/deepseek-v4-pro") == "deepseek"
     assert model_family("openpaths/auto-code") == "neutral"
 
 
@@ -19,6 +21,11 @@ def test_model_hint_stays_ahead_of_project_rules_and_is_idempotent() -> None:
     assert len(profiled.split()) - len(instructions.split()) <= 15
     assert profiled.endswith("--- project-doc ---\n\nrepo wins")
     assert for_model(profiled, "x-ai/grok-4.5") == profiled
+
+
+def test_deepseek_hint_keeps_agent_moving() -> None:
+    profiled = for_model("base", "deepseek-v4-flash")
+    assert "keep calling tools until the task is done" in profiled
 
 
 def test_neutral_models_pay_no_prompt_tax() -> None:

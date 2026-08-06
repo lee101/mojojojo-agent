@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from mjj.config import ConfigError, load
+from mjj.config import ConfigError, load, persist_user_agent_settings
 
 
 def test_project_config_and_environment_precedence(tmp_path: Path):
@@ -212,3 +212,42 @@ def test_explicit_project_config_is_a_trusted_plugin_choice(tmp_path: Path):
 
     assert resolved.plugins == ("chosen",)
     assert resolved.files == (config.resolve(),)
+
+
+def test_persist_user_agent_settings_writes_model_default(tmp_path: Path):
+    home = tmp_path / "home"
+    environ = {"MJJ_HOME": str(home)}
+    path = persist_user_agent_settings(model="deepseek-v4-flash", environ=environ)
+    assert path == home / "config.toml"
+    text = path.read_text(encoding="utf-8")
+    assert "[agent]" in text
+    assert 'model = "deepseek-v4-flash"' in text
+    assert load(tmp_path, environ=environ).model == "deepseek-v4-flash"
+
+    persist_user_agent_settings(model="deepseek-v4-pro", environ=environ)
+    persist_user_agent_settings(provider="deepseek", effort="high", environ=environ)
+    text = path.read_text(encoding="utf-8")
+    assert text.count("[agent]") == 1
+    assert 'model = "deepseek-v4-pro"' in text
+    assert 'provider = "deepseek"' in text
+    assert 'effort = "high"' in text
+    assert "deepseek-v4-flash" not in text
+
+
+def test_persist_user_agent_settings_preserves_other_sections(tmp_path: Path):
+    home = tmp_path / "home"
+    home.mkdir()
+    config = home / "config.toml"
+    config.write_text(
+        '[agent]\nmodel = "old"\neffort = "low"\n\n[tools]\nbudget = 99\n',
+        encoding="utf-8",
+    )
+    persist_user_agent_settings(
+        model='name "with" quotes',
+        environ={"MJJ_HOME": str(home)},
+    )
+    text = config.read_text(encoding="utf-8")
+    assert 'model = "name \\"with\\" quotes"' in text
+    assert 'effort = "low"' in text
+    assert "[tools]" in text
+    assert "budget = 99" in text

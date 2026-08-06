@@ -358,8 +358,14 @@ def test_model_selection_accepts_number_substring_and_relative_change(
 
     app.command("/model 2")
     assert agent.client.model == "gpt-5.6-sol"
+    assert 'model = "gpt-5.6-sol"' in (tmp_path / "home" / "config.toml").read_text(
+        encoding="utf-8"
+    )
     app.command("/model terra")
     assert agent.client.model == "gpt-5.6-terra"
+    assert 'model = "gpt-5.6-terra"' in (tmp_path / "home" / "config.toml").read_text(
+        encoding="utf-8"
+    )
     app.command("/model prev")
     assert agent.client.model == "gpt-5.6-sol"
     app.command("/model gpt")
@@ -371,6 +377,7 @@ def test_model_selection_accepts_number_substring_and_relative_change(
 
     app.command("/model")
     output = capsys.readouterr().out
+    assert "saved default model" in output
     assert "* 2. gpt-5.6-sol" in output
     assert "ambiguous model" in output
     assert "/model NUMBER|NAME|next|prev" in output

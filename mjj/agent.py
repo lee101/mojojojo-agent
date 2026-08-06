@@ -356,7 +356,7 @@ def render(steps: Iterator[Step], out, verbose: bool = False) -> int:
     for step in steps:
         if step.kind == "text":
             out.write(step.text)
-        elif step.kind == "reasoning" and verbose:
+        elif step.kind == "reasoning":
             out.write(step.text)
         elif step.kind == "tool_call":
             label = tool_progress(step, verbose=verbose)
@@ -407,7 +407,7 @@ def render_exec(
             out.flush()
         if step.kind == "text":
             response_text.append(step.text)
-        elif step.kind == "reasoning" and verbose and not jsonl:
+        elif step.kind == "reasoning" and not jsonl:
             err.write(step.text)
             err.flush()
         elif step.kind == "tool_call":
@@ -415,9 +415,10 @@ def render_exec(
             if not jsonl:
                 err.write(f"· {tool_progress(step, verbose=verbose)}\n")
                 err.flush()
-        elif step.kind == "tool_result" and verbose and not jsonl:
+        elif step.kind == "tool_result" and not jsonl:
+            body = step.text if verbose else _first_lines(step.text, 3)
             marker = "" if step.meta.get("ok", True) else " (failed)"
-            err.write(f"{step.text}{marker}\n")
+            err.write(f"{body}{marker}\n")
             err.flush()
         elif step.kind == "usage":
             if not response_called_tool:

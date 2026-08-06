@@ -492,7 +492,105 @@ def test_chat_stream_is_normalized_to_agent_events(monkeypatch):
     monkeypatch.setattr("mjj.model.urllib.request.urlopen", lambda *_a, **_k: Response())
     events = list(ModelClient()._stream_chat_once(credential, {"model": "x"}))
     calls = [event.item for event in events if event.type == "response.output_item.done"]
-    assert calls == [{"type": "function_call", "call_id": "c1", "name": "read", "arguments": '{"path":"README.md"}'}]
+    assert calls == [
+        {
+            "type": "function_call",
+            "call_id": "c1",
+            "name": "read",
+            "arguments": '{"path":"README.md"}',
+            "content": "",
+        }
+    ]
+
+
+def test_chat_stream_keeps_reasoning_content_for_tool_replay(monkeypatch):
+    credential = Credential(
+        "api_key",
+        "ds-test",
+        "https://api.deepseek.com",
+        provider="deepseek",
+        api_style="chat_completions",
+    )
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            chunks = [
+                {"choices": [{"delta": {"reasoning_content": "need list then search"}}]},
+                {
+                    "choices": [
+                        {
+                            "delta": {
+                                "content": "checking",
+                                "tool_calls": [
+                                    {
+                                        "index": 0,
+                                        "id": "c1",
+                                        "function": {
+                                            "name": "list",
+                                            "arguments": "{}",
+                                        },
+                                    }
+                                ],
+                            }
+                        }
+                    ]
+                },
+                {"choices": [], "usage": {"prompt_tokens": 8, "completion_tokens": 4}},
+            ]
+            for chunk in chunks:
+                yield f"data: {json.dumps(chunk)}\n".encode()
+                yield b"\n"
+            yield b"data: [DONE]\n"
+            yield b"\n"
+
+    monkeypatch.setattr("mjj.model.urllib.request.urlopen", lambda *_a, **_k: Response())
+    events = list(
+        ModelClient()._stream_chat_once(credential, {"model": "deepseek-v4-flash"})
+    )
+    assert [
+        event.delta
+        for event in events
+        if event.type == "response.reasoning_summary_text.delta"
+    ] == ["need list then search"]
+    calls = [event.item for event in events if event.type == "response.output_item.done"]
+    assert calls == [
+        {
+            "type": "function_call",
+            "call_id": "c1",
+            "name": "list",
+            "arguments": "{}",
+            "reasoning_content": "need list then search",
+            "content": "checking",
+        }
+    ]
+
+
+def test_deepseek_chat_body_enables_thinking_and_maps_effort():
+    credential = Credential(
+        "api_key",
+        "ds-test",
+        "https://api.deepseek.com",
+        provider="deepseek",
+        api_style="chat_completions",
+        default_model="deepseek-v4-flash",
+    )
+    body = ModelClient(model="deepseek-v4-flash", effort="medium").chat_request_body(
+        [], "system", [], credential
+    )
+    assert body["thinking"] == {"type": "enabled"}
+    assert body["reasoning_effort"] == "high"
+
+    disabled = ModelClient(model="deepseek-v4-flash", effort="none").chat_request_body(
+        [], "system", [], credential
+    )
+    assert disabled["thinking"] == {"type": "disabled"}
+    assert "reasoning_effort" not in disabled
 
 
 def test_chat_history_groups_parallel_calls_before_tool_outputs():
@@ -507,3 +605,39 @@ def test_chat_history_groups_parallel_calls_before_tool_outputs():
     )
     assert [message["role"] for message in messages] == ["system", "assistant", "tool", "tool"]
     assert [call["id"] for call in messages[1]["tool_calls"]] == ["a", "b"]
+
+
+def test_chat_history_echoes_deepseek_reasoning_on_tool_turns():
+    messages = _chat_messages(
+        [
+            {
+                "type": "function_call",
+                "call_id": "c1",
+                "name": "search",
+                "arguments": '{"query":"three"}',
+                "reasoning_content": "look for three.js first",
+                "content": "searching",
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "c1",
+                "output": "no matches",
+            },
+        ],
+        "system",
+    )
+    assert messages[1] == {
+        "role": "assistant",
+        "content": "searching",
+        "reasoning_content": "look for three.js first",
+        "tool_calls": [
+            {
+                "id": "c1",
+                "type": "function",
+                "function": {
+                    "name": "search",
+                    "arguments": '{"query":"three"}',
+                },
+            }
+        ],
+    }

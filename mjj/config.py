@@ -424,3 +424,103 @@ def _boolean(value: str, variable: str) -> bool:
     if normalized in ("0", "false", "no", "off"):
         return False
     raise ConfigError(f"{variable} must be true or false")
+
+
+def user_config_path(environ: Mapping[str, str] | None = None) -> Path:
+    env = os.environ if environ is None else environ
+    return Path(env.get("MJJ_HOME") or "~/.mjj").expanduser() / "config.toml"
+
+
+def persist_user_agent_settings(
+    *,
+    model: str | None = None,
+    provider: str | None = None,
+    effort: str | None = None,
+    verbosity: str | None = None,
+    environ: Mapping[str, str] | None = None,
+) -> Path:
+    """Write selected interactive defaults into ``$MJJ_HOME/config.toml``.
+
+    Only updates keys that are passed. Preserves unrelated sections and
+    unknown ``[agent]`` fields so a ``/model`` pick survives the next launch.
+    """
+    updates = {
+        key: value
+        for key, value in (
+            ("model", model),
+            ("provider", provider),
+            ("effort", effort),
+            ("verbosity", verbosity),
+        )
+        if value is not None
+    }
+    if not updates:
+        raise ConfigError("persist_user_agent_settings requires at least one value")
+    if "provider" in updates and updates["provider"] not in PROVIDERS:
+        raise ConfigError(f"agent.provider must be one of {', '.join(PROVIDERS)}")
+    if "effort" in updates and updates["effort"] not in EFFORTS:
+        raise ConfigError(f"agent.effort must be one of {', '.join(EFFORTS)}")
+    if "verbosity" in updates and updates["verbosity"] not in VERBOSITIES:
+        raise ConfigError(
+            f"agent.verbosity must be one of {', '.join(VERBOSITIES)}"
+        )
+    if "model" in updates and not str(updates["model"]).strip():
+        raise ConfigError("agent.model must be a non-empty string")
+
+    path = user_config_path(environ)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    existing = path.read_text(encoding="utf-8") if path.is_file() else ""
+    path.write_text(_upsert_agent_toml(existing, updates), encoding="utf-8")
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass
+    return path
+
+
+def _toml_string(value: str) -> str:
+    escaped = (
+        value.replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("\n", "\\n")
+        .replace("\t", "\\t")
+    )
+    return f'"{escaped}"'
+
+
+def _upsert_agent_toml(existing: str, updates: Mapping[str, str]) -> str:
+    text = existing.replace("\r\n", "\n")
+    match = re.search(r"(?m)^\[agent\]\s*$", text)
+    if match is None:
+        block = ["[agent]"]
+        for key, value in updates.items():
+            block.append(f"{key} = {_toml_string(str(value).strip())}")
+        suffix = "\n".join(block) + "\n"
+        if not text.strip():
+            return suffix
+        return text.rstrip() + "\n\n" + suffix
+
+    start = match.end()
+    next_section = re.search(r"(?m)^\[", text[start:])
+    end = start + next_section.start() if next_section else len(text)
+    section = text[start:end]
+    lines = section.splitlines(keepends=True)
+    if lines and not lines[-1].endswith("\n"):
+        lines[-1] = lines[-1] + "\n"
+
+    for key, value in updates.items():
+        rendered = f"{key} = {_toml_string(str(value).strip())}\n"
+        pattern = re.compile(rf"(?m)^{re.escape(key)}\s*=")
+        replaced = False
+        for index, line in enumerate(lines):
+            if pattern.match(line):
+                lines[index] = rendered
+                replaced = True
+                break
+        if not replaced:
+            insert_at = len(lines)
+            while insert_at > 0 and lines[insert_at - 1].strip() == "":
+                insert_at -= 1
+            lines.insert(insert_at, rendered)
+
+    return text[:start] + "".join(lines) + text[end:]

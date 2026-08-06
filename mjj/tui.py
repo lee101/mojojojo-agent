@@ -106,7 +106,7 @@ except ImportError:
 
 from . import auth
 from .agent import Agent, Step, tool_progress
-from .config import EFFORTS, PROVIDERS, VERBOSITIES
+from .config import EFFORTS, PROVIDERS, VERBOSITIES, persist_user_agent_settings
 from .context_files import IMAGE_SUFFIXES, discover_project_files
 from .goals import GoalStore
 from .media import ImageAttachment, ImageInputError, prepare_image
@@ -685,6 +685,8 @@ class InteractiveApp:
             models,
             direction,
         )
+        self.agent.client.resolver.model = self.agent.client.model
+        self._remember_model(self.agent.client.model, announce=False)
 
     def _cycle_verbosity(self, direction: int) -> None:
         self.agent.client.verbosity = _cycle_choice(
@@ -862,16 +864,31 @@ class InteractiveApp:
 
     def _render(self, steps) -> None:
         text_open = False
+        reasoning_open = False
         last_usage: Step | None = None
         failed = False
         for step in steps:
             if step.kind in {"tool_call", "tool_result"}:
                 self.activity.append(step)
-            if step.kind == "text":
+            if step.kind == "reasoning":
+                if text_open:
+                    print()
+                    text_open = False
+                if not reasoning_open:
+                    print_formatted_text(ANSI("\x1b[2m  ░ "), end="")
+                    reasoning_open = True
+                print(step.text, end="", flush=True)
+            elif step.kind == "text":
+                if reasoning_open:
+                    print_formatted_text(ANSI("\x1b[0m"))
+                    reasoning_open = False
                 if not text_open:
                     text_open = True
                 print(step.text, end="", flush=True)
             elif step.kind == "tool_call":
+                if reasoning_open:
+                    print_formatted_text(ANSI("\x1b[0m"))
+                    reasoning_open = False
                 if text_open:
                     print()
                     text_open = False
@@ -879,6 +896,9 @@ class InteractiveApp:
                     label = _tool_label(step)
                     print_formatted_text(ANSI(f"\x1b[2m  {label}\x1b[0m"))
             elif step.kind == "tool_result":
+                if reasoning_open:
+                    print_formatted_text(ANSI("\x1b[0m"))
+                    reasoning_open = False
                 if text_open:
                     print()
                     text_open = False
@@ -901,6 +921,9 @@ class InteractiveApp:
                     if preview:
                         print_formatted_text(ANSI(f"\x1b[2m{preview}\x1b[0m"))
             elif step.kind == "autonomous":
+                if reasoning_open:
+                    print_formatted_text(ANSI("\x1b[0m"))
+                    reasoning_open = False
                 if text_open:
                     print()
                     text_open = False
@@ -911,6 +934,9 @@ class InteractiveApp:
                     )
                 )
             elif step.kind == "status":
+                if reasoning_open:
+                    print_formatted_text(ANSI("\x1b[0m"))
+                    reasoning_open = False
                 if text_open:
                     print()
                     text_open = False
@@ -925,6 +951,9 @@ class InteractiveApp:
             elif step.kind == "usage":
                 last_usage = step
             elif step.kind == "goal":
+                if reasoning_open:
+                    print_formatted_text(ANSI("\x1b[0m"))
+                    reasoning_open = False
                 if text_open:
                     print()
                     text_open = False
@@ -936,16 +965,24 @@ class InteractiveApp:
                     ANSI(f"\x1b[38;5;45m  ◎ goal {status}{suffix}\x1b[0m")
                 )
             elif step.kind == "steering":
+                if reasoning_open:
+                    print_formatted_text(ANSI("\x1b[0m"))
+                    reasoning_open = False
                 if text_open:
                     print()
                     text_open = False
                 print_formatted_text(ANSI("\x1b[38;5;45m  ↪ steering applied\x1b[0m"))
             elif step.kind == "error":
                 failed = True
+                if reasoning_open:
+                    print_formatted_text(ANSI("\x1b[0m"))
+                    reasoning_open = False
                 if text_open:
                     print()
                     text_open = False
                 print_formatted_text(ANSI(f"\x1b[31merror: {step.text}\x1b[0m"))
+        if reasoning_open:
+            print_formatted_text(ANSI("\x1b[0m"))
         if text_open:
             print()
         if not failed:
@@ -1343,6 +1380,8 @@ class InteractiveApp:
                     print(f"model unchanged: {self.agent.client.model}")
                     return
                 self.agent.client.model = selected
+                self.agent.client.resolver.model = selected
+                self._remember_model(selected)
                 print(f"model: {selected} · reasoning: {self.agent.client.effort}")
                 return
             self._show_models()
@@ -1359,7 +1398,19 @@ class InteractiveApp:
             print(exc)
             return
         self.agent.client.model = selected
+        self.agent.client.resolver.model = selected
+        self._remember_model(selected)
         print(f"model: {selected}")
+
+    def _remember_model(self, model: str, *, announce: bool = True) -> None:
+        """Persist the interactive model pick as the next-launch default."""
+        try:
+            path = persist_user_agent_settings(model=model)
+        except Exception as exc:  # noqa: BLE001 - never block the session on prefs
+            print(f"warning: could not save model default ({exc})")
+            return
+        if announce:
+            print(f"saved default model → {path}")
 
     def _set_provider(self, value: str) -> None:
         if not value:

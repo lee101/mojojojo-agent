@@ -273,6 +273,11 @@ class ModelClient:
         }
         if credential.provider == "openrouter":
             body["reasoning"] = {"effort": self.effective_effort(model)}
+        elif credential.provider == "deepseek" or _is_deepseek_model(model):
+            thinking, mapped = _deepseek_thinking(self.effort)
+            body["thinking"] = thinking
+            if mapped is not None:
+                body["reasoning_effort"] = mapped
         else:
             body["reasoning_effort"] = self.effective_effort(model)
         if (
@@ -449,32 +454,38 @@ class ModelClient:
     def _normalize_chat_response(self, document: dict) -> Iterator[Event]:
         choices = document.get("choices") or []
         message = (choices[0].get("message") or {}) if choices else {}
-        for index, call in enumerate(message.get("tool_calls") or []):
-            function = call.get("function") or {}
+        reasoning = message.get("reasoning_content") or message.get("reasoning") or ""
+        if isinstance(reasoning, str) and reasoning:
             yield Event(
-                "response.output_item.done",
-                {
-                    "item": {
-                        "type": "function_call",
-                        "call_id": call.get("id") or f"call_{index}",
-                        "name": function.get("name", ""),
-                        "arguments": function.get("arguments", "{}"),
-                    }
-                },
+                "response.reasoning_summary_text.delta",
+                {"delta": reasoning},
             )
-        content = message.get("content")
-        if content and not message.get("tool_calls"):
+        tool_calls = message.get("tool_calls") or []
+        content = message.get("content") or ""
+        if tool_calls:
+            for index, call in enumerate(tool_calls):
+                function = call.get("function") or {}
+                item: dict[str, Any] = {
+                    "type": "function_call",
+                    "call_id": call.get("id") or f"call_{index}",
+                    "name": function.get("name", ""),
+                    "arguments": function.get("arguments", "{}"),
+                }
+                if index == 0:
+                    if reasoning:
+                        item["reasoning_content"] = reasoning
+                    item["content"] = content if isinstance(content, str) else ""
+                yield Event("response.output_item.done", {"item": item})
+        elif content:
+            item = {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": content}],
+            }
+            if isinstance(reasoning, str) and reasoning:
+                item["reasoning_content"] = reasoning
             yield Event("response.output_text.delta", {"delta": content})
-            yield Event(
-                "response.output_item.done",
-                {
-                    "item": {
-                        "type": "message",
-                        "role": "assistant",
-                        "content": [{"type": "output_text", "text": content}],
-                    }
-                },
-            )
+            yield Event("response.output_item.done", {"item": item})
         usage = _chat_usage(document.get("usage") or {})
         self.usage.add(usage)
         self._record_cache_usage(usage)
@@ -557,6 +568,7 @@ class ModelClient:
             raise ModelError(f"connection failed: {exc}", retryable=True) from exc
 
         text_parts: list[str] = []
+        reasoning_parts: list[str] = []
         calls: dict[int, dict] = {}
         usage: dict = {}
         with resp:
@@ -572,18 +584,26 @@ class ModelClient:
                 choices = chunk.get("choices") or []
                 if not choices:
                     continue
-                delta = choices[0].get("delta") or {}
-                reasoning = delta.get("reasoning_content") or delta.get("reasoning")
+                choice = choices[0]
+                delta = choice.get("delta")
+                is_delta = isinstance(delta, dict)
+                payload = delta if is_delta else (choice.get("message") or {})
+                if not isinstance(payload, dict):
+                    continue
+                reasoning = payload.get("reasoning_content") or payload.get("reasoning")
                 if isinstance(reasoning, str) and reasoning:
-                    yield Event(
-                        "response.reasoning_summary_text.delta",
-                        {"delta": reasoning},
-                    )
-                content = delta.get("content")
+                    if is_delta or not reasoning_parts:
+                        reasoning_parts.append(reasoning)
+                        yield Event(
+                            "response.reasoning_summary_text.delta",
+                            {"delta": reasoning},
+                        )
+                content = payload.get("content")
                 if isinstance(content, str) and content:
-                    text_parts.append(content)
-                    yield Event("response.output_text.delta", {"delta": content})
-                for piece in delta.get("tool_calls") or []:
+                    if is_delta or not text_parts:
+                        text_parts.append(content)
+                        yield Event("response.output_text.delta", {"delta": content})
+                for piece in payload.get("tool_calls") or []:
                     index = int(piece.get("index") or 0)
                     call = calls.setdefault(
                         index,
@@ -592,37 +612,39 @@ class ModelClient:
                     call["id"] = piece.get("id") or call["id"]
                     function = piece.get("function") or {}
                     call["name"] = function.get("name") or call["name"]
-                    if function.get("arguments"):
-                        call["arguments"].append(function["arguments"])
+                    arguments = function.get("arguments")
+                    if arguments:
+                        if is_delta or not call["arguments"]:
+                            call["arguments"].append(arguments)
 
+        reasoning_text = "".join(reasoning_parts)
+        content_text = "".join(text_parts)
         if calls:
+            first_index = min(calls)
             for index in sorted(calls):
                 call = calls[index]
                 call_id = call["id"] or f"call_{index}"
-                yield Event(
-                    "response.output_item.done",
-                    {
-                        "item": {
-                            "type": "function_call",
-                            "call_id": call_id,
-                            "name": call["name"],
-                            "arguments": "".join(call["arguments"]),
-                        }
-                    },
-                )
-        elif text_parts:
-            yield Event(
-                "response.output_item.done",
-                {
-                    "item": {
-                        "type": "message",
-                        "role": "assistant",
-                        "content": [
-                            {"type": "output_text", "text": "".join(text_parts)}
-                        ],
-                    }
-                },
-            )
+                item: dict[str, Any] = {
+                    "type": "function_call",
+                    "call_id": call_id,
+                    "name": call["name"],
+                    "arguments": "".join(call["arguments"]),
+                }
+                # DeepSeek requires reasoning_content on tool turns to be echoed.
+                if index == first_index:
+                    if reasoning_text:
+                        item["reasoning_content"] = reasoning_text
+                    item["content"] = content_text
+                yield Event("response.output_item.done", {"item": item})
+        elif content_text or reasoning_text:
+            item = {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": content_text}],
+            }
+            if reasoning_text:
+                item["reasoning_content"] = reasoning_text
+            yield Event("response.output_item.done", {"item": item})
         normalized_usage = _chat_usage(usage)
         self.usage.add(normalized_usage)
         self._record_cache_usage(normalized_usage)
@@ -794,20 +816,27 @@ def _chat_messages(items: list[dict], instructions: str) -> list[dict]:
                         image_url["detail"] = part["detail"]
                     parts.append({"type": "image_url", "image_url": image_url})
             if role == "assistant":
-                messages.append(
-                    {
-                        "role": "assistant",
-                        "content": "".join(part.get("text", "") for part in parts),
-                    }
-                )
+                message: dict[str, Any] = {
+                    "role": "assistant",
+                    "content": "".join(part.get("text", "") for part in parts),
+                }
+                if item.get("reasoning_content"):
+                    message["reasoning_content"] = item["reasoning_content"]
+                messages.append(message)
             elif len(parts) == 1 and parts[0].get("type") == "text":
                 messages.append({"role": role, "content": parts[0]["text"]})
             else:
                 messages.append({"role": role, "content": parts})
         elif item_type == "function_call":
             tool_calls = []
+            reasoning_content = ""
+            content: str | None = None
             while index < len(items) and items[index].get("type") == "function_call":
                 call = items[index]
+                if not reasoning_content and call.get("reasoning_content"):
+                    reasoning_content = call["reasoning_content"]
+                if content is None and "content" in call:
+                    content = call.get("content")
                 tool_calls.append(
                     {
                         "id": call.get("call_id", ""),
@@ -819,13 +848,14 @@ def _chat_messages(items: list[dict], instructions: str) -> list[dict]:
                     }
                 )
                 index += 1
-            messages.append(
-                {
-                    "role": "assistant",
-                    "content": None,
-                    "tool_calls": tool_calls,
-                }
-            )
+            message = {
+                "role": "assistant",
+                "content": content,
+                "tool_calls": tool_calls,
+            }
+            if reasoning_content:
+                message["reasoning_content"] = reasoning_content
+            messages.append(message)
             continue
         elif item_type == "function_call_output":
             messages.append(
@@ -837,6 +867,26 @@ def _chat_messages(items: list[dict], instructions: str) -> list[dict]:
             )
         index += 1
     return messages
+
+
+def _is_deepseek_model(model: str) -> bool:
+    leaf = model.strip().lower().rsplit("/", 1)[-1]
+    return leaf.startswith("deepseek")
+
+
+def _deepseek_thinking(effort: str) -> tuple[dict[str, str], str | None]:
+    """Map mjj effort onto DeepSeek thinking + reasoning_effort."""
+    normalized = (effort or "high").strip().lower()
+    if normalized in {"none", "minimal"}:
+        return {"type": "disabled"}, None
+    mapped = {
+        "low": "low",
+        "medium": "high",
+        "high": "high",
+        "xhigh": "high",
+        "max": "max",
+    }.get(normalized, "high")
+    return {"type": "enabled"}, mapped
 
 
 def probe(model: str = "auto", provider: str = "auto") -> dict:

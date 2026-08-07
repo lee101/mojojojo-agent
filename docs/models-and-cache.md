@@ -44,6 +44,19 @@ MJJ fingerprints the effective model, stable instructions, and sorted tool
 schemas. Prefix tracking is bounded to 512 entries and a two-hour observation
 window.
 
+Instruction layout keeps a shared spine for cache hits:
+
+1. base system contract;
+2. bounded project/user docs;
+3. model-family hint last (volatile suffix).
+
+Anthropic models through OpenPaths/OpenRouter mark only the spine with
+`cache_control`; the model hint is a trailing uncached text block. OpenAI
+GPT-5.6 API-key traffic uses a prefix-derived `prompt_cache_key` shared across
+sessions with the same spine, instead of a per-session shard. Goal tooling stays
+registered whenever a goal store is bound so enabling a goal does not reshuffle
+tool schemas mid-session.
+
 ### OpenAI
 
 For GPT-5.6 API-key requests, `auto` uses explicit cache mode with no breakpoint

@@ -101,6 +101,8 @@ def test_explicit_env_key_wins(tmp_path, monkeypatch):
 def test_max_plan_outranks_stray_openai_api_key(tmp_path, monkeypatch):
     _write_auth(tmp_path, expired=False)
     monkeypatch.delenv("MJJ_OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENPATHS_API_KEY", raising=False)
+    monkeypatch.delenv("MJJ_OPENPATHS_API_KEY", raising=False)
     monkeypatch.setenv("OPENAI_API_KEY", "sk-metered")
     resolver = auth.CredentialResolver(max_plan=auth.MaxPlanCredentials(home=tmp_path))
     assert resolver.resolve().kind == "chatgpt"
@@ -108,6 +110,8 @@ def test_max_plan_outranks_stray_openai_api_key(tmp_path, monkeypatch):
 
 def test_falls_back_to_env_key_when_no_credential(tmp_path, monkeypatch):
     monkeypatch.delenv("MJJ_OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENPATHS_API_KEY", raising=False)
+    monkeypatch.delenv("MJJ_OPENPATHS_API_KEY", raising=False)
     monkeypatch.setenv("OPENAI_API_KEY", "sk-metered")
     empty = auth.MaxPlanCredentials(home=tmp_path)  # no auth.json here
     cred = auth.CredentialResolver(max_plan=empty).resolve()
@@ -116,6 +120,8 @@ def test_falls_back_to_env_key_when_no_credential(tmp_path, monkeypatch):
 
 def test_can_prefer_env_key_after_max_plan_auth_failure(tmp_path, monkeypatch):
     _write_auth(tmp_path, expired=False)
+    monkeypatch.delenv("OPENPATHS_API_KEY", raising=False)
+    monkeypatch.delenv("MJJ_OPENPATHS_API_KEY", raising=False)
     monkeypatch.setenv("OPENAI_API_KEY", "sk-metered")
     resolver = auth.CredentialResolver(
         max_plan=auth.MaxPlanCredentials(home=tmp_path)
@@ -127,6 +133,8 @@ def test_can_prefer_env_key_after_max_plan_auth_failure(tmp_path, monkeypatch):
 def test_raises_when_nothing_is_available(tmp_path, monkeypatch):
     monkeypatch.delenv("MJJ_OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENPATHS_API_KEY", raising=False)
+    monkeypatch.delenv("MJJ_OPENPATHS_API_KEY", raising=False)
     with pytest.raises(auth.AuthError):
         auth.CredentialResolver(
             max_plan=auth.MaxPlanCredentials(home=tmp_path)
@@ -194,11 +202,50 @@ def test_deepseek_uses_compatible_chat_api(tmp_path, monkeypatch):
     )
 
 
+def test_explicit_openai_prefers_api_key_over_chatgpt_session(tmp_path, monkeypatch):
+    _write_auth(tmp_path, expired=False)
+    monkeypatch.setenv("MJJ_HOME", str(tmp_path / "mjj-home"))
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-openai")
+    monkeypatch.delenv("MJJ_OPENAI_API_KEY", raising=False)
+
+    credential = auth.CredentialResolver(
+        provider="openai",
+        max_plan=auth.MaxPlanCredentials(home=tmp_path),
+    ).resolve()
+
+    assert credential.provider == "openai"
+    assert credential.token == "sk-test-openai"
+    assert credential.base_url == "https://api.openai.com/v1"
+    assert credential.api_style == "responses"
+
+
+def test_auto_deepseek_model_prefers_deepseek_key(tmp_path, monkeypatch):
+    monkeypatch.setenv("MJJ_HOME", str(tmp_path))
+    monkeypatch.delenv("MJJ_OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("MJJ_OPENPATHS_API_KEY", raising=False)
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.delenv("MJJ_DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.setenv("OPENPATHS_API_KEY", "op-should-lose")
+    auth.save_provider_key("deepseek", "sk-deepseek")
+
+    credential = auth.CredentialResolver(
+        provider="auto",
+        model="deepseek-v4-flash",
+        max_plan=auth.MaxPlanCredentials(home=tmp_path / "empty"),
+    ).resolve()
+
+    assert credential.provider == "deepseek"
+    assert credential.token == "sk-deepseek"
+    assert credential.api_style == "chat_completions"
+
+
 @pytest.mark.parametrize("malformed", ["[]", '{"providers": []}'])
 def test_saving_provider_key_repairs_malformed_auth_document(
     tmp_path, monkeypatch, malformed
 ):
     monkeypatch.setenv("MJJ_HOME", str(tmp_path))
+    monkeypatch.delenv("OPENPATHS_API_KEY", raising=False)
+    monkeypatch.delenv("MJJ_OPENPATHS_API_KEY", raising=False)
     (tmp_path / "auth.json").write_text(malformed, encoding="utf-8")
 
     auth.save_provider_key("openpaths", "op-secret")

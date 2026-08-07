@@ -29,6 +29,7 @@ These pages document the `mjj` CLI, Python package, and hosted agent backend.
 
 ## Contribute or operate
 
+- [Dogfooding / self-edit](../developers.md) — run source, persist defaults, rebuild
 - [Development guide](../DEV.md) and [contributing](../CONTRIBUTING.md)
 - [Hosted server](server.md)
 - [Visualbench](../visualbench/README.md)

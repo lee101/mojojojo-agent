@@ -194,6 +194,24 @@ def test_retry_status_and_request_fallback_when_stream_never_starts(monkeypatch)
     assert calls == [True]
 
 
+def test_stream_required_errors_skip_nonstream_fallback(monkeypatch):
+    client = ModelClient(resolver=Resolver(), max_retries=1)
+
+    def stream_once(_credential, _body):
+        raise ModelError(
+            'HTTP 400: {"detail":"Stream must be set to true"}',
+            status=400,
+            retryable=True,
+        )
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(client, "_stream_once", stream_once)
+    monkeypatch.setattr("mjj.model.time.sleep", lambda _seconds: None)
+
+    with pytest.raises(ModelError, match="Stream must be set to true"):
+        list(client.stream([], "brief"))
+
+
 def test_partial_stream_is_never_replayed_as_a_request(monkeypatch):
     client = ModelClient(resolver=Resolver(), max_retries=4)
     calls = 0
@@ -257,12 +275,13 @@ def test_openai_56_cache_policy_marks_only_a_reused_stable_prefix():
 
     assert cold["prompt_cache_options"] == {"mode": "explicit"}
     assert cold["input"] == []
+    assert cold["prompt_cache_key"].startswith("mjj:")
     assert warm["prompt_cache_options"] == {"mode": "explicit", "ttl": "30m"}
     assert warm["input"][0]["role"] == "developer"
     assert warm["input"][0]["content"][0]["prompt_cache_breakpoint"] == {
         "mode": "explicit"
     }
-    assert warm["prompt_cache_key"].startswith("mjj:")
+    assert warm["prompt_cache_key"] == cold["prompt_cache_key"]
 
 
 def test_openai_56_implicit_cache_keeps_a_stable_routing_key():
@@ -317,10 +336,16 @@ def test_transport_retry_does_not_look_like_prefix_reuse(monkeypatch):
     list(client.stream([], "stable instructions " * 300))
 
     assert len(bodies) == 2
-    assert all("prompt_cache_key" not in body for body in bodies)
+    assert bodies[0]["prompt_cache_key"] == bodies[1]["prompt_cache_key"]
+    assert all(body["input"] == [] for body in bodies)
+    assert all(
+        body.get("prompt_cache_options") == {"mode": "explicit"} for body in bodies
+    )
 
 
-def test_anthropic_chat_request_gets_adaptive_cache_control():
+def test_anthropic_chat_request_caches_stable_spine_not_model_hint():
+    from mjj.prompt import for_model
+
     credential = Credential(
         "api_key",
         "op-test",
@@ -329,12 +354,20 @@ def test_anthropic_chat_request_gets_adaptive_cache_control():
         api_style="chat_completions",
     )
     client = ModelClient(model="claude-sonnet-4-6", cache_mode="auto")
-    instructions = "stable instructions " * 300
+    instructions = (
+        "stable instructions " * 300
+        + "\n\n--- project-doc ---\n\nrepo contract"
+    )
+    rendered = for_model(instructions, "grok-4.5")
 
-    body = client.chat_request_body([], instructions, [], credential)
+    body = client.chat_request_body([], rendered, [], credential)
 
-    system = body["messages"][0]["content"][0]
-    assert system["cache_control"] == {"type": "ephemeral", "ttl": "5m"}
+    blocks = body["messages"][0]["content"]
+    assert isinstance(blocks, list)
+    assert blocks[0]["text"] == instructions
+    assert blocks[0]["cache_control"] == {"type": "ephemeral", "ttl": "5m"}
+    assert "favor exact tool calls" in blocks[1]["text"]
+    assert "cache_control" not in blocks[1]
 
 
 def test_custom_chat_gateway_does_not_receive_anthropic_cache_extensions():

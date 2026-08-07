@@ -15,6 +15,7 @@ def test_repository_local_markdown_links_resolve() -> None:
         ROOT / "AGENTS.md",
         ROOT / "CONTRIBUTING.md",
         ROOT / "DEV.md",
+        ROOT / "developers.md",
     ]
     documents.extend(sorted((ROOT / "docs").glob("*.md")))
     broken: list[str] = []
@@ -36,5 +37,6 @@ def test_always_loaded_agent_instructions_stay_concise() -> None:
 
     assert len(instructions) <= AGENT_INSTRUCTION_MAX_BYTES, (
         "AGENTS.md is injected into every repository turn; move discoverable "
-        "detail to DEV.md or docs/ instead of increasing its 4 KiB budget"
+        "detail to DEV.md, developers.md, or docs/ instead of increasing its "
+        "4 KiB budget"
     )

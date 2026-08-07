@@ -192,7 +192,24 @@ def test_active_goal_continues_then_stops_when_model_marks_complete(
     first_user = agent.items[0]["content"][0]["text"]
     assert "Make the router tests pass" in first_user
     assert "Call goal complete only after" in first_user
-    assert "goal" not in agent.registry.tools
+    assert "goal" in agent.registry.tools
+
+
+def test_goal_store_keeps_tool_schema_stable_without_active_goal(tmp_path, monkeypatch):
+    monkeypatch.setenv("MJJ_HOME", str(tmp_path / "home"))
+    store = GoalStore(tmp_path)
+    agent = Agent(
+        registry=Registry(),
+        client=ModelClient(),
+        cwd=tmp_path,
+        instructions="test",
+        goal_store=store,
+    )
+    assert "goal" in agent.registry.tools
+    names = [schema["name"] for schema in agent.registry.schemas()]
+    store.set("Stabilize schemas")
+    agent.bind_goal_store(store)
+    assert [schema["name"] for schema in agent.registry.schemas()] == names
 
 
 def test_goal_turn_budget_checkpoints_without_discarding_goal(tmp_path, monkeypatch):

@@ -4,6 +4,10 @@ Kept short on purpose. It is resent on every turn of every session; a
 paragraph that only helps one task in fifty is a permanent tax on the other
 forty-nine. Tool-specific detail belongs in the tool's own description, where
 the model reads it in the same place it decides to call it.
+
+Layout is cache-aware: the stable spine (base contract + project docs) comes
+first; model-family hints are appended last so switching models only changes
+the suffix and shared prefixes stay reusable.
 """
 
 SYSTEM_PROMPT = """You are mjj, a coding agent working in a real repository.
@@ -25,6 +29,8 @@ Tools:
   parsing, counting, simulating, checking a hypothesis against data.
 - `skill` lists and loads specialized workflows. Load a matching skill before
   doing domain-specific work; its bundled paths can then be read normally.
+- `read_image` attaches a workspace screenshot/mockup as quality-85 WebP for
+  vision. Prefer it over guessing UI feel from CSS alone.
 
 Style:
 - Match the surrounding code. Its conventions beat your preferences.
@@ -36,6 +42,7 @@ Style:
 
 
 _PROJECT_DOC_MARKER = "\n\n--- project-doc ---\n\n"
+_MODEL_HINT_MARKER = "\n\n--- model-hint ---\n\n"
 _MODEL_HINTS = {
     "codex": "For Codex models, keep working through tools until the requested change is verified.",
     "grok": "For Grok models, favor exact tool calls over narration and keep working until verified.",
@@ -58,12 +65,45 @@ def model_family(model: str) -> str:
 
 
 def for_model(instructions: str, model: str) -> str:
-    """Add one model-family hint while leaving repository rules last."""
+    """Append one model-family hint after the stable instruction spine."""
     hint = _MODEL_HINTS.get(model_family(model))
     if not hint or hint in instructions:
         return instructions
-    base, marker, project = instructions.partition(_PROJECT_DOC_MARKER)
-    return f"{base}\n\n{hint}{marker}{project}"
+    stable, _volatile = split_cache_layers(instructions)
+    return f"{stable}{_MODEL_HINT_MARKER}{hint}"
 
 
-__all__ = ["SYSTEM_PROMPT", "for_model", "model_family"]
+def split_cache_layers(instructions: str) -> tuple[str, str]:
+    """Split instructions into a reusable prefix and a volatile suffix.
+
+    Project docs stay in the stable spine. Model-family hints are volatile so
+    Anthropic-style block caching can mark only the shared prefix.
+    """
+    if _MODEL_HINT_MARKER in instructions:
+        stable, _, volatile = instructions.partition(_MODEL_HINT_MARKER)
+        return stable, volatile
+    # Legacy mid-spine hints from older builds: keep project docs stable.
+    if _PROJECT_DOC_MARKER in instructions:
+        base, marker, rest = instructions.partition(_PROJECT_DOC_MARKER)
+        for hint in _MODEL_HINTS.values():
+            needle = f"\n\n{hint}"
+            if needle in base:
+                base = base.replace(needle, "", 1)
+                return f"{base}{marker}{rest}", hint
+            if base.endswith(hint):
+                return f"{base[: -len(hint)].rstrip()}{marker}{rest}", hint
+    for hint in _MODEL_HINTS.values():
+        needle = f"\n\n{hint}"
+        if instructions.endswith(needle):
+            return instructions[: -len(needle)], hint
+        if needle in instructions and _PROJECT_DOC_MARKER not in instructions:
+            return instructions.replace(needle, "", 1), hint
+    return instructions, ""
+
+
+__all__ = [
+    "SYSTEM_PROMPT",
+    "for_model",
+    "model_family",
+    "split_cache_layers",
+]

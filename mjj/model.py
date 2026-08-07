@@ -25,6 +25,7 @@ from typing import Any, Iterator
 from .auth import AuthError, Credential, CredentialResolver
 from .model_routes import closest_effort, resolve_model, supported_efforts
 from .prompt import for_model as prompt_for_model
+from .prompt import split_cache_layers
 from .prompt_cache import CACHE_MODES, PromptCacheOptimizer
 
 DEFAULT_MODEL = os.environ.get("MJJ_MODEL", "gpt-5.6-sol")
@@ -165,6 +166,8 @@ class ModelClient:
         if self.cache_mode not in CACHE_MODES:
             self.cache_mode = "auto"
         self.cache_optimizer.mode = self.cache_mode
+        self.resolver.model = self.model
+        self.resolver.provider = self.provider
 
     def request_body(
         self,
@@ -206,11 +209,11 @@ class ModelClient:
             body["prompt_cache_options"] = {"mode": plan.mode}
             if plan.ttl:
                 body["prompt_cache_options"]["ttl"] = plan.ttl
-            if plan.mode == "implicit":
+            # Prefix-derived keys share KV across sessions with the same spine.
+            if self.cache_mode != "off":
                 body["prompt_cache_key"] = plan.key
             if plan.breakpoint:
                 body["input"] = [_openai_cache_boundary(), *input_items]
-                body["prompt_cache_key"] = plan.key
         elif self.cache_mode != "off" and self.cache_key:
             body["prompt_cache_key"] = self.cache_key
         if self.max_output_tokens > 0:
@@ -292,13 +295,17 @@ class ModelClient:
                 observe=observe_cache,
             )
             if plan.breakpoint:
-                body["messages"][0]["content"] = [
+                stable, volatile = split_cache_layers(rendered_instructions)
+                blocks = [
                     {
                         "type": "text",
-                        "text": rendered_instructions,
+                        "text": stable,
                         "cache_control": {"type": "ephemeral", "ttl": plan.ttl},
                     }
                 ]
+                if volatile:
+                    blocks.append({"type": "text", "text": volatile})
+                body["messages"][0]["content"] = blocks
         if self.max_output_tokens > 0:
             body["max_tokens"] = self.max_output_tokens
         return {key: value for key, value in body.items() if value is not None}
@@ -314,6 +321,8 @@ class ModelClient:
         auth_failures = 0
         emitted_content = False
         while True:
+            self.resolver.model = self.model
+            self.resolver.provider = self.provider
             credential = self.resolver.resolve(
                 force=auth_failures == 1,
                 fallback=auth_failures > 1,
@@ -392,7 +401,7 @@ class ModelClient:
                 if emitted_content:
                     raise
                 if not exc.retryable or attempt > self.max_retries:
-                    if exc.retryable:
+                    if exc.retryable and not _stream_required(exc):
                         yield Event(
                             "mjj.request_fallback",
                             {"message": "stream unavailable; retrying as one request"},
@@ -666,6 +675,11 @@ def _retryable_message(message: str) -> bool:
     )
 
 
+def _stream_required(exc: ModelError) -> bool:
+    """Some gateways reject the non-stream fallback; do not mask the real error."""
+    return "stream must be set to true" in str(exc).lower()
+
+
 def _chat_usage(usage: dict) -> dict:
     """Normalize Chat Completions token names to Responses names."""
     prompt_details = usage.get("prompt_tokens_details") or {}
@@ -897,7 +911,7 @@ def probe(model: str = "auto", provider: str = "auto") -> dict:
         provider=provider,
         effort="low",
         summary="auto",
-        resolver=CredentialResolver(provider=provider),
+        resolver=CredentialResolver(provider=provider, model=model),
     )
     text = []
     try:

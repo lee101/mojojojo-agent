@@ -56,8 +56,9 @@ boundary over adding another always-visible tool.
 
 - Lead with the user outcome and one runnable example.
 - Keep one canonical explanation; link to it instead of copying it.
-- Put contributor internals in `DEV.md`, user behavior in `docs/`, and only
-  always-relevant agent constraints in `AGENTS.md`.
+- Put contributor internals in `DEV.md`, dogfooding/self-edit in
+  `developers.md`, user behavior in `docs/`, and only always-relevant agent
+  constraints in `AGENTS.md`.
 - Keep commands copyable, local links valid, and claims reproducible.
 - Avoid workstation-specific paths, credential shapes, roadmap speculation,
   and comparison claims that are not tied to a pinned source.

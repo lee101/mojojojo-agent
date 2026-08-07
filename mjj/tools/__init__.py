@@ -21,6 +21,7 @@ MODULES = (
     "navigate",
     "check",
     "display",
+    "read_image",
     "py_exec",
     "skills",
     "plan",

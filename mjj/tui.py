@@ -677,6 +677,7 @@ class InteractiveApp:
             EFFORTS,
             direction,
         )
+        self._remember_defaults(announce=False)
 
     def _cycle_model(self, direction: int) -> None:
         models = _model_choices(self.provider)
@@ -685,8 +686,9 @@ class InteractiveApp:
             models,
             direction,
         )
+        self._align_provider_for_model(self.agent.client.model)
         self.agent.client.resolver.model = self.agent.client.model
-        self._remember_model(self.agent.client.model, announce=False)
+        self._remember_defaults(announce=False)
 
     def _cycle_verbosity(self, direction: int) -> None:
         self.agent.client.verbosity = _cycle_choice(
@@ -694,6 +696,7 @@ class InteractiveApp:
             VERBOSITIES,
             direction,
         )
+        self._remember_defaults(announce=False)
 
     def _toolbar(self):
         images = f" · {len(self.attachments)} image" if self.attachments else ""
@@ -1369,6 +1372,8 @@ class InteractiveApp:
                 print(exc)
                 return
             setattr(self.agent.client, name, current)
+            if name in {"effort", "verbosity"}:
+                self._remember_defaults()
         print(f"{name}: {current}")
 
     def _set_model(self, value: str) -> None:
@@ -1380,9 +1385,13 @@ class InteractiveApp:
                     print(f"model unchanged: {self.agent.client.model}")
                     return
                 self.agent.client.model = selected
+                self._align_provider_for_model(selected)
                 self.agent.client.resolver.model = selected
-                self._remember_model(selected)
-                print(f"model: {selected} · reasoning: {self.agent.client.effort}")
+                self._remember_defaults()
+                print(
+                    f"model: {selected} · reasoning: {self.agent.client.effort}"
+                    f" · provider: {self.provider}"
+                )
                 return
             self._show_models()
             return
@@ -1398,19 +1407,42 @@ class InteractiveApp:
             print(exc)
             return
         self.agent.client.model = selected
+        self._align_provider_for_model(selected)
         self.agent.client.resolver.model = selected
-        self._remember_model(selected)
-        print(f"model: {selected}")
+        self._remember_defaults()
+        print(f"model: {selected} · provider: {self.provider}")
 
-    def _remember_model(self, model: str, *, announce: bool = True) -> None:
-        """Persist the interactive model pick as the next-launch default."""
+    def _align_provider_for_model(self, model: str) -> None:
+        """When provider is auto, lock onto the one preset that owns this model."""
+        if self.provider != "auto":
+            return
+        owners = [
+            name
+            for name, models in MODEL_PRESETS.items()
+            if name not in {"auto", "custom"} and model in models
+        ]
+        if len(owners) != 1:
+            return
+        selected = owners[0]
+        self.agent.client.provider = selected
+        self.agent.client.resolver = auth.CredentialResolver(
+            provider=selected, model=model
+        )
+
+    def _remember_defaults(self, *, announce: bool = True) -> None:
+        """Persist interactive model/provider/effort/verbosity for the next launch."""
         try:
-            path = persist_user_agent_settings(model=model)
+            path = persist_user_agent_settings(
+                model=self.agent.client.model,
+                provider=self.provider,
+                effort=self.agent.client.effort,
+                verbosity=self.agent.client.verbosity,
+            )
         except Exception as exc:  # noqa: BLE001 - never block the session on prefs
-            print(f"warning: could not save model default ({exc})")
+            print(f"warning: could not save defaults ({exc})")
             return
         if announce:
-            print(f"saved default model → {path}")
+            print(f"saved defaults → {path}")
 
     def _set_provider(self, value: str) -> None:
         if not value:
@@ -1434,7 +1466,10 @@ class InteractiveApp:
         if previous_model in known_models and previous_model not in target_models:
             self.agent.client.model = "auto"
         self.agent.client.provider = selected
-        self.agent.client.resolver = auth.CredentialResolver(provider=selected)
+        self.agent.client.resolver = auth.CredentialResolver(
+            provider=selected, model=self.agent.client.model
+        )
+        self._remember_defaults()
         print(f"provider: {selected} · model: {self.agent.client.model}")
 
     def _show_models(self) -> None:
@@ -1544,7 +1579,10 @@ class InteractiveApp:
             return
         path = auth.save_provider_key(provider, key)
         self.agent.client.provider = provider
-        self.agent.client.resolver = auth.CredentialResolver(provider=provider)
+        self.agent.client.resolver = auth.CredentialResolver(
+            provider=provider, model=self.agent.client.model
+        )
+        self._remember_defaults(announce=False)
         print(f"saved {provider} credential to {path}")
 
     def _new_session(self) -> None:

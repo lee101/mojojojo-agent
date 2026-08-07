@@ -363,16 +363,27 @@ class CredentialResolver:
     In ``auto`` mode, explicit Mojojojo credentials win, followed by
     OpenPaths, an existing ChatGPT/Codex session, and finally an OpenAI key.
     Explicit provider selection only considers that provider's credentials.
+    When ``auto`` is paired with a DeepSeek model id and a DeepSeek key is
+    available, DeepSeek wins so the model is not sent to the wrong gateway.
     """
 
     max_plan: MaxPlanCredentials = field(default_factory=MaxPlanCredentials)
     provider: str = "auto"
+    model: str = "auto"
 
     def resolve(self, force: bool = False, fallback: bool = False) -> Credential:
         requested = self.provider.strip().lower()
         if requested not in ("auto", "openai"):
             return provider_credential(requested)
+        if requested == "openai":
+            # Explicit openai: prefer a real API key, then ChatGPT/Codex session.
+            if provider_key("openai")[0]:
+                return provider_credential("openai")
+            return self.max_plan.credential(force=force)
         if requested == "auto":
+            leaf = self.model.strip().lower().rsplit("/", 1)[-1]
+            if leaf.startswith("deepseek") and provider_key("deepseek")[0]:
+                return provider_credential("deepseek")
             # MJJ_OPENAI_API_KEY is explicitly scoped to this harness and wins.
             # Otherwise an OpenPaths key selects the project's native multi-LLM
             # path. OpenRouter is supported with --provider openrouter but is
@@ -386,11 +397,6 @@ class CredentialResolver:
                 )
             if provider_key("openpaths")[0]:
                 return provider_credential("openpaths")
-        if requested == "openai" and (
-            (os.environ.get("MJJ_OPENAI_API_KEY") or "").strip()
-            or _stored_provider_keys().get("openai")
-        ):
-            return provider_credential("openai")
         explicit = (os.environ.get("MJJ_OPENAI_API_KEY") or "").strip()
         if explicit:
             return Credential(

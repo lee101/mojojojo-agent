@@ -12,6 +12,7 @@ A fast, token-efficient coding agent for your terminal.
 [Releases](https://github.com/lee101/mojojojo-agent/releases) ·
 [Issues](https://github.com/lee101/mojojojo-agent/issues) ·
 [Development](DEV.md) ·
+[Dogfooding](developers.md) ·
 [MIT licence](LICENSE)
 
 MJJ reads a repository, edits files, runs tests, and reports the result like
@@ -166,7 +167,8 @@ from disk.
 ## Develop and benchmark
 
 The project is open source and tested on Windows, Linux, Python 3.10/3.13, and
-the pinned Mojo compiler. Start with [DEV.md](DEV.md) for architecture, native
+the pinned Mojo compiler. Use [developers.md](developers.md) when editing the
+agent with `uv run mjj`. Start with [DEV.md](DEV.md) for architecture, native
 builds, tests, benchmarks, and release work, or [CONTRIBUTING.md](CONTRIBUTING.md)
 for the contribution workflow.
 

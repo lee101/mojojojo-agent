@@ -1,18 +1,18 @@
 # Coding-agent feature parity
 
-This comparison was audited on 2026-08-05 against Pi Infinity synced to Pi
-0.83.0, the local Grok Infinity user guide, and local Codex commit
-`f5371bce8729`. Mojo Agent maintains coding-workflow parity while
-preserving its Python host, native Mojo acceleration, OpenPaths routing, and
-inline terminal UI. Product-specific services and presentation widgets are not
-part of that contract.
+This comparison was audited on 2026-08-07 against local Pi Infinity in
+`../badlogic/pi-mono` (coding-agent package), the local Grok Infinity user
+guide, and local Codex commit `f5371bce8729`. Mojo Agent maintains coding-
+workflow parity while preserving its Python host, native Mojo acceleration,
+OpenPaths routing, and inline terminal UI. Product-specific services and
+presentation widgets are not part of that contract.
 
 | Coding workflow | Pi / Grok / Codex reference | Mojo Agent |
 | --- | --- | --- |
-| Interactive default | `pinf` | `mjj` |
+| Interactive default | `pinf` / `pi` | `mjj` |
 | Headless and JSONL | print/JSON modes | `mjj exec`, `--json` |
 | In-app authentication | `/login`, `/logout` | `/login`, `/logout`, `/auth` |
-| Model and reasoning control | `/model`, settings, hotkeys | arrow-key `/model` picker with descriptions and numbered fallback; always-visible model/reasoning; Shift+Up/Down reasoning; Grok 4.5 and Codex presets; `/provider`, `/reasoning`, `/verbosity`; F2–F4 and Alt bindings |
+| Model and reasoning control | `/model`, settings, hotkeys | arrow-key `/model` picker with descriptions and numbered fallback; always-visible model/reasoning; Shift+Up/Down reasoning; Grok 4.5 and Codex presets; `/provider`, `/reasoning`, `/verbosity`; F2–F4 and Alt bindings; defaults persist to `$MJJ_HOME/config.toml` |
 | File references | Pi/Grok/Codex `@` completion and attachments | fuzzy `@path`, quoted paths, bounded text, and `@path:START-END` |
 | Multimodal prompts | clipboard/files | `/image`, `--image`, or `@image`; quality-85 bounded WebP |
 | Images in tool responses | terminal/media attachments | `display_image`, Kitty graphics, bounded ANSI fallback, `/preview` |
@@ -37,6 +37,7 @@ part of that contract.
 | Background execution | compiler and shell jobs | pollable compiler and shell jobs |
 | Active steering | follow-up input during a run | bounded hosted follow-up queue at safe model boundaries |
 | Provider reach | direct provider adapters | OpenAI plus OpenPaths/OpenRouter/custom compatible gateways |
+| Prompt-cache reuse | stable system/tools prefix; date/cwd trailing in Pi | shared instruction spine before model hints; prefix-derived cache keys; Anthropic block cache on spine only; append-only transcript |
 
 ## Deliberate product boundaries
 
@@ -57,6 +58,9 @@ identical:
 - Pi talks directly to a broader list of provider SDKs. Mojo Agent reaches
   additional models through OpenPaths or OpenRouter so one transcript and tool
   protocol stays consistent.
+- Pi injects the current date and cwd at the end of its system prompt. MJJ
+  keeps those out of the instruction spine; cwd is available through tools and
+  volatile steering stays in user turns so the shared prefix survives longer.
 
 The implemented and regression-tested surface covers the shared coding job: authenticate,
 select a model and reasoning level, attach files or images, inspect and edit a

@@ -155,6 +155,19 @@ be symlinks or leave the workspace.
 {"path":"visualbench/results/water.webp"}
 ```
 
+## `read_image`
+
+`read_image` prepares a workspace image for vision: orientation-correct,
+bounded to the 2048-pixel edge, encoded as quality-85 WebP, then attached to
+the next model turn. Use it for UI screenshots and `visualbench/output`
+captures before changing layout or art. The tool result is a short summary
+only; pixels travel as a normal vision attachment, not as base64 in the text
+channel.
+
+```json
+{"path":"visualbench/output/title.webp","note":"Is the overlay readable?"}
+```
+
 ## `check`
 
 `check` validates explicitly named files, files changed through `apply_patch`,

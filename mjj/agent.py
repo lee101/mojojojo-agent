@@ -93,14 +93,12 @@ class Agent:
             self.client.cache_key = f"mjj-{self.session.id}"
 
     def bind_goal_store(self, store: GoalStore) -> None:
-        """Bind durable goal state and expose its tool only while active."""
+        """Bind durable goal state and keep its tool schema in the stable prefix."""
         self.goal_store = store
         self.ctx.state["goal-store"] = store
-        goal = store.load()
-        if goal is not None and goal.status == "active":
-            self.registry.add(GoalTool())
-        else:
-            self.registry.tools.pop("goal", None)
+        # Always expose the tool while a store is bound so enabling a goal
+        # mid-session does not reshuffle tool schemas and bust the prompt cache.
+        self.registry.add(GoalTool())
 
     def current_goal(self) -> Goal | None:
         return self.goal_store.load() if self.goal_store is not None else None
@@ -262,7 +260,6 @@ class Agent:
                         text=goal.summary(),
                         meta={"id": goal.id, "status": goal.status},
                     )
-                    self.registry.tools.pop("goal", None)
                     return
                 autonomous = auto_next_steps or auto_next_idea
                 under_limit = (
@@ -348,6 +345,27 @@ class Agent:
             text=result.output,
             meta={"ok": result.ok, **result.meta},
         )
+        pending = self.ctx.state.pop("pending_vision", None)
+        if pending:
+            attachments = []
+            notes = []
+            for entry in pending:
+                attachment = entry.get("attachment")
+                if attachment is None:
+                    continue
+                attachments.append(attachment)
+                relative = entry.get("relative") or attachment.path.name
+                note = entry.get("note") or ""
+                notes.append(
+                    f"- {relative}" + (f" · {note}" if note else "")
+                )
+            if attachments:
+                prompt = (
+                    "Vision follow-up from read_image. Inspect the attached "
+                    "image(s) and continue the task with concrete visual feedback.\n"
+                    + "\n".join(notes)
+                )
+                self.user(prompt, tuple(attachments))
 
 
 def render(steps: Iterator[Step], out, verbose: bool = False) -> int:

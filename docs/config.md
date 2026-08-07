@@ -10,8 +10,11 @@ Configuration resolves in this order, from lowest to highest precedence:
 
 `mjj config` prints the resolved non-secret values and the files that supplied
 them. An explicit `--config PATH` is an additional file layer after the normal
-user and project files. Interactive `/model` (and F2 model cycling) writes the
-chosen model back into `$MJJ_HOME/config.toml` so the next launch keeps it.
+user and project files. Interactive `/model`, `/provider`, `/reasoning`, and
+`/verbosity` (plus the matching hotkeys) write those defaults back into
+`$MJJ_HOME/config.toml` so the next launch keeps them. Choosing a model that
+belongs to exactly one concrete provider while `provider = "auto"` also locks
+the provider onto that backend.
 
 ```toml
 [agent]

@@ -1,4 +1,8 @@
-"""On-demand goal control tool, installed only while a goal is active."""
+"""On-demand goal control tool.
+
+Registered whenever a goal store is bound so the tool schema stays in the
+stable prompt-cache prefix even before a goal is active.
+"""
 
 from __future__ import annotations
 

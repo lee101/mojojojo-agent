@@ -62,7 +62,7 @@ def _agent(args):
         provider=args.provider,
         effort=args.effort,
         verbosity=args.verbosity,
-        resolver=auth.CredentialResolver(provider=args.provider),
+        resolver=auth.CredentialResolver(provider=args.provider, model=args.model),
     )
     goal_store = GoalStore(cwd)
     requested_goal = getattr(args, "goal", None)

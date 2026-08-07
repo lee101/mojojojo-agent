@@ -1,8 +1,9 @@
 # MJJ development guide
 
-This is the engineering entry point for mojojojo-agent. User installation and
-daily commands stay in [README.md](README.md); detailed behavior lives under
-[docs/](docs/README.md).
+This is the engineering entry point for mojojojo-agent. For editing the agent
+with the agent itself, start with [developers.md](developers.md). User
+installation and daily commands stay in [README.md](README.md); detailed
+behavior lives under [docs/](docs/README.md).
 
 ## Local setup
 

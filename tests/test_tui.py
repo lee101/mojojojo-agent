@@ -53,6 +53,30 @@ def test_slash_commands_update_live_model_controls(tmp_path, monkeypatch, capsys
     assert agent.client.model == "openrouter/auto"
     assert agent.client.resolver.provider == "openrouter"
     assert "effort: max" in capsys.readouterr().out
+    text = (tmp_path / "home" / "config.toml").read_text(encoding="utf-8")
+    assert 'effort = "max"' in text
+    assert 'provider = "openrouter"' in text
+    assert 'model = "openrouter/auto"' in text
+
+
+def test_deepseek_model_locks_provider_and_persists(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("MJJ_HOME", str(tmp_path / "home"))
+    agent = Agent(
+        registry=Registry(),
+        client=ModelClient(model="auto", provider="auto", effort="high"),
+        cwd=tmp_path,
+        instructions="test",
+    )
+    app = InteractiveApp(agent, _args())
+    app.command("/model deepseek-v4-flash")
+    assert agent.client.model == "deepseek-v4-flash"
+    assert agent.client.provider == "deepseek"
+    assert agent.client.resolver.provider == "deepseek"
+    text = (tmp_path / "home" / "config.toml").read_text(encoding="utf-8")
+    assert 'model = "deepseek-v4-flash"' in text
+    assert 'provider = "deepseek"' in text
+    assert 'effort = "high"' in text
+    assert "saved defaults" in capsys.readouterr().out
 
 
 def test_auto_command_updates_live_autonomy_controls(tmp_path, monkeypatch, capsys):
@@ -377,10 +401,14 @@ def test_model_selection_accepts_number_substring_and_relative_change(
 
     app.command("/model")
     output = capsys.readouterr().out
-    assert "saved default model" in output
+    assert "saved defaults" in output
     assert "* 2. gpt-5.6-sol" in output
     assert "ambiguous model" in output
     assert "/model NUMBER|NAME|next|prev" in output
+    text = (tmp_path / "home" / "config.toml").read_text(encoding="utf-8")
+    assert 'effort = "high"' in text
+    assert 'verbosity = "medium"' in text
+    assert 'provider = "openai"' in text
 
 
 def test_model_picker_moves_with_arrows_and_accepts_enter() -> None:

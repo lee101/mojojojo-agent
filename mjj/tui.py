@@ -25,7 +25,8 @@ from typing import Callable
 try:
     if os.environ.get("MJJ_TUI", "").lower() == "basic":
         raise ImportError("basic TUI requested")
-    from prompt_toolkit import PromptSession, print_formatted_text
+    from prompt_toolkit import PromptSession
+    from prompt_toolkit import print_formatted_text as _pt_print_formatted_text
     from prompt_toolkit.application import Application
     from prompt_toolkit.completion import Completer, Completion
     from prompt_toolkit.formatted_text import ANSI, HTML, FormattedText
@@ -39,6 +40,13 @@ try:
     from prompt_toolkit.shortcuts import prompt as secure_prompt
     from prompt_toolkit.patch_stdout import patch_stdout
     from prompt_toolkit.styles import Style
+
+    def print_formatted_text(value, *, end="\n") -> None:
+        # Headless Windows runners have prompt-toolkit but no console buffer.
+        try:
+            _pt_print_formatted_text(value, end=end)
+        except Exception:
+            print(str(value), end=end)
 
     RICH_TUI = True
 except ImportError:

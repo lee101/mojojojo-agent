@@ -61,15 +61,16 @@ class DelegateTool:
             for result in results:
                 client.usage.merge(result.usage)
         ok = bool(results) and all(result.ok for result in results)
-        return self._result(
-            ctx,
-            body,
-            ok=ok,
-            tasks=len(results),
-            commits=[result.commit for result in results if result.commit],
-            sessions=[result.session_id for result in results if result.session_id],
-            plan=advanced,
-        )
+        meta = {
+            "tasks": len(results),
+            "commits": [result.commit for result in results if result.commit],
+            "sessions": [
+                result.session_id for result in results if result.session_id
+            ],
+        }
+        if advanced is not None:
+            meta["plan"] = advanced
+        return self._result(ctx, body, ok=ok, **meta)
 
     @staticmethod
     def _result(ctx: ToolContext, text: str, *, ok: bool, **meta) -> ToolResult:

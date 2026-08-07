@@ -561,7 +561,7 @@ class RepositoryIndex:
                 if event.get("type") != "match":
                     continue
                 data = event["data"]
-                path = str(data["path"]["text"]).removeprefix("./")
+                path = _relative_path(str(data["path"]["text"]))
                 if path not in self.files:
                     continue
                 line = int(data["line_number"])
@@ -909,7 +909,7 @@ def _discover_files(root: Path) -> dict[str, tuple[int, int]]:
         paths = _walk_files(root)
     result: dict[str, tuple[int, int]] = {}
     for relative in sorted(set(paths)):
-        relative = relative.replace(os.sep, "/").removeprefix("./")
+        relative = _relative_path(relative)
         if not relative or _hard_skipped(relative):
             continue
         path = root / relative
@@ -1098,11 +1098,16 @@ def _hard_skipped(path: str) -> bool:
     return any(part.lower() in _HARD_SKIP_DIRS for part in Path(path).parts)
 
 
-def _normalise_scope(scope: str) -> str:
-    value = scope.replace("\\", "/").strip()
+def _relative_path(path: str) -> str:
+    """Normalise ripgrep/git walk paths to the index's posix relative keys."""
+    value = path.replace("\\", "/").strip()
     while value.startswith("./"):
         value = value[2:]
-    value = value.strip("/")
+    return value
+
+
+def _normalise_scope(scope: str) -> str:
+    value = _relative_path(scope).strip("/")
     if value in {"", "."}:
         return ""
     if value == ".." or value.startswith("../") or "/../" in value:

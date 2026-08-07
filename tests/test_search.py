@@ -212,7 +212,7 @@ def test_python_vector_scan_finds_naming_variant() -> None:
 
 
 def test_repository_mojo_search_build_is_preferred_to_optional_peer() -> None:
-    candidates = _library_candidates()
+    candidates = [Path(path).as_posix() for path in _library_candidates()]
     local = next(
         i
         for i, path in enumerate(candidates)
@@ -410,6 +410,55 @@ def test_auto_exact_search_skips_vector_scan(tmp_path: Path, monkeypatch) -> Non
     hits = index.search("refresh_access_token", mode="auto", limit=8)
 
     assert hits
+    assert hits[0].sources == ("literal",)
+
+
+def test_literal_rg_accepts_windows_relative_paths(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _write_fixture(tmp_path)
+    index = build_index(tmp_path)
+    payload = (
+        '{"type":"match","data":{"path":{"text":".\\\\app.py"},'
+        '"lines":{"text":"def refresh_access_token(value):\\n"},'
+        '"line_number":7,"submatches":[{"start":4,"end":25}]}}\n'
+    )
+
+    class FakeStdout:
+        def __init__(self, lines) -> None:
+            self._lines = iter(lines)
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            return next(self._lines)
+
+        def close(self) -> None:
+            return None
+
+    class FakeProcess:
+        def __init__(self) -> None:
+            self.stdout = FakeStdout([payload])
+
+        def kill(self) -> None:
+            return None
+
+        def wait(self, timeout=None) -> int:
+            return 0
+
+    monkeypatch.setattr(index_module.shutil, "which", lambda _name: "rg")
+    monkeypatch.setattr(
+        index_module.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: FakeProcess(),
+    )
+
+    hits = index.search("refresh_access_token", mode="literal", limit=4)
+
+    assert hits
+    assert hits[0].chunk.path == "app.py"
+    assert hits[0].line == 7
     assert hits[0].sources == ("literal",)
 
 

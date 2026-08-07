@@ -18,10 +18,12 @@ def test_every_core_tool_imports_on_the_current_platform() -> None:
         "navigate",
         "py",
         "read",
+        "read_image",
         "search",
         "shell",
         "skill",
         "update_plan",
+        "verify",
     }
 
 

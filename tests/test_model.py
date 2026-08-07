@@ -626,6 +626,24 @@ def test_deepseek_chat_body_enables_thinking_and_maps_effort():
     assert "reasoning_effort" not in disabled
 
 
+def test_http_error_message_hints_on_insufficient_balance():
+    from mjj.model import _http_error_message
+
+    msg = _http_error_message(
+        402,
+        '{"error":{"message":"Insufficient Balance","type":"unknown_error"}}',
+    )
+    assert "HTTP 402" in msg
+    assert "Insufficient Balance" in msg
+    assert "Top up" in msg
+    assert "platform.deepseek.com" in msg
+    assert "--provider" in msg or "/provider" in msg
+
+    ordinary = _http_error_message(500, "boom")
+    assert ordinary == "HTTP 500: boom"
+    assert "Top up" not in ordinary
+
+
 def test_chat_history_groups_parallel_calls_before_tool_outputs():
     messages = _chat_messages(
         [

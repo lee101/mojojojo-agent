@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from ..model import ModelClient
-from ..subagents import SubagentRunner, validate_tasks
+from ..subagents import SubagentRunner, advance_plan_for_tasks, validate_tasks
 from .base import ToolContext, ToolResult
 
 
@@ -23,6 +23,10 @@ class DelegateTool:
                     "properties": {
                         "prompt": {"type": "string"},
                         "role": {"type": "string", "enum": ["reviewer", "worker"]},
+                        "plan_step": {
+                            "type": "string",
+                            "description": "Optional update_plan step label to mark completed on success.",
+                        },
                     },
                     "required": ["prompt"],
                     "additionalProperties": False,
@@ -48,6 +52,9 @@ class DelegateTool:
             results = runner.run(tasks, ctx.cwd)
         except Exception as exc:
             return self._result(ctx, f"delegation failed: {type(exc).__name__}: {exc}", ok=False)
+        advanced = advance_plan_for_tasks(ctx.state.get("plan"), tasks, results)
+        if advanced is not None:
+            ctx.state["plan"] = advanced
         body = "\n\n".join(result.render() for result in results)
         client = ctx.state.get("model-client")
         if isinstance(client, ModelClient):
@@ -61,6 +68,7 @@ class DelegateTool:
             tasks=len(results),
             commits=[result.commit for result in results if result.commit],
             sessions=[result.session_id for result in results if result.session_id],
+            plan=advanced,
         )
 
     @staticmethod

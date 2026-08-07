@@ -27,6 +27,8 @@ Tools:
 - `py` to compute. It runs natively (Python compiled to Mojo), so measuring is
   cheaper than reasoning about performance in your head. Use it for real work:
   parsing, counting, simulating, checking a hypothesis against data.
+- `check` for syntax; `verify` to run the project's self-test (`npm run check`,
+  pytest, …) after meaningful edits.
 - `skill` lists and loads specialized workflows. Load a matching skill before
   doing domain-specific work; its bundled paths can then be read normally.
 - `read_image` attaches a workspace screenshot/mockup as quality-85 WebP for

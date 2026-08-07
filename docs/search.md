@@ -157,38 +157,83 @@ Writes go to a sibling temporary file, are flushed, and replace the old index
 atomically. Corrupt, truncated, wrong-root, wrong-version, and wrong-dimension
 files are rebuilt.
 
-`mjj/search/vectors.py` loads the native backend only when a vector matrix is
-opened. It looks for the library named by `MJJ_MOJO_EMBED_LIB`, MJJ's own
-`build/libmjj_search.so`, the adjacent `../mojo-embed` checkout, a packaged
-copy, then the system library path. Its C ABI scans the vector and factor regions
-directly from the mmap with no NumPy or row copies. If the library is missing
-or its buffers cannot be bound, the same exact dot-product ranking runs using
-stdlib Python arrays. Search continues; only latency changes.
+`mjj/search/vectors.py` loads the native backend when tokenize, embed, or a
+vector matrix needs it. It looks for the library named by `MJJ_MOJO_EMBED_LIB`,
+MJJ's own `build/libmjj_search.so`, the adjacent `../mojo-embed` checkout, a
+packaged copy, then the system library path. Its C ABI tokenises identifiers,
+projects static embeddings, and scans the vector and factor regions directly
+from the mmap with no NumPy or row copies. If the library is missing or its
+buffers cannot be bound, the same pure-Python paths run. Search continues; only
+latency changes. `MJJ_ACCEL=0` disables the tokenize/embed exports while leaving
+the optional int8 scan available when the library is present.
 
-`mjj/search/embed.mojo` supplies the optional `mjj_search_i8_mmap` implementation for a
-repository-specific build. It is never compiled in the agent loop, and the
-prebuilt upstream ABI already has every entry point normal installs need.
+`mjj/search/embed.mojo` supplies `mjj_search_i8_mmap`, `mjj_tokenize`, and
+`mjj_static_embed` for a repository-specific build. It is never compiled in the
+agent loop. Embedding L2 normalisation stays in CPython so persisted index
+factors remain bit-compatible with the Python fallback.
 
 ## Measured benchmark
 
 Run:
 
 ```bash
-python bench/search_bench.py
+python bench/search_bench.py --corpus /path/to/corpus
+python bench/allocation_bench.py --corpus /path/to/corpus
+python -m mjj.kernels.bench
+pixi run mojo-check
 ```
 
-The benchmark creates its index in a temporary directory and uses
-`/nvme0n1-disk/code/mojojojo` as the real corpus. Fresh build and unchanged
-incremental times are single measured runs; the incremental run reuses the
-live index, as repeated tool calls do. Each query is warmed, then reports the
+The search benchmark creates its index in a temporary directory. Fresh build and
+unchanged incremental times are single measured runs; the incremental run reuses
+the live index, as repeated tool calls do. Each query is warmed, then reports the
 median of seven runs. MJJ time includes literal search, BM25, int8 scan, fusion,
 source-context reads, and formatting. The `rg` comparison is
 `rg -n -F QUERY .` from the corpus root. The naming-variant row also compares
 the ranked evidence with reading its complete top-result file. Returned tokens
 use the harness's dependency-free four-characters-per-token estimate.
 
-Measured on 2026-08-05 on the audit host with the repository-local Mojo
-`mjj_search_i8_mmap` backend:
+### Mojo tokenize / embed microbench (2026-08-07)
+
+Measured on this checkout with `build/libmjj_search.so` from `pixi run mojo-check`
+(`MJJ_ACCEL=1`). Kernel rows are medians from `python -m mjj.kernels.bench`;
+allocation rows use `bench/allocation_bench.py`'s 7409-character sample.
+
+| candidate | Python µs | Mojo µs | decision |
+| --- | ---: | ---: | --- |
+| identifier tokenizer | 1223.3 | 894.7 | keep |
+| static embedding 256d | 5674.5 | 492.1 | keep |
+
+Cold index of this repository (207 files / 2083 chunks, median of 3 builds):
+
+| path | median build |
+| --- | ---: |
+| Python fallback (`MJJ_ACCEL=0`) | 917.695 ms |
+| Mojo tokenize + embed | 603.173 ms |
+
+### Hybrid search vs `rg` (2026-08-07, this repository)
+
+```text
+Corpus: `/vfast/data/code/mojojojo-agent`
+Index: 207 files, 2083 chunks, mojo-embed backend; query time is median of 7 runs.
+
+| Case | MJJ time | rg time | MJJ tokens | rg tokens |
+|---|---:|---:|---:|---:|
+| Fresh index build | 641.28 ms | — | — | — |
+| Unchanged incremental index | 9.89 ms | — | — | — |
+| `errInsufficientCredits` | 6.20 ms | 6.19 ms | 33 | 35 |
+| `workerBootstrap` | 6.10 ms | 5.88 ms | 158 | 171 |
+| `mojojail` | 6.23 ms | 5.81 ms | 146 | 203 |
+| `billed_ms` | 6.24 ms | 5.23 ms | 27 | 29 |
+
+| Naming-variant case | MJJ time | MJJ tokens | rg tokens | Top result | Top-file read tokens |
+|---|---:|---:|---:|---|---:|
+| `worker_bootstrap` | 6.04 ms | 132 | 199 | `docs/search.md` | 2920 |
+```
+
+### Prior audit host (2026-08-05, `/nvme0n1-disk/code/mojojojo`)
+
+Measured on 2026-08-05 with the repository-local Mojo `mjj_search_i8_mmap`
+backend only (tokenize/embed still Python):
 
 ```text
 Corpus: `/nvme0n1-disk/code/mojojojo`
@@ -209,9 +254,10 @@ Index: 271 files, 3383 chunks, mojo-embed backend; query time is median of 5 run
 ```
 
 Decisive literal queries skip BM25/vector work. Broad queries retain the hybrid
-ranking while withholding 718 and 367 estimated tokens in the two broad rows.
-The naming variant has no literal `rg` hit, still ranks `vector_scaling.go`
-first, and returns 1548 fewer estimated tokens than reading that file.
+ranking while withholding 718 and 367 estimated tokens in the two broad rows of
+the 2026-08-05 audit. The naming variant there has no literal `rg` hit, still
+ranks `vector_scaling.go` first, and returns 1548 fewer estimated tokens than
+reading that file.
 
 `bench/retrieval_bench.py` adds an adversarial 120-match corpus, ignored and
 2 MiB files, a binary decoy, cursored pages, and schema accounting. On the same

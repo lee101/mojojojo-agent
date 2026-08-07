@@ -188,6 +188,13 @@ checkpoints every target first, and restores those files when a formatter
 fails. On Windows, an installed `pwsh` or Windows PowerShell parser provides
 compiler checks for `.ps1` files, and project `.exe`/`.cmd` tools are detected.
 
+## `verify`
+
+`verify` runs the workspace self-test: `npm run check` when present, else
+`make test` / `pytest` / `scripts/self-test.sh`. Prefer it after meaningful
+edits instead of inventing ad-hoc shell. Override with `command` when needed.
+CLI twin for the harness itself: `mjj self-test` (offline core pytest slice).
+
 ## `py`
 
 `py` routes safe pure computation through current-interpreter execution and

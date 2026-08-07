@@ -21,8 +21,13 @@ if str(SOURCE) not in sys.path:
     sys.path.insert(0, str(SOURCE))
 
 from mjj.search.index import build_index  # noqa: E402
-from mjj.search.lexical import tokenize  # noqa: E402
-from mjj.search.vectors import static_embedding  # noqa: E402
+from mjj.search.lexical import tokenize, tokenize_python  # noqa: E402
+from mjj.search.vectors import (  # noqa: E402
+    native_static_embedding_tokens,
+    native_tokenize,
+    static_embedding,
+    static_embedding_tokens_python,
+)
 
 SAMPLE = "\n".join(
     f"def HTTPServer{index}.refresh_access_token(worker_{index}): "
@@ -60,22 +65,53 @@ def _peak_bytes(call: Callable[[], object], repeats: int = 7) -> int:
 def benchmark(iterations: int = 100) -> dict:
     loops = max(1, int(iterations))
     embedding_loops = max(1, loops // 20)
+    sample_tokens = tokenize_python(SAMPLE)
+    latency = {
+        "tokenize_python": round(
+            _median_us(lambda: tokenize_python(SAMPLE), loops), 3
+        ),
+        "static_embedding_python": round(
+            _median_us(
+                lambda: static_embedding_tokens_python(sample_tokens),
+                embedding_loops,
+            ),
+            3,
+        ),
+        "tokenize": round(_median_us(lambda: tokenize(SAMPLE), loops), 3),
+        "static_embedding": round(
+            _median_us(
+                lambda: static_embedding(SAMPLE),
+                embedding_loops,
+            ),
+            3,
+        ),
+    }
+    peak = {
+        "tokenize_python": _peak_bytes(lambda: tokenize_python(SAMPLE)),
+        "static_embedding_python": _peak_bytes(
+            lambda: static_embedding_tokens_python(sample_tokens)
+        ),
+        "tokenize": _peak_bytes(lambda: tokenize(SAMPLE)),
+        "static_embedding": _peak_bytes(lambda: static_embedding(SAMPLE)),
+    }
+    if native_tokenize(SAMPLE) is not None:
+        latency["tokenize_mojo"] = latency["tokenize"]
+        peak["tokenize_mojo"] = peak["tokenize"]
+    if native_static_embedding_tokens(sample_tokens) is not None:
+        latency["static_embedding_mojo"] = round(
+            _median_us(
+                lambda: native_static_embedding_tokens(sample_tokens),
+                embedding_loops,
+            ),
+            3,
+        )
+        peak["static_embedding_mojo"] = _peak_bytes(
+            lambda: native_static_embedding_tokens(sample_tokens)
+        )
     return {
         "sample_chars": len(SAMPLE),
-        "latency_us": {
-            "tokenize": round(_median_us(lambda: tokenize(SAMPLE), loops), 3),
-            "static_embedding": round(
-                _median_us(
-                    lambda: static_embedding(SAMPLE),
-                    embedding_loops,
-                ),
-                3,
-            ),
-        },
-        "peak_bytes": {
-            "tokenize": _peak_bytes(lambda: tokenize(SAMPLE)),
-            "static_embedding": _peak_bytes(lambda: static_embedding(SAMPLE)),
-        },
+        "latency_us": latency,
+        "peak_bytes": peak,
     }
 
 
@@ -143,7 +179,16 @@ def markdown(report: dict) -> str:
         "| hot path | median latency | peak traced bytes |",
         "| --- | ---: | ---: |",
     ]
-    for name in ("tokenize", "static_embedding"):
+    for name in (
+        "tokenize_python",
+        "tokenize_mojo",
+        "tokenize",
+        "static_embedding_python",
+        "static_embedding_mojo",
+        "static_embedding",
+    ):
+        if name not in report["latency_us"]:
+            continue
         lines.append(
             f"| `{name}` | {report['latency_us'][name]:.3f} us | "
             f"{report['peak_bytes'][name]} |"

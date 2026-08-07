@@ -250,3 +250,23 @@ def test_tui_goal_command_persists_and_starts_the_objective(tmp_path, monkeypatc
     assert agent.current_goal().objective == "Make every focused test pass"
     assert "goal" in agent.registry.tools
     assert turns == ["Begin the active goal now and establish its first checkpoint."]
+
+
+def test_plan_continuation_lists_open_steps_only():
+    from mjj.agent import _plan_continuation
+
+    text = _plan_continuation(
+        {
+            "plan": {
+                "plan": [
+                    {"step": "done step", "status": "completed"},
+                    {"step": "now", "status": "in_progress"},
+                    {"step": "later", "status": "pending"},
+                ]
+            }
+        }
+    )
+    assert "now" in text and "later" in text
+    assert "done step" not in text
+    assert _plan_continuation({}) == ""
+    assert _plan_continuation(None) == ""

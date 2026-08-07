@@ -20,6 +20,7 @@ MODULES = (
     "search",
     "navigate",
     "check",
+    "verify",
     "display",
     "read_image",
     "py_exec",

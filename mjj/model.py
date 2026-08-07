@@ -47,6 +47,42 @@ class ModelError(RuntimeError):
         self.retryable = retryable
 
 
+def _http_error_message(status: int, detail: str) -> str:
+    """Turn provider HTTP failures into actionable agent errors."""
+    text = (detail or "").strip()
+    lower = text.lower()
+    billing = status == 402 or any(
+        needle in lower
+        for needle in (
+            "insufficient balance",
+            "insufficient credits",
+            "out of credits",
+            "payment required",
+            "quota exceeded",
+            "billing",
+        )
+    )
+    if billing:
+        hint = (
+            "Provider reports insufficient balance/credits. "
+            "Top up the provider account (DeepSeek: https://platform.deepseek.com), "
+            "or switch with `mjj /provider openpaths` / `--provider openai`."
+        )
+        body = text[:400] if text else "payment required"
+        return f"HTTP {status}: {body} — {hint}"
+    clipped = text[:600] if text else "no response body"
+    return f"HTTP {status}: {clipped}"
+
+
+def _raise_http_error(exc: urllib.error.HTTPError) -> None:
+    detail = exc.read(4096).decode("utf-8", "replace").strip()
+    raise ModelError(
+        _http_error_message(exc.code, detail),
+        status=exc.code,
+        retryable=exc.code in (401, 408, 409, 429, 500, 502, 503, 504),
+    ) from exc
+
+
 def _body_effort(body: dict) -> str:
     reasoning = body.get("reasoning")
     if isinstance(reasoning, dict):
@@ -444,10 +480,7 @@ class ModelClient:
             with urllib.request.urlopen(req, timeout=READ_TIMEOUT) as resp:
                 document = json.load(resp)
         except urllib.error.HTTPError as exc:
-            detail = exc.read(4096).decode("utf-8", "replace").strip()
-            raise ModelError(
-                f"HTTP {exc.code}: {detail[:600]}", status=exc.code
-            ) from exc
+            _raise_http_error(exc)
         except (urllib.error.URLError, TimeoutError, ValueError) as exc:
             raise ModelError(f"request fallback failed: {exc}") from exc
         if credential.api_style == "chat_completions":
@@ -515,12 +548,7 @@ class ModelClient:
         try:
             resp = urllib.request.urlopen(req, timeout=READ_TIMEOUT)
         except urllib.error.HTTPError as exc:
-            detail = exc.read(4096).decode("utf-8", "replace").strip()
-            raise ModelError(
-                f"HTTP {exc.code}: {detail[:600]}",
-                status=exc.code,
-                retryable=exc.code in (401, 408, 409, 429, 500, 502, 503, 504),
-            ) from exc
+            _raise_http_error(exc)
         except (urllib.error.URLError, TimeoutError) as exc:
             raise ModelError(f"connection failed: {exc}", retryable=True) from exc
         with resp:
@@ -567,12 +595,7 @@ class ModelClient:
         try:
             resp = urllib.request.urlopen(req, timeout=READ_TIMEOUT)
         except urllib.error.HTTPError as exc:
-            detail = exc.read(4096).decode("utf-8", "replace").strip()
-            raise ModelError(
-                f"HTTP {exc.code}: {detail[:600]}",
-                status=exc.code,
-                retryable=exc.code in (401, 408, 409, 429, 500, 502, 503, 504),
-            ) from exc
+            _raise_http_error(exc)
         except (urllib.error.URLError, TimeoutError) as exc:
             raise ModelError(f"connection failed: {exc}", retryable=True) from exc
 

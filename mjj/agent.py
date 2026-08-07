@@ -231,7 +231,9 @@ class Agent:
                     )
                     if under_limit:
                         autonomous_turns += 1
-                        follow_up = _goal_continuation(goal)
+                        follow_up = _goal_continuation(goal) + _plan_continuation(
+                            self.ctx.state
+                        )
                         self.user(follow_up)
                         yield Step(
                             kind="goal",
@@ -607,4 +609,30 @@ def _goal_continuation(goal: Goal) -> str:
         "Take the next concrete step, verify it, and record useful progress with the "
         "goal tool. Complete the goal only with evidence that its stopping condition "
         "has been met."
+    )
+
+
+def _plan_continuation(state: dict | None) -> str:
+    """Inject open update_plan steps into goal loops (prime-agent-style checklist)."""
+    if not isinstance(state, dict):
+        return ""
+    plan = state.get("plan")
+    steps = plan.get("plan") if isinstance(plan, dict) else None
+    if not isinstance(steps, list) or not steps:
+        return ""
+    lines = []
+    for item in steps:
+        if not isinstance(item, dict):
+            continue
+        status = str(item.get("status") or "pending")
+        step = str(item.get("step") or "").strip()
+        if not step or status == "completed":
+            continue
+        mark = ">" if status == "in_progress" else "-"
+        lines.append(f"{mark} [{status}] {step}")
+    if not lines:
+        return ""
+    return (
+        "\nActive plan (update_plan) — keep working the in_progress step, then advance:\n"
+        + "\n".join(lines[:12])
     )

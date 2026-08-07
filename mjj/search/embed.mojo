@@ -1,25 +1,48 @@
-"""Zero-copy int8 top-k scan used by MJJ's mmap search index."""
+"""Native search kernels: int8 top-k scan, identifier tokenize, static embed."""
 
 from std.algorithm import parallelize
+from std.math import sqrt
 from std.sys.info import num_performance_cores, simd_width_of as simdwidthof
 
 comptime F32Ptr = UnsafePointer[Float32, AnyOrigin[mut=True]]
+comptime F64Ptr = UnsafePointer[Float64, AnyOrigin[mut=True]]
 comptime I8Ptr = UnsafePointer[Int8, AnyOrigin[mut=True]]
+comptime I32Ptr = UnsafePointer[Int32, AnyOrigin[mut=True]]
 comptime I64Ptr = UnsafePointer[Int64, AnyOrigin[mut=True]]
+comptime U8Ptr = UnsafePointer[UInt8, AnyOrigin[mut=True]]
 comptime I8W = simdwidthof[DType.int8]()
 comptime PARALLEL_WORK_THRESHOLD = 100_000_000
+comptime TOKEN_PREFIX_LOW = UInt32(2774198458)
+comptime TOKEN_PREFIX_HIGH = UInt32(4130110811)
+comptime NGRAM_PREFIX_LOW = UInt32(911368588)
+comptime NGRAM_PREFIX_HIGH = UInt32(1696920685)
+comptime HASH_SIGN_BIT = UInt64(1) << 63
+comptime START_MARKER = UInt8(ord("^"))
+comptime END_MARKER = UInt8(ord("$"))
 
 
 def f32p(addr: Int) -> F32Ptr:
     return F32Ptr(unsafe_from_address=addr)
 
 
+def f64p(addr: Int) -> F64Ptr:
+    return F64Ptr(unsafe_from_address=addr)
+
+
 def i8p(addr: Int) -> I8Ptr:
     return I8Ptr(unsafe_from_address=addr)
 
 
+def i32p(addr: Int) -> I32Ptr:
+    return I32Ptr(unsafe_from_address=addr)
+
+
 def i64p(addr: Int) -> I64Ptr:
     return I64Ptr(unsafe_from_address=addr)
+
+
+def u8p(addr: Int) -> U8Ptr:
+    return U8Ptr(unsafe_from_address=addr)
 
 
 def dot_i8_ptr(a: I8Ptr, b: I8Ptr, n: Int) -> Int32:
@@ -127,3 +150,371 @@ def mjj_search_i8_mmap(
             slot -= 1
         output_scores[slot] = value
         output_ids[slot] = ids[row]
+
+
+def crc32_table() -> InlineArray[UInt32, 256]:
+    var table = InlineArray[UInt32, 256](fill=0)
+    var index = 0
+    while index < 256:
+        var crc = UInt32(index)
+        var bit = 0
+        while bit < 8:
+            if (crc & 1) != 0:
+                crc = (crc >> 1) ^ 0xEDB88320
+            else:
+                crc = crc >> 1
+            bit += 1
+        table[index] = crc
+        index += 1
+    return table
+
+
+comptime CRC32_TABLE = crc32_table()
+
+
+def crc32_update(data: U8Ptr, length: Int, value: UInt32) -> UInt32:
+    var crc = value ^ 0xFFFFFFFF
+    var i = 0
+    while i < length:
+        var index = Int((crc ^ UInt32(Int(data[i]))) & 0xFF)
+        crc = CRC32_TABLE[index] ^ (crc >> 8)
+        i += 1
+    return crc ^ 0xFFFFFFFF
+
+
+def is_ascii_alpha(byte: UInt8) -> Bool:
+    return (byte >= UInt8(ord("A")) and byte <= UInt8(ord("Z"))) or (
+        byte >= UInt8(ord("a")) and byte <= UInt8(ord("z"))
+    )
+
+
+def is_ascii_digit(byte: UInt8) -> Bool:
+    return byte >= UInt8(ord("0")) and byte <= UInt8(ord("9"))
+
+
+def is_ascii_alnum(byte: UInt8) -> Bool:
+    return is_ascii_alpha(byte) or is_ascii_digit(byte)
+
+
+def is_ascii_upper(byte: UInt8) -> Bool:
+    return byte >= UInt8(ord("A")) and byte <= UInt8(ord("Z"))
+
+
+def is_ascii_lower(byte: UInt8) -> Bool:
+    return byte >= UInt8(ord("a")) and byte <= UInt8(ord("z"))
+
+
+def to_ascii_lower(byte: UInt8) -> UInt8:
+    if is_ascii_upper(byte):
+        return byte + UInt8(32)
+    return byte
+
+
+def camel_boundary_before(word: U8Ptr, length: Int, index: Int) -> Bool:
+    if index <= 0 or index >= length:
+        return False
+    var prev = word[index - 1]
+    var curr = word[index]
+    if (is_ascii_lower(prev) or is_ascii_digit(prev)) and is_ascii_upper(curr):
+        return True
+    if (
+        is_ascii_upper(prev)
+        and is_ascii_upper(curr)
+        and index + 1 < length
+        and is_ascii_lower(word[index + 1])
+    ):
+        return True
+    return False
+
+
+def word_all_lower_or_digit(word: U8Ptr, length: Int) -> Bool:
+    var all_digit = True
+    var all_lower = True
+    var i = 0
+    while i < length:
+        var byte = word[i]
+        if not is_ascii_digit(byte):
+            all_digit = False
+        if not is_ascii_lower(byte):
+            all_lower = False
+        i += 1
+    return all_digit or all_lower
+
+
+def emit_token(
+    source: U8Ptr,
+    start: Int,
+    length: Int,
+    dest: U8Ptr,
+    out_cap: Int,
+    out_len: Int,
+    offsets: I32Ptr,
+    lengths: I32Ptr,
+    max_tokens: Int,
+    token_count: Int,
+) -> Tuple[Int, Int, Bool]:
+    """Copy one lowercased token. Returns (token_count, out_len, ok)."""
+    if token_count >= max_tokens or out_len + length > out_cap:
+        return (token_count, out_len, False)
+    offsets[token_count] = Int32(out_len)
+    lengths[token_count] = Int32(length)
+    var i = 0
+    while i < length:
+        dest[out_len + i] = to_ascii_lower(source[start + i])
+        i += 1
+    return (token_count + 1, out_len + length, True)
+
+
+def emit_word_tokens(
+    text: U8Ptr,
+    start: Int,
+    length: Int,
+    dest: U8Ptr,
+    out_cap: Int,
+    out_len: Int,
+    offsets: I32Ptr,
+    lengths: I32Ptr,
+    max_tokens: Int,
+    token_count: Int,
+) -> Tuple[Int, Int, Bool]:
+    var word = text + start
+    var count = token_count
+    var written = out_len
+    var ok = True
+    count, written, ok = emit_token(
+        word, 0, length, dest, out_cap, written, offsets, lengths, max_tokens, count
+    )
+    if not ok:
+        return (count, written, False)
+    if word_all_lower_or_digit(word, length):
+        return (count, written, True)
+
+    var piece_start = 0
+    var index = 1
+    while index < length:
+        if camel_boundary_before(word, length, index):
+            var piece_len = index - piece_start
+            if piece_len > 0 and piece_len != length:
+                count, written, ok = emit_token(
+                    word,
+                    piece_start,
+                    piece_len,
+                    dest,
+                    out_cap,
+                    written,
+                    offsets,
+                    lengths,
+                    max_tokens,
+                    count,
+                )
+                if not ok:
+                    return (count, written, False)
+            piece_start = index
+        index += 1
+    var tail_len = length - piece_start
+    if piece_start > 0 and tail_len > 0 and tail_len != length:
+        count, written, ok = emit_token(
+            word,
+            piece_start,
+            tail_len,
+            dest,
+            out_cap,
+            written,
+            offsets,
+            lengths,
+            max_tokens,
+            count,
+        )
+        if not ok:
+            return (count, written, False)
+    return (count, written, True)
+
+
+@export("mjj_tokenize")
+def mjj_tokenize(
+    text_addr: Int,
+    text_len: Int,
+    out_addr: Int,
+    out_cap: Int,
+    offsets_addr: Int,
+    lengths_addr: Int,
+    max_tokens: Int,
+    token_count_out_addr: Int,
+    out_len_out_addr: Int,
+) abi("C") -> Int:
+    """Tokenise ASCII identifiers. Returns 0 on success, 1 if buffers are short.
+
+    On success, *token_count_out / *out_len_out hold written sizes. On overflow
+    they hold a lower bound of what was consumed before capacity ran out; the
+    Python wrapper retries with a larger buffer.
+    """
+    if (
+        text_addr == 0
+        or out_addr == 0
+        or offsets_addr == 0
+        or lengths_addr == 0
+        or token_count_out_addr == 0
+        or out_len_out_addr == 0
+        or text_len < 0
+        or out_cap < 0
+        or max_tokens < 0
+    ):
+        return 1
+    var text = u8p(text_addr)
+    var dest = u8p(out_addr)
+    var offsets = i32p(offsets_addr)
+    var lengths = i32p(lengths_addr)
+    var token_count_out = i64p(token_count_out_addr)
+    var out_len_out = i64p(out_len_out_addr)
+    var token_count = 0
+    var out_len = 0
+    var ok = True
+    var index = 0
+    while index < text_len:
+        var byte = text[index]
+        if is_ascii_alpha(byte):
+            var start = index
+            index += 1
+            while index < text_len and is_ascii_alnum(text[index]):
+                index += 1
+            token_count, out_len, ok = emit_word_tokens(
+                text,
+                start,
+                index - start,
+                dest,
+                out_cap,
+                out_len,
+                offsets,
+                lengths,
+                max_tokens,
+                token_count,
+            )
+            if not ok:
+                token_count_out[0] = Int64(token_count)
+                out_len_out[0] = Int64(out_len)
+                return 1
+        elif is_ascii_digit(byte):
+            var start = index
+            index += 1
+            while index < text_len and is_ascii_digit(text[index]):
+                index += 1
+            token_count, out_len, ok = emit_word_tokens(
+                text,
+                start,
+                index - start,
+                dest,
+                out_cap,
+                out_len,
+                offsets,
+                lengths,
+                max_tokens,
+                token_count,
+            )
+            if not ok:
+                token_count_out[0] = Int64(token_count)
+                out_len_out[0] = Int64(out_len)
+                return 1
+        else:
+            index += 1
+    token_count_out[0] = Int64(token_count)
+    out_len_out[0] = Int64(out_len)
+    return 0
+
+
+def project_hashed(
+    values: F64Ptr,
+    dim: Int,
+    low: UInt32,
+    high: UInt32,
+    weight: Float64,
+):
+    var hashed = UInt64(Int(low)) | (UInt64(Int(high)) << 32)
+    var position = Int(hashed % UInt64(dim))
+    if (hashed & HASH_SIGN_BIT) != 0:
+        values[position] += weight
+    else:
+        values[position] -= weight
+
+
+def project_ngrams(
+    values: F64Ptr,
+    dim: Int,
+    marked: U8Ptr,
+    marked_len: Int,
+    width: Int,
+    weight: Float64,
+):
+    if marked_len < width:
+        return
+    var start = 0
+    while start <= marked_len - width:
+        var span = marked + start
+        var low = crc32_update(span, width, NGRAM_PREFIX_LOW)
+        var high = crc32_update(span, width, NGRAM_PREFIX_HIGH)
+        project_hashed(values, dim, low, high, weight)
+        start += 1
+
+
+def embed_token(values: F64Ptr, dim: Int, token: U8Ptr, length: Int, frequency: Int):
+    var token_weight = 1.5 * sqrt(Float64(frequency))
+    var low = crc32_update(token, length, TOKEN_PREFIX_LOW)
+    var high = crc32_update(token, length, TOKEN_PREFIX_HIGH)
+    project_hashed(values, dim, low, high, token_weight)
+
+    var marked = List[UInt8](capacity=length + 2)
+    marked.append(START_MARKER)
+    var i = 0
+    while i < length:
+        marked.append(token[i])
+        i += 1
+    marked.append(END_MARKER)
+    var marked_ptr = u8p(Int(marked.unsafe_ptr()))
+    var marked_len = len(marked)
+    project_ngrams(values, dim, marked_ptr, marked_len, 3, 0.45)
+    project_ngrams(values, dim, marked_ptr, marked_len, 4, 0.65)
+
+
+@export("mjj_static_embed")
+def mjj_static_embed(
+    tokens_addr: Int,
+    offsets_addr: Int,
+    lengths_addr: Int,
+    freqs_addr: Int,
+    token_count: Int,
+    out_addr: Int,
+    dim: Int,
+) abi("C") -> Int:
+    """Project unique tokens into an unnormalized float64 embedding.
+
+    Caller applies CPython ``sum``-compatible L2 normalisation so persisted
+    factors stay bit-compatible with the Python fallback.
+    """
+    if (
+        tokens_addr == 0
+        or offsets_addr == 0
+        or lengths_addr == 0
+        or freqs_addr == 0
+        or out_addr == 0
+        or dim <= 0
+        or token_count < 0
+    ):
+        return 1
+    var tokens = u8p(tokens_addr)
+    var offsets = i32p(offsets_addr)
+    var lengths = i32p(lengths_addr)
+    var freqs = i32p(freqs_addr)
+    var values = f64p(out_addr)
+    var i = 0
+    while i < dim:
+        values[i] = 0.0
+        i += 1
+    var index = 0
+    while index < token_count:
+        var length = Int(lengths[index])
+        var frequency = Int(freqs[index])
+        if length > 0 and frequency > 0:
+            embed_token(
+                values, dim, tokens + Int(offsets[index]), length, frequency
+            )
+        index += 1
+    return 0

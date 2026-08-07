@@ -32,8 +32,14 @@ from mjj.kernels import (
 )
 from mjj.ledger import Budget, Ledger
 from mjj.search.index import build_index
-from mjj.search.lexical import tokenize
-from mjj.search.vectors import Int8Vectors, quantize
+from mjj.search.lexical import tokenize_python
+from mjj.search.vectors import (
+    Int8Vectors,
+    native_static_embedding_tokens,
+    native_tokenize,
+    quantize,
+    static_embedding_tokens_python,
+)
 from mjj.tools.patch import _find_block
 
 QUERIES = (
@@ -176,15 +182,57 @@ def compact_benchmark() -> None:
         f"HTTPServer{index}.fetch_user auth_token path/to/source.py"
         for index in range(400)
     )
-    rows.append(
-        (
-            "identifier tokenizer",
-            "strings (unsupported)",
-            _median_us(lambda: tokenize(text), loops=100),
-            None,
-            "reject",
+    python_tokenize = _median_us(lambda: tokenize_python(text), loops=100)
+    native_tokens = native_tokenize(text)
+    if native_tokens is None:
+        rows.append(
+            (
+                "identifier tokenizer",
+                "mojo ABI",
+                python_tokenize,
+                None,
+                "fallback",
+            )
         )
+    else:
+        accelerated = _median_us(lambda: native_tokenize(text), loops=100)
+        rows.append(
+            (
+                "identifier tokenizer",
+                "mojo ABI",
+                python_tokenize,
+                accelerated,
+                "keep" if accelerated < python_tokenize else "loss",
+            )
+        )
+
+    sample_tokens = tokenize_python(text)
+    python_embed = _median_us(
+        lambda: static_embedding_tokens_python(sample_tokens), loops=20
     )
+    if native_static_embedding_tokens(sample_tokens) is None:
+        rows.append(
+            (
+                "static embedding 256d",
+                "mojo ABI",
+                python_embed,
+                None,
+                "fallback",
+            )
+        )
+    else:
+        accelerated = _median_us(
+            lambda: native_static_embedding_tokens(sample_tokens), loops=20
+        )
+        rows.append(
+            (
+                "static embedding 256d",
+                "mojo ABI",
+                python_embed,
+                accelerated,
+                "keep" if accelerated < python_embed else "loss",
+            )
+        )
 
     clipped_text = "\n".join(f"{index}: output line" for index in range(5_000))
     ledger = Ledger(Budget(default=600))

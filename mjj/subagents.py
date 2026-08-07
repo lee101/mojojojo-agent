@@ -33,6 +33,7 @@ ROLES = ("reviewer", "worker")
 class SubagentTask:
     prompt: str
     role: str = "reviewer"
+    plan_step: str | None = None
 
 
 @dataclass
@@ -401,11 +402,57 @@ def validate_tasks(raw: object) -> list[SubagentTask]:
             raise ValueError(f"task {index} must be an object")
         prompt = item.get("prompt")
         role = item.get("role", "reviewer")
+        plan_step = item.get("plan_step")
         if not isinstance(prompt, str) or not prompt.strip():
             raise ValueError(f"task {index} prompt must be a non-empty string")
         if len(prompt) > MAX_PROMPT_CHARS:
             raise ValueError(f"task {index} prompt exceeds {MAX_PROMPT_CHARS} characters")
         if role not in ROLES:
             raise ValueError(f"task {index} role must be one of: {', '.join(ROLES)}")
-        tasks.append(SubagentTask(prompt=prompt.strip(), role=role))
+        if plan_step is not None and (
+            not isinstance(plan_step, str) or not plan_step.strip()
+        ):
+            raise ValueError(f"task {index} plan_step must be a non-empty string")
+        tasks.append(
+            SubagentTask(
+                prompt=prompt.strip(),
+                role=role,
+                plan_step=plan_step.strip() if isinstance(plan_step, str) else None,
+            )
+        )
     return tasks
+
+
+def advance_plan_for_tasks(
+    plan_state: dict | None, tasks: list[SubagentTask], results: list[SubagentResult]
+) -> dict | None:
+    """Mark matching plan steps completed when their subagent succeeded."""
+    if not isinstance(plan_state, dict):
+        return plan_state
+    steps = plan_state.get("plan")
+    if not isinstance(steps, list):
+        return plan_state
+    completed_labels = {
+        task.plan_step
+        for task, result in zip(tasks, results)
+        if result.ok and task.plan_step
+    }
+    if not completed_labels:
+        return plan_state
+    updated = []
+    for item in steps:
+        if not isinstance(item, dict):
+            updated.append(item)
+            continue
+        step = item.get("step")
+        status = item.get("status")
+        if step in completed_labels and status != "completed":
+            updated.append({"step": step, "status": "completed"})
+        else:
+            updated.append({"step": step, "status": status})
+    if not any(item.get("status") == "in_progress" for item in updated if isinstance(item, dict)):
+        for item in updated:
+            if isinstance(item, dict) and item.get("status") == "pending":
+                item["status"] = "in_progress"
+                break
+    return {**plan_state, "plan": updated}

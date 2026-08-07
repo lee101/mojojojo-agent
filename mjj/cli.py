@@ -522,6 +522,14 @@ def cmd_visualize(args) -> int:
     return 0
 
 
+def cmd_self_test(args) -> int:
+    from .selftest import run_self_test
+
+    code, text = run_self_test(verbose=bool(getattr(args, "verbose", False)))
+    print(text)
+    return code
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv == ["--version"]:
@@ -763,6 +771,14 @@ def main(argv: list[str] | None = None) -> int:
     visual.add_argument("--json", action="store_true")
     visual.add_argument("-C", "--cd", "--cwd", dest="cwd", default=argparse.SUPPRESS)
     visual.set_defaults(func=cmd_visualize)
+
+    self_test = sub.add_parser(
+        "self-test", help="run the offline harness self-test suite"
+    )
+    self_test.add_argument(
+        "-v", "--verbose", action="store_true", help="verbose pytest output"
+    )
+    self_test.set_defaults(func=cmd_self_test)
 
     args = parser.parse_args(argv)
     _apply_loop_mode(args)

@@ -45,11 +45,19 @@ def static_embedding(text: str, dim: int = DIMENSION) -> list[float]:
     return static_embedding_tokens(tokenize(text), dim)
 
 
-def static_embedding_tokens(
+def _l2_normalize(values: list[float]) -> list[float]:
+    norm = math.sqrt(sum(value * value for value in values))
+    if not norm:
+        return values
+    inverse = 1.0 / norm
+    return [value * inverse for value in values]
+
+
+def static_embedding_tokens_python(
     tokens: Iterable[str],
     dim: int = DIMENSION,
 ) -> list[float]:
-    """Embed an existing ordered token stream without tokenizing it again."""
+    """Pure-Python static embedding used as the portable fallback."""
     if dim <= 0:
         raise ValueError("vector dimension must be positive")
     values = [0.0] * dim
@@ -82,11 +90,21 @@ def static_embedding_tokens(
                 span.release()
                 project(values, low, high, weight)
         marked_bytes.release()
-    norm = math.sqrt(sum(value * value for value in values))
-    if norm:
-        inverse = 1.0 / norm
-        values = [value * inverse for value in values]
-    return values
+    return _l2_normalize(values)
+
+
+def static_embedding_tokens(
+    tokens: Iterable[str],
+    dim: int = DIMENSION,
+) -> list[float]:
+    """Embed an existing ordered token stream without tokenizing it again."""
+    if dim <= 0:
+        raise ValueError("vector dimension must be positive")
+    materialised = list(tokens)
+    native = native_static_embedding_tokens(materialised, dim)
+    if native is not None:
+        return native
+    return static_embedding_tokens_python(materialised, dim)
 
 
 def quantize(values: Sequence[float]) -> tuple[bytes, float]:
@@ -142,19 +160,22 @@ def _library_candidates() -> list[str]:
 
 
 class MojoBackend:
-    """Guarded ctypes binding to mojo-embed's zero-copy top-k function."""
+    """Guarded ctypes binding to Mojo search/tokenize/embed exports."""
 
     def __init__(self) -> None:
         self.library: ctypes.CDLL | None = None
         self.path = ""
         self.error = ""
+        self.search_function = None
+        self.tokenize_function = None
+        self.embed_function = None
+        integer = ctypes.c_ssize_t
         for candidate in _library_candidates():
             try:
                 library = ctypes.CDLL(candidate)
                 search = getattr(library, "mjj_search_i8_mmap", None)
                 if search is None:
                     search = getattr(library, "embed_search_i8")
-                integer = ctypes.c_ssize_t
                 search.argtypes = [
                     integer,
                     integer,
@@ -169,8 +190,18 @@ class MojoBackend:
                     ctypes.c_float,
                 ]
                 search.restype = None
+                tokenize = getattr(library, "mjj_tokenize", None)
+                embed = getattr(library, "mjj_static_embed", None)
+                if tokenize is not None:
+                    tokenize.argtypes = [integer] * 9
+                    tokenize.restype = ctypes.c_int
+                if embed is not None:
+                    embed.argtypes = [integer] * 7
+                    embed.restype = ctypes.c_int
                 self.library = library
                 self.search_function = search
+                self.tokenize_function = tokenize
+                self.embed_function = embed
                 self.path = candidate
                 break
             except (AttributeError, OSError) as exc:
@@ -179,6 +210,18 @@ class MojoBackend:
     @property
     def available(self) -> bool:
         return self.library is not None
+
+    @property
+    def tokenize_available(self) -> bool:
+        return self.tokenize_function is not None and _accel_requested()
+
+    @property
+    def embed_available(self) -> bool:
+        return self.embed_function is not None and _accel_requested()
+
+
+def _accel_requested() -> bool:
+    return os.environ.get("MJJ_ACCEL", "1") != "0"
 
 
 _BACKEND: MojoBackend | None = None
@@ -199,6 +242,98 @@ def _address(buffer, c_type) -> tuple[int, object]:
     view = memoryview(buffer)
     holder = (c_type * (view.nbytes // ctypes.sizeof(c_type))).from_buffer(view)
     return ctypes.addressof(holder), holder
+
+
+def native_tokenize(value: str) -> list[str] | None:
+    """Return Mojo tokens when the ABI is loaded; otherwise ``None``."""
+    backend = _default_backend()
+    if not backend.tokenize_available:
+        return None
+    encoded = value.encode("utf-8", "surrogatepass")
+    if not encoded:
+        return []
+    text = bytearray(encoded)
+    out_cap = max(64, len(text) * 3)
+    max_tokens = max(16, len(text) + 1)
+    for _ in range(3):
+        out = bytearray(out_cap)
+        offsets = array("i", [0]) * max_tokens
+        lengths = array("i", [0]) * max_tokens
+        token_count = ctypes.c_ssize_t(0)
+        out_len = ctypes.c_ssize_t(0)
+        text_address, text_holder = _address(text, ctypes.c_uint8)
+        out_address, out_holder = _address(out, ctypes.c_uint8)
+        offsets_address, offsets_holder = _address(offsets, ctypes.c_int32)
+        lengths_address, lengths_holder = _address(lengths, ctypes.c_int32)
+        _ = (text_holder, out_holder, offsets_holder, lengths_holder)
+        status = backend.tokenize_function(
+            text_address,
+            len(text),
+            out_address,
+            len(out),
+            offsets_address,
+            lengths_address,
+            max_tokens,
+            ctypes.addressof(token_count),
+            ctypes.addressof(out_len),
+        )
+        if status == 0:
+            tokens: list[str] = []
+            for index in range(int(token_count.value)):
+                start = int(offsets[index])
+                length = int(lengths[index])
+                tokens.append(bytes(out[start:start + length]).decode("ascii"))
+            return tokens
+        out_cap = max(out_cap * 2, int(out_len.value) + len(text) + 64)
+        max_tokens = max(max_tokens * 2, int(token_count.value) + 64)
+    return None
+
+
+def native_static_embedding_tokens(
+    tokens: Iterable[str],
+    dim: int = DIMENSION,
+) -> list[float] | None:
+    """Mojo projection + CPython L2; ``None`` when the ABI is unavailable."""
+    backend = _default_backend()
+    if not backend.embed_available or dim <= 0:
+        return None
+    frequencies: dict[str, int] = {}
+    for token in tokens:
+        frequencies[token] = frequencies.get(token, 0) + 1
+    if not frequencies:
+        return [0.0] * dim
+    parts: list[bytes] = []
+    offsets = array("i")
+    lengths = array("i")
+    freqs = array("i")
+    cursor = 0
+    for token, frequency in frequencies.items():
+        encoded = token.encode("utf-8", "surrogatepass")
+        offsets.append(cursor)
+        lengths.append(len(encoded))
+        freqs.append(int(frequency))
+        parts.append(encoded)
+        cursor += len(encoded)
+    blob = bytearray(b"".join(parts))
+    values = array("d", [0.0]) * dim
+    blob_address, blob_holder = _address(blob, ctypes.c_uint8)
+    offsets_address, offsets_holder = _address(offsets, ctypes.c_int32)
+    lengths_address, lengths_holder = _address(lengths, ctypes.c_int32)
+    freqs_address, freqs_holder = _address(freqs, ctypes.c_int32)
+    values_address, values_holder = _address(values, ctypes.c_double)
+    _ = (blob_holder, offsets_holder, lengths_holder, freqs_holder, values_holder)
+    status = backend.embed_function(
+        blob_address,
+        offsets_address,
+        lengths_address,
+        freqs_address,
+        len(offsets),
+        values_address,
+        dim,
+    )
+    if status != 0:
+        return None
+    return _l2_normalize([float(value) for value in values])
 
 
 class Int8Vectors:

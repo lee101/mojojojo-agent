@@ -602,6 +602,8 @@ def describe() -> dict:
     }
     if os.environ.get("MJJ_OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY"):
         out["env_api_key"] = True
+    if provider_key("deepseek")[0]:
+        out["deepseek_balance"] = fetch_deepseek_balance()
     if not home:
         return out
     try:
@@ -622,3 +624,55 @@ def describe() -> dict:
     if isinstance(auth, dict):
         out["plan"] = auth.get("chatgpt_plan_type")
     return out
+
+
+def fetch_deepseek_balance(timeout: float = 5.0) -> dict:
+    """Probe DeepSeek ``GET /user/balance`` (vtcode-style preflight).
+
+    Returns a redacted public dict — never the API key. Soft-fails with
+    ``{"error": ...}`` so ``/auth`` and ``/status`` stay usable offline.
+    """
+    key, source = provider_key("deepseek")
+    if not key:
+        return {"error": "no deepseek key", "source": None}
+    root = DEEPSEEK_BASE_URL.rstrip("/")
+    if root.endswith("/v1"):
+        root = root[:-3]
+    url = f"{root}/user/balance"
+    req = urllib.request.Request(url, method="GET")
+    req.add_header("Authorization", f"Bearer {key}")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            doc = json.load(resp)
+    except urllib.error.HTTPError as exc:
+        detail = exc.read(512).decode("utf-8", "replace").strip()
+        return {"error": f"HTTP {exc.code}", "detail": detail[:200], "source": source}
+    except (urllib.error.URLError, TimeoutError, ValueError, OSError) as exc:
+        return {"error": str(exc), "source": source}
+    infos = doc.get("balance_infos") if isinstance(doc, dict) else None
+    currencies = []
+    if isinstance(infos, list):
+        for item in infos:
+            if not isinstance(item, dict):
+                continue
+            currency = str(item.get("currency") or "")
+            total = str(item.get("total_balance") or "")
+            symbol = {"CNY": "¥", "USD": "$"}.get(currency, currency)
+            currencies.append(
+                {
+                    "currency": currency,
+                    "total": total,
+                    "display": f"{symbol}{total}" if symbol else total,
+                    "granted": str(item.get("granted_balance") or ""),
+                    "topped_up": str(item.get("topped_up_balance") or ""),
+                }
+            )
+    available = bool(doc.get("is_available")) if isinstance(doc, dict) else False
+    primary = currencies[0]["display"] if currencies else "n/a"
+    return {
+        "available": available,
+        "display": primary,
+        "currencies": currencies,
+        "source": source,
+        "ok": available,
+    }

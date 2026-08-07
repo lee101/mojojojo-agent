@@ -112,6 +112,46 @@ def test_tokenize_matches_reference_order_and_duplicates() -> None:
     assert tokenize(text) == expected
 
 
+def test_native_tokenize_and_embed_match_python_when_abi_present() -> None:
+    from mjj.search.lexical import tokenize_python
+    from mjj.search.vectors import (
+        native_static_embedding_tokens,
+        native_tokenize,
+        static_embedding_tokens_python,
+        _default_backend,
+    )
+
+    backend = _default_backend()
+    if not backend.tokenize_available or not backend.embed_available:
+        pytest.skip("Mojo search ABI with tokenize/embed not loaded")
+    texts = (
+        "",
+        "x A HTTP 123 !!!",
+        "lowercase lowercase 123 123 snake_case HTTPServer XMLHttpRequest",
+        "version2HTTPServer path/to/file.py CAPS lowerUPPER42Next",
+    )
+    for text in texts:
+        assert native_tokenize(text) == tokenize_python(text)
+        tokens = tokenize_python(text)
+        assert native_static_embedding_tokens(tokens, 256) == (
+            static_embedding_tokens_python(tokens, 256)
+        )
+
+
+def test_mjj_accel_disables_native_tokenize_and_embed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from mjj.search import vectors as vector_module
+    from mjj.search.lexical import tokenize_python
+
+    monkeypatch.setenv("MJJ_ACCEL", "0")
+    vector_module._BACKEND = None
+    assert vector_module.native_tokenize("HTTPServer") is None
+    assert vector_module.native_static_embedding_tokens(["http"], 8) is None
+    assert tokenize("HTTPServer") == tokenize_python("HTTPServer")
+    vector_module._BACKEND = None
+
+
 @pytest.mark.parametrize("dim", (1, 7, 256))
 @pytest.mark.parametrize(
     "text",

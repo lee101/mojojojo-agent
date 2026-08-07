@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 import ctypes
+import math
 import sys
 from pathlib import Path
 
 
-def main() -> int:
-    if len(sys.argv) != 2:
-        raise SystemExit("usage: native_search_smoke.py LIBRARY")
-    library = ctypes.CDLL(str(Path(sys.argv[1]).resolve()))
+def _check_search(library: ctypes.CDLL) -> None:
     search = library.mjj_search_i8_mmap
     integer = ctypes.c_ssize_t
     search.argtypes = [integer] * 10 + [ctypes.c_float]
@@ -40,6 +38,75 @@ def main() -> int:
 
     assert list(output_ids) == [30, 10], list(output_ids)
     assert list(output_scores) == [10.0, 5.0], list(output_scores)
+
+
+def _check_tokenize(library: ctypes.CDLL) -> None:
+    tokenize = library.mjj_tokenize
+    integer = ctypes.c_ssize_t
+    tokenize.argtypes = [integer] * 9
+    tokenize.restype = ctypes.c_int
+
+    text = b"HTTPServer.fetch_user"
+    text_buf = (ctypes.c_uint8 * len(text)).from_buffer_copy(text)
+    out = (ctypes.c_uint8 * 64)()
+    offsets = (ctypes.c_int32 * 16)()
+    lengths = (ctypes.c_int32 * 16)()
+    token_count = ctypes.c_ssize_t(0)
+    out_len = ctypes.c_ssize_t(0)
+    status = tokenize(
+        ctypes.addressof(text_buf),
+        len(text),
+        ctypes.addressof(out),
+        len(out),
+        ctypes.addressof(offsets),
+        ctypes.addressof(lengths),
+        len(offsets),
+        ctypes.addressof(token_count),
+        ctypes.addressof(out_len),
+    )
+    assert status == 0, status
+    tokens = []
+    for index in range(token_count.value):
+        start = offsets[index]
+        length = lengths[index]
+        tokens.append(bytes(out[start:start + length]).decode("ascii"))
+    assert tokens == ["httpserver", "http", "server", "fetch", "user"], tokens
+
+
+def _check_embed(library: ctypes.CDLL) -> None:
+    embed = library.mjj_static_embed
+    integer = ctypes.c_ssize_t
+    embed.argtypes = [integer] * 7
+    embed.restype = ctypes.c_int
+
+    token = b"http"
+    offsets = (ctypes.c_int32 * 1)(0)
+    lengths = (ctypes.c_int32 * 1)(len(token))
+    freqs = (ctypes.c_int32 * 1)(1)
+    values = (ctypes.c_double * 8)()
+    token_buf = (ctypes.c_uint8 * len(token)).from_buffer_copy(token)
+    status = embed(
+        ctypes.addressof(token_buf),
+        ctypes.addressof(offsets),
+        ctypes.addressof(lengths),
+        ctypes.addressof(freqs),
+        1,
+        ctypes.addressof(values),
+        8,
+    )
+    assert status == 0, status
+    assert any(value != 0.0 for value in values), list(values)
+    norm = math.sqrt(sum(value * value for value in values))
+    assert norm > 0.0
+
+
+def main() -> int:
+    if len(sys.argv) != 2:
+        raise SystemExit("usage: native_search_smoke.py LIBRARY")
+    library = ctypes.CDLL(str(Path(sys.argv[1]).resolve()))
+    _check_search(library)
+    _check_tokenize(library)
+    _check_embed(library)
     print("native search ABI ok")
     return 0
 

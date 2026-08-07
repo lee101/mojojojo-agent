@@ -16,13 +16,8 @@ _CAMEL_BOUNDARY = re.compile(
 )
 
 
-def tokenize(value: str) -> list[str]:
-    """Tokenise prose, paths, snake_case and camelCase identifiers.
-
-    Both the complete identifier and its components are retained.  Searching
-    for ``httpserver`` can therefore find ``HTTPServer``, while ``server`` can
-    find it too.
-    """
+def tokenize_python(value: str) -> list[str]:
+    """Pure-Python identifier tokenizer used as the portable fallback."""
     tokens: list[str] = []
     for match in _WORDS.finditer(value):
         word = match.group(0)
@@ -39,6 +34,22 @@ def tokenize(value: str) -> list[str]:
                 if lowered != whole:
                     tokens.append(lowered)
     return tokens
+
+
+def tokenize(value: str) -> list[str]:
+    """Tokenise prose, paths, snake_case and camelCase identifiers.
+
+    Both the complete identifier and its components are retained.  Searching
+    for ``httpserver`` can therefore find ``HTTPServer``, while ``server`` can
+    find it too.
+    """
+    # Lazy import avoids a module cycle with vectors' Mojo backend loader.
+    from mjj.search.vectors import native_tokenize
+
+    native = native_tokenize(value)
+    if native is not None:
+        return native
+    return tokenize_python(value)
 
 
 def term_frequencies(

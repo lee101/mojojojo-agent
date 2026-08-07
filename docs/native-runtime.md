@@ -50,13 +50,13 @@ pixel rendering requires `vision`.
 
 ## Why the control plane is not pure Mojo yet
 
-Search scoring, embedding scans, and supported execution kernels already use
-Mojo behind stable guarded boundaries. The session store, HTTP provider client,
-portable process layer, and terminal editor remain Python until their Mojo
-replacements can meet the same Windows and Linux behavior and fallback tests.
-The current Mojo distribution is not a reliable native Windows packaging target,
-so replacing those pieces today would remove Windows support rather than improve
-it.
+Search scoring, embedding scans, identifier tokenize/embed, and supported
+execution kernels already use Mojo behind stable guarded boundaries. The session
+store, HTTP provider client, portable process layer, and terminal editor remain
+Python until their Mojo replacements can meet the same Windows and Linux
+behavior and fallback tests. The current Mojo distribution is not a reliable
+native Windows packaging target, so replacing those pieces today would remove
+Windows support rather than improve it.
 
 Migration follows three rules:
 

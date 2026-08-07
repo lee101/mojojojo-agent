@@ -149,9 +149,49 @@ def test_api_key_credential_sends_no_chatgpt_headers():
 def test_describe_never_leaks_secrets(tmp_path, monkeypatch):
     _write_auth(tmp_path)
     monkeypatch.setenv("MJJ_CODEX_HOME", str(tmp_path))
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.delenv("MJJ_DEEPSEEK_API_KEY", raising=False)
     blob = json.dumps(auth.describe())
     assert "rt.old" not in blob
     assert json.loads(blob)["has_refresh_token"] is True
+
+
+def test_fetch_deepseek_balance_parses_and_redacts(tmp_path, monkeypatch):
+    import io
+
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-secret-balance")
+    monkeypatch.delenv("MJJ_DEEPSEEK_API_KEY", raising=False)
+    payload = json.dumps(
+        {
+            "is_available": False,
+            "balance_infos": [
+                {
+                    "currency": "USD",
+                    "total_balance": "-0.37",
+                    "granted_balance": "0.00",
+                    "topped_up_balance": "-0.37",
+                }
+            ],
+        }
+    ).encode()
+
+    class Resp:
+        def __enter__(self):
+            return io.BytesIO(payload)
+
+        def __exit__(self, *args):
+            return False
+
+    monkeypatch.setattr("mjj.auth.urllib.request.urlopen", lambda *_a, **_k: Resp())
+    info = auth.fetch_deepseek_balance()
+    assert info["ok"] is False
+    assert info["available"] is False
+    assert info["display"] == "$-0.37"
+    assert "sk-secret" not in json.dumps(info)
+
+    described = auth.describe()
+    assert described["deepseek_balance"]["display"] == "$-0.37"
+    assert "sk-secret" not in json.dumps(described)
 
 
 def test_auto_prefers_openpaths_but_does_not_adopt_ambient_openrouter(tmp_path, monkeypatch):

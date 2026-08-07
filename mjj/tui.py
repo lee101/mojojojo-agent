@@ -1241,6 +1241,10 @@ class InteractiveApp:
             "background_jobs": describe_jobs(self.agent.ctx),
             "git": git.output,
         }
+        if self.provider == "deepseek" or str(self.agent.client.model).startswith(
+            "deepseek"
+        ):
+            status["deepseek_balance"] = auth.fetch_deepseek_balance()
         print(json.dumps(status, indent=2))
 
     def _plan(self, value: str) -> None:

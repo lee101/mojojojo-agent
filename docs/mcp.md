@@ -44,3 +44,6 @@ each call, and Read-only denies them. Configuring a stdio server authorizes MJJ
 to start that local command during tool discovery, so only configure commands
 you trust: the process can still access files allowed to the MJJ user. The
 multi-user hosted server does not load local MCP configuration.
+
+Agent Plugins packages may also contribute stdio servers through root
+`mcp.json`; see [Agent Plugins](agent-plugins.md).

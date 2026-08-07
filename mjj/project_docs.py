@@ -71,20 +71,28 @@ def load(
     if include_user and remaining > 0:
         user_path = _user_instruction(env, filenames)
         if user_path is not None:
-            allowance = min(remaining, GLOBAL_MAX_BYTES)
-            try:
-                with user_path.open("rb") as handle:
-                    data = handle.read(allowance + 1)
-            except OSError:
-                data = b""
-            if len(data) > allowance:
-                data = data[:allowance]
+            text, consumed, hit_limit = _read_bounded(user_path, min(remaining, GLOBAL_MAX_BYTES))
+            if hit_limit:
                 truncated = True
-            text = data.decode("utf-8", errors="replace")
             if text.strip():
                 user_parts.append(text)
                 user_sources.append(user_path.resolve())
-                remaining -= len(data)
+                remaining -= consumed
+    if remaining > 0:
+        opencode = root / ".opencode" / "AGENTS.md"
+        if opencode.is_file() and opencode.resolve() not in {path.resolve() for path in sources}:
+            text, consumed, hit_limit = _read_bounded(opencode, remaining)
+            if hit_limit:
+                truncated = True
+            if text.strip():
+                # Keep hierarchical root→cwd docs first; OpenCode config supplements them.
+                if sources and sources[0].parent == root:
+                    parts.insert(1, text)
+                    sources.insert(1, opencode.resolve())
+                else:
+                    parts.insert(0, text)
+                    sources.insert(0, opencode.resolve())
+                remaining -= consumed
     return ProjectInstructions(
         text="\n\n".join([*user_parts, *parts]),
         sources=tuple([*user_sources, *sources]),
@@ -194,6 +202,20 @@ class ScopedProjectDocs:
             bytes_read=bytes_read,
             truncated=truncated,
         )
+
+
+def _read_bounded(path: Path, limit: int) -> tuple[str, int, bool]:
+    if limit <= 0:
+        return "", 0, False
+    try:
+        with path.open("rb") as handle:
+            data = handle.read(limit + 1)
+    except OSError:
+        return "", 0, False
+    truncated = len(data) > limit
+    if truncated:
+        data = data[:limit]
+    return data.decode("utf-8", errors="replace"), len(data), truncated
 
 
 def _find_instruction(directory: Path, filenames: tuple[str, ...]) -> Path | None:

@@ -13,16 +13,23 @@ description: Port a measured Python hot loop to Mojo and prove parity.
 ...
 ```
 
-Discovery checks explicit configured paths, then these directories at the Git
-root:
+Discovery checks explicit configured paths, then Agent Plugins packages, then
+these directories at the Git root:
 
 - `.mjj/skills/`
 - `.agents/skills/`
 - `.codex/skills/`
 - `.claude/skills/`
+- `.opencode/skills/`
+
+Agent Plugins packages under `.agents/plugins/`, `.mjj/plugins/`, and
+`.codex/plugins/` contribute each package's immediate `skills/*/SKILL.md`
+entries (see [Agent Plugins](agent-plugins.md)).
 
 Local CLI sessions also check `$MJJ_HOME/skills`, `~/.agents/skills`,
-`~/.codex/skills`, and `~/.claude/skills`. Hosted sessions intentionally skip
+`~/.codex/skills`, `~/.claude/skills`, `~/.config/opencode/skills`, and
+`~/.appnz/skills` (including flat `*.md` files installed from
+[app.nz/skills](https://app.nz/skills)). Hosted sessions intentionally skip
 all user directories. Symlinked skill roots and bundled files are not followed.
 Set `MJJ_DISABLE_CLAUDE_CODE_SKILLS=1` (or the broader
 `MJJ_DISABLE_CLAUDE_CODE=1`) to skip automatic `.claude/skills` discovery;

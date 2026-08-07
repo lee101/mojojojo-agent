@@ -12,7 +12,9 @@ working directory. In each directory, the first existing file wins:
 This retains Codex-style hierarchical overrides while allowing an existing
 OpenCode or Claude project to work without renaming its rules. An `AGENTS.md`
 does not suppress a more specific `CLAUDE.md` in a deeper directory; the deeper
-file still applies to its subtree.
+file still applies to its subtree. When present, `.opencode/AGENTS.md` is also
+loaded as a project supplement immediately after the repository-root instruction
+file.
 
 Local CLI runs also load the first existing user rule from:
 

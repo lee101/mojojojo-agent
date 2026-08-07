@@ -41,6 +41,7 @@ def _apply_loop_mode(args) -> None:
 def _agent(args):
     from . import auth
     from .agent import Agent
+    from .agent_plugins import resolve_workspace
     from .goals import GoalStore
     from .ledger import Budget, Ledger
     from .model import ModelClient
@@ -71,12 +72,19 @@ def _agent(args):
             requested_goal,
             session_id=session.id if session is not None else "",
         )
-    registry = build_registry(
-        disabled=args.disabled_tools,
+    extensions = resolve_workspace(
+        cwd,
         skill_paths=args.skill_paths,
         mcp_servers=args.resolved_config.mcp_servers,
+        include_user=True,
+    )
+    registry = build_registry(
+        disabled=args.disabled_tools,
+        skill_paths=extensions.skill_dirs,
+        mcp_servers=extensions.mcp_servers,
         plugins=args.plugins,
     )
+    registry.warnings[0:0] = extensions.warnings
     try:
         agent = Agent(
             registry=registry,
@@ -289,13 +297,23 @@ def cmd_logout(args) -> int:
 
 
 def cmd_tools(args) -> int:
+    from .agent_plugins import resolve_workspace
     from .tools import build_registry
-    registry = build_registry(
-        disabled=args.disabled_tools,
+
+    cwd = Path(args.cwd).resolve()
+    extensions = resolve_workspace(
+        cwd,
         skill_paths=args.skill_paths,
         mcp_servers=args.resolved_config.mcp_servers,
+        include_user=True,
+    )
+    registry = build_registry(
+        disabled=args.disabled_tools,
+        skill_paths=extensions.skill_dirs,
+        mcp_servers=extensions.mcp_servers,
         plugins=args.plugins,
     )
+    registry.warnings[0:0] = extensions.warnings
     try:
         for warning in registry.warnings:
             print(f"warning: {warning}", file=sys.stderr)

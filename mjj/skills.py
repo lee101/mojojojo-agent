@@ -9,8 +9,21 @@ from pathlib import Path
 from typing import Iterable
 
 
-PROJECT_DIRS = (".mjj/skills", ".agents/skills", ".codex/skills", ".claude/skills")
-USER_DIRS = ("skills", "~/.agents/skills", "~/.codex/skills", "~/.claude/skills")
+PROJECT_DIRS = (
+    ".mjj/skills",
+    ".agents/skills",
+    ".codex/skills",
+    ".claude/skills",
+    ".opencode/skills",
+)
+USER_DIRS = (
+    "skills",
+    "~/.agents/skills",
+    "~/.codex/skills",
+    "~/.claude/skills",
+    "~/.config/opencode/skills",
+    "~/.appnz/skills",
+)
 BUILTIN_DIR = Path(__file__).with_name("builtin_skills")
 MAX_SKILLS = 128
 MAX_DEPTH = 4
@@ -35,6 +48,8 @@ class Skill:
 
     def files(self, limit: int = 20) -> list[str]:
         root = self.path.parent
+        if self.path.name != "SKILL.md":
+            return []
         output = []
         for directory, names, filenames in os.walk(root, followlinks=False):
             here = Path(directory)
@@ -58,7 +73,7 @@ def discover(
     include_user: bool = True,
     extra_paths: Iterable[str | Path] = (),
 ) -> list[Skill]:
-    """Discover skills in explicit, repository, then user locations."""
+    """Discover skills in explicit, plugin, repository, then user locations."""
     working = Path(cwd).expanduser().resolve()
     roots: list[tuple[str, Path]] = []
     roots.extend(("extra", Path(path).expanduser().resolve()) for path in extra_paths)
@@ -67,6 +82,10 @@ def discover(
     claude_disabled = _truthy(os.environ.get("MJJ_DISABLE_CLAUDE_CODE", "")) or _truthy(
         os.environ.get("MJJ_DISABLE_CLAUDE_CODE_SKILLS", "")
     )
+    plugin_bundle = _plugin_bundle(working, include_user=include_user)
+    for plugin in plugin_bundle.plugins:
+        for directory in plugin.skill_dirs:
+            roots.append((f"plugin/{plugin.name}", directory))
     roots.extend(
         ("project", project / relative)
         for relative in PROJECT_DIRS
@@ -78,7 +97,7 @@ def discover(
         roots.extend(
             ("user", Path(path).expanduser())
             for path in USER_DIRS[1:]
-            if not (claude_disabled and "/.claude/" in path)
+            if not (claude_disabled and "/.claude/" in path.replace("\\", "/"))
         )
 
     skills: list[Skill] = []
@@ -112,6 +131,17 @@ def find(skills: Iterable[Skill], name: str) -> tuple[Skill | None, list[str]]:
     return None, []
 
 
+def _plugin_bundle(cwd: Path, *, include_user: bool):
+    try:
+        from .agent_plugins import discover as discover_plugins
+
+        return discover_plugins(cwd, include_user=include_user)
+    except Exception:
+        from .agent_plugins import PluginBundle
+
+        return PluginBundle()
+
+
 def _project_root(cwd: Path) -> Path:
     for directory in (cwd, *cwd.parents):
         if (directory / ".git").exists():
@@ -121,10 +151,25 @@ def _project_root(cwd: Path) -> Path:
 
 def _skill_files(root: Path) -> list[Path]:
     if root.is_file():
-        return [root] if root.name == "SKILL.md" else []
+        if root.name == "SKILL.md" or root.suffix.lower() == ".md":
+            return [root]
+        return []
     if not root.is_dir() or root.is_symlink():
         return []
     output = []
+    # Agent Skills directories (SKILL.md) and app.nz flat markdown installs.
+    for child in sorted(root.iterdir(), key=lambda item: item.name.lower()):
+        if child.is_symlink():
+            continue
+        if child.is_file() and child.suffix.lower() == ".md":
+            output.append(child)
+            continue
+        if child.is_dir():
+            skill_md = child / "SKILL.md"
+            if skill_md.is_file() and not skill_md.is_symlink():
+                output.append(skill_md)
+    if output:
+        return output
     for directory, names, filenames in os.walk(root, followlinks=False):
         here = Path(directory)
         depth = len(here.relative_to(root).parts)
@@ -145,7 +190,10 @@ def _parse_skill(path: Path, scope: str) -> Skill | None:
     except OSError:
         return None
     name, description, body = _frontmatter(text)
-    name = name or path.parent.name
+    if path.name == "SKILL.md":
+        name = name or path.parent.name
+    else:
+        name = name or path.stem
     if not _NAME.fullmatch(name):
         return None
     if not description:

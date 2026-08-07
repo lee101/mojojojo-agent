@@ -1173,13 +1173,22 @@ class InteractiveApp:
         elif command == "/rollout":
             print(self.agent.session.path if self.agent.session else "ephemeral session")
         elif command == "/reload":
+            from .agent_plugins import resolve_workspace
+
             self.agent.registry.close()
-            self.agent.registry = build_registry(
-                disabled=self.args.disabled_tools,
+            extensions = resolve_workspace(
+                self.agent.cwd,
                 skill_paths=self.args.skill_paths,
                 mcp_servers=self.args.resolved_config.mcp_servers,
+                include_user=True,
+            )
+            self.agent.registry = build_registry(
+                disabled=self.args.disabled_tools,
+                skill_paths=extensions.skill_dirs,
+                mcp_servers=extensions.mcp_servers,
                 plugins=self.args.plugins,
             )
+            self.agent.registry.warnings[0:0] = extensions.warnings
             if self.agent.goal_store is not None:
                 self.agent.bind_goal_store(self.agent.goal_store)
             print("reloaded tools and skills")

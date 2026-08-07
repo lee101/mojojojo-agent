@@ -13,7 +13,8 @@ These pages document the `mjj` CLI, Python package, and hosted agent backend.
 - [Tools](tools.md) — search, read, patch, shell, checks, navigation, and media.
 - [Execution](exec.md) — local isolation, Mojo acceleration, and remote fallback.
 - [Platforms](platforms.md) — Windows/Linux process and path behavior.
-- [MCP](mcp.md) and [plugins](plugins.md) — opt-in external tool boundaries.
+- [MCP](mcp.md), [Agent Plugins](agent-plugins.md), and [plugins](plugins.md) —
+  portable skills/MCP packages plus opt-in Python tool entry points.
 - [Loops and goals](autonomy.md), [durable goals](goals.md), [subagents](subagents.md), and
   [LSP refactors](lsp-refactors.md) — longer and semantic workflows.
 

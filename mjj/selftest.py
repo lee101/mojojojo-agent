@@ -21,6 +21,9 @@ CORE_TESTS = (
     "tests/test_permissions.py",
     "tests/test_patch.py",
     "tests/test_fs.py",
+    "tests/test_agent_plugins.py",
+    "tests/test_skills.py",
+    "tests/test_project_docs.py",
 )
 
 

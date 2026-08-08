@@ -50,13 +50,13 @@ pixel rendering requires `vision`.
 
 ## Why the control plane is not pure Mojo yet
 
-Search scoring, embedding scans, identifier tokenize/embed, and supported
-execution kernels already use Mojo behind stable guarded boundaries. The session
-store, HTTP provider client, portable process layer, and terminal editor remain
-Python until their Mojo replacements can meet the same Windows and Linux
-behavior and fallback tests. The current Mojo distribution is not a reliable
-native Windows packaging target, so replacing those pieces today would remove
-Windows support rather than improve it.
+Search scoring, embedding scans, identifier tokenize/embed, BM25 posting
+accumulation, and supported execution kernels already use Mojo behind stable
+guarded boundaries. The session store, HTTP provider client, portable process
+layer, and terminal editor remain Python until their Mojo replacements can meet
+the same Windows and Linux behavior and fallback tests. The current Mojo
+distribution is not a reliable native Windows packaging target, so replacing
+those pieces today would remove Windows support rather than improve it.
 
 Migration follows three rules:
 
@@ -64,3 +64,49 @@ Migration follows three rules:
 2. Land a tested portable fallback before enabling a native implementation.
 3. Measure hot paths through `bench/`; do not count test-runner dependencies as
    runtime work or claim speedups from dependency renaming.
+
+## uv and pixi peer wiring
+
+Keep the split sharp:
+
+| tool | owns |
+| --- | --- |
+| `uv` | Python package, extras, tests, wheels |
+| `pixi` | pinned Mojo nightly and `mojo build` of shared libraries |
+
+Extras stay optional so the base wheel stays dependency-free on Python 3.11+:
+
+| extra | peer / package | role |
+| --- | --- | --- |
+| `accel` | `mojosub` | tiered JIT for numeric kernels (`quantize_i8`, BM25 fallback) |
+| `syntax` | `tree-sitter-language-pack` | typed repo-map symbols and non-Python syntax checks |
+
+Shared libraries are discovered, never imported as Python modules:
+
+1. `MJJ_MOJO_EMBED_LIB`
+2. this repo's `build/libmjj_search.so` (`pixi run mojo-check`)
+3. adjacent `../mojo-embed/build`
+4. packaged / system paths
+
+When several candidates load, MJJ prefers the library that exports the fullest
+ABI (`search`, `tokenize`, `embed`, `bm25`). Missing symbols degrade that path
+only; the harness keeps running.
+
+Local peer overrides while developing both sides:
+
+```bash
+# Python JIT peer
+uv sync --extra accel
+uv pip install -e ../mojosub
+
+# Native search / BM25 ABI
+pixi run mojo-check
+
+# Typed symbols (portable tree-sitter today)
+uv sync --extra syntax
+```
+
+`../mojo-tree-sitter*` checkouts are the future Mojo host for batch parse /
+symbol work. Until that ABI is measured and wired, `syntax` keeps the same
+model-visible maps via the Python tree-sitter pack. Do not vendor peer trees
+into this repository; discover them the same way as `mojo-embed`.

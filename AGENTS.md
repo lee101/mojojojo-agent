@@ -39,8 +39,9 @@ Python-hosted coding agent with optional Mojo hot paths. It ships as the
   and `tests/test_auth.py` for the contract.
 - Keep the hosted workspace, billing, and no-compiler sandbox boundaries intact.
   Shared app.nz behavior must match `../app-site` and `../mojojojo/auth.go`.
-- Treat `../mojosub`, `../mojo-embed`, and `../mojojojo` as optional peers.
-  The ordinary Python suite must work without them.
+- Treat `../mojosub`, `../mojo-embed`, `../mojo-tree-sitter*`, and
+  `../mojojojo` as optional peers. The ordinary Python suite must work without
+  them.
 
 ## Reference harnesses
 

@@ -157,20 +157,22 @@ Writes go to a sibling temporary file, are flushed, and replace the old index
 atomically. Corrupt, truncated, wrong-root, wrong-version, and wrong-dimension
 files are rebuilt.
 
-`mjj/search/vectors.py` loads the native backend when tokenize, embed, or a
+`mjj/search/vectors.py` loads the native backend when tokenize, embed, BM25, or a
 vector matrix needs it. It looks for the library named by `MJJ_MOJO_EMBED_LIB`,
 MJJ's own `build/libmjj_search.so`, the adjacent `../mojo-embed` checkout, a
-packaged copy, then the system library path. Its C ABI tokenises identifiers,
-projects static embeddings, and scans the vector and factor regions directly
-from the mmap with no NumPy or row copies. If the library is missing or its
-buffers cannot be bound, the same pure-Python paths run. Search continues; only
-latency changes. `MJJ_ACCEL=0` disables the tokenize/embed exports while leaving
-the optional int8 scan available when the library is present.
+packaged copy, then the system library path. When more than one candidate loads,
+it keeps the library with the fullest ABI. Its C ABI tokenises identifiers,
+projects static embeddings, accumulates BM25 postings, and scans the vector and
+factor regions directly from the mmap with no NumPy or row copies. If the library
+is missing or its buffers cannot be bound, the same pure-Python paths run (BM25
+may still use mojosub when the `accel` extra is installed). Search continues;
+only latency changes. `MJJ_ACCEL=0` disables the tokenize/embed/BM25 exports
+while leaving the optional int8 scan available when the library is present.
 
-`mjj/search/embed.mojo` supplies `mjj_search_i8_mmap`, `mjj_tokenize`, and
-`mjj_static_embed` for a repository-specific build. It is never compiled in the
-agent loop. Embedding L2 normalisation stays in CPython so persisted index
-factors remain bit-compatible with the Python fallback.
+`mjj/search/embed.mojo` supplies `mjj_search_i8_mmap`, `mjj_tokenize`,
+`mjj_static_embed`, and `mjj_bm25_accumulate` for a repository-specific build. It
+is never compiled in the agent loop. Embedding L2 normalisation stays in CPython
+so persisted index factors remain bit-compatible with the Python fallback.
 
 ## Measured benchmark
 
@@ -192,16 +194,18 @@ source-context reads, and formatting. The `rg` comparison is
 the ranked evidence with reading its complete top-result file. Returned tokens
 use the harness's dependency-free four-characters-per-token estimate.
 
-### Mojo tokenize / embed microbench (2026-08-07)
+### Mojo tokenize / embed / BM25 microbench (2026-08-08)
 
 Measured on this checkout with `build/libmjj_search.so` from `pixi run mojo-check`
-(`MJJ_ACCEL=1`). Kernel rows are medians from `python -m mjj.kernels.bench`;
-allocation rows use `bench/allocation_bench.py`'s 7409-character sample.
+(`MJJ_ACCEL=1`). Tokenize/embed rows are medians from `python -m mjj.kernels.bench`;
+BM25 compares pure Python against `mjj_bm25_accumulate` directly (5,000-row posting,
+median of 7×40 loops).
 
 | candidate | Python µs | Mojo µs | decision |
 | --- | ---: | ---: | --- |
-| identifier tokenizer | 1223.3 | 894.7 | keep |
-| static embedding 256d | 5674.5 | 492.1 | keep |
+| identifier tokenizer | 3573.6 | 2150.8 | keep |
+| static embedding 256d | 12601.0 | 1256.9 | keep |
+| BM25 posting, 5,000 rows | 2340.3 | 43.4 | keep |
 
 Cold index of this repository (207 files / 2083 chunks, median of 3 builds):
 

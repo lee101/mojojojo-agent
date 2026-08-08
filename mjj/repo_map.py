@@ -10,6 +10,7 @@ from pathlib import Path
 
 from .search.index import RepositoryIndex
 from .search.lexical import tokenize
+from .symbols import extract_symbols
 
 
 _DEFINITION = re.compile(
@@ -84,8 +85,12 @@ def render_repo_map(
             )
         )
     for path in index.files:
-        if _in_scope(path, scope):
-            definitions.setdefault(path, [])
+        if not _in_scope(path, scope):
+            continue
+        definitions.setdefault(path, [])
+        typed = _tree_sitter_definitions(index.root, path)
+        if typed is not None:
+            definitions[path] = typed
 
     scores = {path: 0.1 + 1.0 / (1 + path.count("/")) for path in definitions}
     definers: dict[str, set[str]] = defaultdict(set)
@@ -172,6 +177,22 @@ def render_repo_map(
         if len(output) + len(footer) <= character_budget:
             output += footer
     return RepoMap(output, len(blocks), included_symbols, omitted)
+
+
+def _tree_sitter_definitions(root: Path, path: str) -> list[Definition] | None:
+    """Prefer typed tree-sitter signatures when the optional syntax extra works."""
+    symbols = extract_symbols(root / path)
+    if symbols is None:
+        return None
+    return [
+        Definition(
+            path=path,
+            line=symbol.line,
+            name=symbol.name,
+            signature=_short(symbol.signature),
+        )
+        for symbol in symbols
+    ]
 
 
 def _distinctive_terms(name: str) -> set[str]:

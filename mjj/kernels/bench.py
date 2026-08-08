@@ -178,6 +178,41 @@ def compact_benchmark() -> None:
         )
     )
 
+    from mjj.search.vectors import native_bm25_accumulate
+
+    if native_bm25_accumulate(
+        document_ids, frequencies, lengths, array("d", [0.0]) * count, *parameters
+    ) is None:
+        rows.append(
+            (
+                "BM25 ABI posting, 5,000 rows",
+                "mojo ABI",
+                pure,
+                None,
+                "fallback",
+            )
+        )
+    else:
+        abi = _median_us(
+            lambda: native_bm25_accumulate(
+                document_ids,
+                frequencies,
+                lengths,
+                array("d", [0.0]) * count,
+                *parameters,
+            ),
+            loops=40,
+        )
+        rows.append(
+            (
+                "BM25 ABI posting, 5,000 rows",
+                "mojo ABI",
+                pure,
+                abi,
+                "keep" if abi < pure else "loss",
+            )
+        )
+
     text = " ".join(
         f"HTTPServer{index}.fetch_user auth_token path/to/source.py"
         for index in range(400)

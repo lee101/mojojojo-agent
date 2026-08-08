@@ -1,4 +1,4 @@
-"""Native search kernels: int8 top-k scan, identifier tokenize, static embed."""
+"""Native search kernels: int8 top-k scan, identifier tokenize, static embed, BM25."""
 
 from std.algorithm import parallelize
 from std.math import sqrt
@@ -518,3 +518,51 @@ def mjj_static_embed(
             )
         index += 1
     return 0
+
+
+@export("mjj_bm25_accumulate")
+def mjj_bm25_accumulate(
+    doc_ids_addr: Int,
+    freqs_addr: Int,
+    lengths_addr: Int,
+    scores_addr: Int,
+    posting_len: Int,
+    average_length: Float64,
+    k1: Float64,
+    b: Float64,
+    inverse_frequency: Float64,
+    query_boost: Float64,
+) abi("C") -> Int:
+    """Accumulate one BM25 term into a dense float64 score buffer.
+
+    Buffers are zero-copy ``array('q'|'d')`` addresses from Python. Exact with
+    ``opt=0`` mojosub / CPython because the arithmetic is scalar and ordered.
+    """
+    if (
+        posting_len <= 0
+        or doc_ids_addr == 0
+        or freqs_addr == 0
+        or lengths_addr == 0
+        or scores_addr == 0
+        or average_length == 0.0
+    ):
+        return 0
+    var doc_ids = i64p(doc_ids_addr)
+    var freqs = i64p(freqs_addr)
+    var lengths = f64p(lengths_addr)
+    var scores = f64p(scores_addr)
+    var index = 0
+    while index < posting_len:
+        var document_id = Int(doc_ids[index])
+        var frequency = Float64(Int(freqs[index]))
+        var normalizer = k1 * (
+            1.0 - b + b * lengths[document_id] / average_length
+        )
+        scores[document_id] += (
+            inverse_frequency
+            * (frequency * (k1 + 1.0))
+            / (frequency + normalizer)
+            * query_boost
+        )
+        index += 1
+    return posting_len

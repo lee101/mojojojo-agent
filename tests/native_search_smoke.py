@@ -100,6 +100,43 @@ def _check_embed(library: ctypes.CDLL) -> None:
     assert norm > 0.0
 
 
+def _check_bm25(library: ctypes.CDLL) -> None:
+    bm25 = library.mjj_bm25_accumulate
+    integer = ctypes.c_ssize_t
+    bm25.argtypes = [
+        integer,
+        integer,
+        integer,
+        integer,
+        integer,
+        ctypes.c_double,
+        ctypes.c_double,
+        ctypes.c_double,
+        ctypes.c_double,
+        ctypes.c_double,
+    ]
+    bm25.restype = ctypes.c_int
+
+    doc_ids = (ctypes.c_int64 * 2)(0, 1)
+    freqs = (ctypes.c_int64 * 2)(2, 1)
+    lengths = (ctypes.c_double * 2)(10.0, 20.0)
+    scores = (ctypes.c_double * 2)(0.0, 0.0)
+    status = bm25(
+        ctypes.addressof(doc_ids),
+        ctypes.addressof(freqs),
+        ctypes.addressof(lengths),
+        ctypes.addressof(scores),
+        2,
+        15.0,
+        1.2,
+        0.72,
+        0.8,
+        1.0,
+    )
+    assert status == 2, status
+    assert scores[0] > 0.0 and scores[1] > 0.0, list(scores)
+
+
 def main() -> int:
     if len(sys.argv) != 2:
         raise SystemExit("usage: native_search_smoke.py LIBRARY")
@@ -107,6 +144,7 @@ def main() -> int:
     _check_search(library)
     _check_tokenize(library)
     _check_embed(library)
+    _check_bm25(library)
     print("native search ABI ok")
     return 0
 

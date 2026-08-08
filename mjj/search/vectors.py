@@ -160,7 +160,7 @@ def _library_candidates() -> list[str]:
 
 
 class MojoBackend:
-    """Guarded ctypes binding to Mojo search/tokenize/embed exports."""
+    """Guarded ctypes binding to Mojo search/tokenize/embed/BM25 exports."""
 
     def __init__(self) -> None:
         self.library: ctypes.CDLL | None = None
@@ -169,13 +169,17 @@ class MojoBackend:
         self.search_function = None
         self.tokenize_function = None
         self.embed_function = None
+        self.bm25_function = None
         integer = ctypes.c_ssize_t
+        best: tuple[int, object, object, object, object, object, str] | None = None
         for candidate in _library_candidates():
             try:
                 library = ctypes.CDLL(candidate)
                 search = getattr(library, "mjj_search_i8_mmap", None)
                 if search is None:
-                    search = getattr(library, "embed_search_i8")
+                    search = getattr(library, "embed_search_i8", None)
+                if search is None:
+                    raise AttributeError("missing search export")
                 search.argtypes = [
                     integer,
                     integer,
@@ -192,20 +196,46 @@ class MojoBackend:
                 search.restype = None
                 tokenize = getattr(library, "mjj_tokenize", None)
                 embed = getattr(library, "mjj_static_embed", None)
+                bm25 = getattr(library, "mjj_bm25_accumulate", None)
                 if tokenize is not None:
                     tokenize.argtypes = [integer] * 9
                     tokenize.restype = ctypes.c_int
                 if embed is not None:
                     embed.argtypes = [integer] * 7
                     embed.restype = ctypes.c_int
-                self.library = library
-                self.search_function = search
-                self.tokenize_function = tokenize
-                self.embed_function = embed
-                self.path = candidate
-                break
+                if bm25 is not None:
+                    bm25.argtypes = [
+                        integer,
+                        integer,
+                        integer,
+                        integer,
+                        integer,
+                        ctypes.c_double,
+                        ctypes.c_double,
+                        ctypes.c_double,
+                        ctypes.c_double,
+                        ctypes.c_double,
+                    ]
+                    bm25.restype = ctypes.c_int
+                score = 1 + sum(
+                    function is not None for function in (tokenize, embed, bm25)
+                )
+                if best is None or score > best[0]:
+                    best = (score, library, search, tokenize, embed, bm25, candidate)
+                if score >= 4:
+                    break
             except (AttributeError, OSError) as exc:
                 self.error = str(exc)
+        if best is not None:
+            (
+                _,
+                self.library,
+                self.search_function,
+                self.tokenize_function,
+                self.embed_function,
+                self.bm25_function,
+                self.path,
+            ) = best
 
     @property
     def available(self) -> bool:
@@ -218,6 +248,10 @@ class MojoBackend:
     @property
     def embed_available(self) -> bool:
         return self.embed_function is not None and _accel_requested()
+
+    @property
+    def bm25_available(self) -> bool:
+        return self.bm25_function is not None and _accel_requested()
 
 
 def _accel_requested() -> bool:
@@ -334,6 +368,71 @@ def native_static_embedding_tokens(
     if status != 0:
         return None
     return _l2_normalize([float(value) for value in values])
+
+
+def native_bm25_accumulate(
+    document_ids: Sequence[int],
+    frequencies: Sequence[int],
+    lengths: Sequence[float],
+    scores: Sequence[float],
+    average_length: float,
+    k1: float,
+    b: float,
+    inverse_frequency: float,
+    query_boost: float,
+) -> int | None:
+    """Mojo BM25 posting accumulate; ``None`` when the ABI is unavailable."""
+    backend = _default_backend()
+    if not backend.bm25_available:
+        return None
+    posting_len = len(document_ids)
+    if posting_len != len(frequencies) or average_length == 0.0:
+        return None
+    doc_ids = (
+        document_ids
+        if isinstance(document_ids, array) and document_ids.typecode == "q"
+        else array("q", (int(value) for value in document_ids))
+    )
+    freqs = (
+        frequencies
+        if isinstance(frequencies, array) and frequencies.typecode == "q"
+        else array("q", (int(value) for value in frequencies))
+    )
+    length_buf = (
+        lengths
+        if isinstance(lengths, array) and lengths.typecode == "d"
+        else array("d", (float(value) for value in lengths))
+    )
+    score_buf = (
+        scores
+        if isinstance(scores, array) and scores.typecode == "d"
+        else array("d", (float(value) for value in scores))
+    )
+    if posting_len == 0:
+        return 0
+    doc_address, doc_holder = _address(doc_ids, ctypes.c_int64)
+    freq_address, freq_holder = _address(freqs, ctypes.c_int64)
+    length_address, length_holder = _address(length_buf, ctypes.c_double)
+    score_address, score_holder = _address(score_buf, ctypes.c_double)
+    _ = (doc_holder, freq_holder, length_holder, score_holder)
+    status = backend.bm25_function(
+        doc_address,
+        freq_address,
+        length_address,
+        score_address,
+        posting_len,
+        float(average_length),
+        float(k1),
+        float(b),
+        float(inverse_frequency),
+        float(query_boost),
+    )
+    if status < 0:
+        return None
+    if score_buf is not scores:
+        for index, value in enumerate(score_buf):
+            scores[index] = float(value)
+    return int(status)
 
 
 class Int8Vectors:

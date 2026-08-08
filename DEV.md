@@ -52,6 +52,18 @@ pixi run mojo-check
 The ordinary Python matrix separately proves that no Mojo compiler or native
 library is required for correctness.
 
+`uv` owns the Python package and extras; `pixi` owns the Mojo nightly and shared
+library build. Prefer a local peer while developing both sides:
+
+```bash
+uv sync --extra accel --extra syntax
+uv pip install -e ../mojosub          # optional local JIT peer
+pixi run mojo-check                   # build/libmjj_search.so
+```
+
+See [docs/native-runtime.md](docs/native-runtime.md) for discovery order and the
+tree-sitter / `mojo-tree-sitter` boundary.
+
 ## Validation
 
 Run the focused test first, then the whole offline suite. Provider tests use

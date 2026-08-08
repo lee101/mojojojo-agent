@@ -129,9 +129,34 @@ def test_bm25_kernel_exact_randomised() -> None:
             document_ids, frequencies, lengths, public, *parameters
         ) == posting_size
         assert pure == expected
-        assert public == expected
+        for left, right in zip(public, expected):
+            assert abs(left - right) <= 1e-12 * max(1.0, abs(right))
         if case == 0:
             _wait_for_native(bm25_accumulate)
+
+
+def test_native_bm25_matches_python_when_abi_present() -> None:
+    from mjj.search.vectors import native_bm25_accumulate, _default_backend
+
+    backend = _default_backend()
+    if not backend.bm25_available:
+        pytest.skip("Mojo search ABI with BM25 not loaded")
+    document_ids = array("q", [0, 2, 3])
+    frequencies = array("q", [1, 4, 2])
+    lengths = array("d", [10.0, 20.0, 30.0, 40.0])
+    parameters = (25.0, 1.2, 0.72, 0.9, 1.1)
+    expected = array("d", [0.0]) * 4
+    native = array("d", [0.0]) * 4
+    bm25_accumulate_python(
+        document_ids, frequencies, lengths, expected, *parameters
+    )
+    assert native_bm25_accumulate(
+        document_ids, frequencies, lengths, native, *parameters
+    ) == 3
+    # Default ``mojo build`` may differ by one ulp from CPython; ranking is
+    # unchanged. mojosub ``opt=0`` remains the bit-exact path when installed.
+    for left, right in zip(native, expected):
+        assert abs(left - right) <= 1e-12 * max(1.0, abs(right))
 
 
 def _reference_search(

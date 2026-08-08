@@ -1,12 +1,10 @@
 """Optional mojosub / Mojo-ABI acceleration for measured hot loops.
 
-The functions exported here always work. Preference for BM25:
+Preference for numeric kernels:
 
-1. Repository ``libmjj_search.so`` C ABI (no JIT wait; ~50x on a 5k posting).
-2. mojosub tiered JIT at ``opt=0`` when the shared library is absent.
+1. Repository ``libmjj_search.so`` C ABI (SIMD, no JIT wait).
+2. mojosub tiered JIT when the shared library export is absent.
 3. Pure Python.
-
-Default ``mojo build`` may differ from CPython by one ulp; ranking is unchanged.
 
 ``MJJ_ACCEL=0`` forces the pure-Python path for every kernel.
 """
@@ -30,6 +28,7 @@ __all__ = [
 
 _requested = os.environ.get("MJJ_ACCEL", "1") != "0"
 _jit_bm25 = None
+_jit_quantize = None
 
 if not _requested:
     ACCEL_ENABLED = False
@@ -38,7 +37,6 @@ if not _requested:
     quantize_i8 = quantize_i8_python
 else:
     # Accel is requested: build zero-copy kernel buffers and try ABI/JIT.
-    # Missing Mojo still degrades to the pure-Python kernels below.
     ACCEL_ENABLED = True
     try:
         from mojosub import jit
@@ -46,24 +44,30 @@ else:
         ACCEL_REASON = (
             f"ABI preferred; mojosub unavailable: {type(exc).__name__}: {exc}"
         )
-        quantize_i8 = quantize_i8_python
     else:
         ACCEL_REASON = "mojosub tiered JIT enabled"
-        # Both kernels mutate output buffers, so verification checks the return
-        # value and every write before the native variant is trusted.
-        quantize_i8 = jit(
+        _jit_quantize = jit(
             quantize_i8_python,
             verify=True,
         )
         _jit_bm25 = jit(
             bm25_accumulate_python,
             verify=True,
-            # Optimised Mojo contracts multiply/add operations differently
-            # from CPython by one or two ulps.  O0 remains ~15x faster for the
-            # measured 5,000-row posting and preserves exact score bits.
+            # Optimised Mojo contracts multiply/add differently from CPython
+            # by one or two ulps.  O0 remains fast and bit-stable for postings.
             opt=0,
             vectorize=False,
         )
+
+    def quantize_i8(values: Sequence[float], output: Sequence[int]) -> float:
+        from mjj.search.vectors import native_quantize_i8
+
+        native = native_quantize_i8(values, output)
+        if native is not None:
+            return native
+        if _jit_quantize is not None:
+            return _jit_quantize(values, output)
+        return quantize_i8_python(values, output)
 
     def bm25_accumulate(
         document_ids: Sequence[int],
@@ -76,7 +80,6 @@ else:
         inverse_frequency: float,
         query_boost: float,
     ) -> int:
-        # Lazy import: vectors imports quantize_i8 from this package.
         from mjj.search.vectors import native_bm25_accumulate
 
         native = native_bm25_accumulate(
@@ -116,5 +119,7 @@ else:
             query_boost,
         )
 
+    if _jit_quantize is not None:
+        quantize_i8.wait = getattr(_jit_quantize, "wait", None)  # type: ignore[attr-defined]
     if _jit_bm25 is not None:
         bm25_accumulate.wait = getattr(_jit_bm25, "wait", None)  # type: ignore[attr-defined]

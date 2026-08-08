@@ -137,6 +137,26 @@ def _check_bm25(library: ctypes.CDLL) -> None:
     assert scores[0] > 0.0 and scores[1] > 0.0, list(scores)
 
 
+def _check_quantize(library: ctypes.CDLL) -> None:
+    quantize = library.mjj_quantize_i8
+    integer = ctypes.c_ssize_t
+    quantize.argtypes = [integer, integer, integer, integer]
+    quantize.restype = ctypes.c_int
+
+    values = (ctypes.c_double * 4)(-2.0, -0.5, 0.0, 1.0)
+    output = (ctypes.c_int64 * 4)()
+    scale = ctypes.c_double(0.0)
+    status = quantize(
+        ctypes.addressof(values),
+        ctypes.addressof(output),
+        4,
+        ctypes.addressof(scale),
+    )
+    assert status == 0, status
+    assert scale.value == 2.0 / 127.0, scale.value
+    assert list(output) == [-127, -32, 0, 64], list(output)
+
+
 def main() -> int:
     if len(sys.argv) != 2:
         raise SystemExit("usage: native_search_smoke.py LIBRARY")
@@ -145,6 +165,7 @@ def main() -> int:
     _check_tokenize(library)
     _check_embed(library)
     _check_bm25(library)
+    _check_quantize(library)
     print("native search ABI ok")
     return 0
 

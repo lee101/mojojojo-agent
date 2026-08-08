@@ -160,7 +160,7 @@ def _library_candidates() -> list[str]:
 
 
 class MojoBackend:
-    """Guarded ctypes binding to Mojo search/tokenize/embed/BM25 exports."""
+    """Guarded ctypes binding to Mojo search/tokenize/embed/BM25/quantize exports."""
 
     def __init__(self) -> None:
         self.library: ctypes.CDLL | None = None
@@ -170,8 +170,11 @@ class MojoBackend:
         self.tokenize_function = None
         self.embed_function = None
         self.bm25_function = None
+        self.quantize_function = None
         integer = ctypes.c_ssize_t
-        best: tuple[int, object, object, object, object, object, str] | None = None
+        best: tuple[
+            int, object, object, object, object, object, object, str
+        ] | None = None
         for candidate in _library_candidates():
             try:
                 library = ctypes.CDLL(candidate)
@@ -197,6 +200,7 @@ class MojoBackend:
                 tokenize = getattr(library, "mjj_tokenize", None)
                 embed = getattr(library, "mjj_static_embed", None)
                 bm25 = getattr(library, "mjj_bm25_accumulate", None)
+                quantize = getattr(library, "mjj_quantize_i8", None)
                 if tokenize is not None:
                     tokenize.argtypes = [integer] * 9
                     tokenize.restype = ctypes.c_int
@@ -217,12 +221,25 @@ class MojoBackend:
                         ctypes.c_double,
                     ]
                     bm25.restype = ctypes.c_int
+                if quantize is not None:
+                    quantize.argtypes = [integer, integer, integer, integer]
+                    quantize.restype = ctypes.c_int
                 score = 1 + sum(
-                    function is not None for function in (tokenize, embed, bm25)
+                    function is not None
+                    for function in (tokenize, embed, bm25, quantize)
                 )
                 if best is None or score > best[0]:
-                    best = (score, library, search, tokenize, embed, bm25, candidate)
-                if score >= 4:
+                    best = (
+                        score,
+                        library,
+                        search,
+                        tokenize,
+                        embed,
+                        bm25,
+                        quantize,
+                        candidate,
+                    )
+                if score >= 5:
                     break
             except (AttributeError, OSError) as exc:
                 self.error = str(exc)
@@ -234,6 +251,7 @@ class MojoBackend:
                 self.tokenize_function,
                 self.embed_function,
                 self.bm25_function,
+                self.quantize_function,
                 self.path,
             ) = best
 
@@ -252,6 +270,10 @@ class MojoBackend:
     @property
     def bm25_available(self) -> bool:
         return self.bm25_function is not None and _accel_requested()
+
+    @property
+    def quantize_available(self) -> bool:
+        return self.quantize_function is not None and _accel_requested()
 
 
 def _accel_requested() -> bool:
@@ -433,6 +455,47 @@ def native_bm25_accumulate(
         for index, value in enumerate(score_buf):
             scores[index] = float(value)
     return int(status)
+
+
+def native_quantize_i8(
+    values: Sequence[float],
+    output: Sequence[int],
+) -> float | None:
+    """SIMD Mojo quantise; ``None`` when the ABI is unavailable."""
+    backend = _default_backend()
+    if not backend.quantize_available:
+        return None
+    count = len(values)
+    if count != len(output):
+        return None
+    numeric = (
+        values
+        if isinstance(values, array) and values.typecode == "d"
+        else array("d", (float(value) for value in values))
+    )
+    out = (
+        output
+        if isinstance(output, array) and output.typecode == "q"
+        else array("q", [0]) * count
+    )
+    if count == 0:
+        return 1.0
+    scale = ctypes.c_double(0.0)
+    values_address, values_holder = _address(numeric, ctypes.c_double)
+    output_address, output_holder = _address(out, ctypes.c_int64)
+    _ = (values_holder, output_holder)
+    status = backend.quantize_function(
+        values_address,
+        output_address,
+        count,
+        ctypes.addressof(scale),
+    )
+    if status != 0:
+        return None
+    if out is not output:
+        for index, value in enumerate(out):
+            output[index] = int(value)
+    return float(scale.value)
 
 
 class Int8Vectors:

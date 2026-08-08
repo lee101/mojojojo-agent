@@ -1,8 +1,9 @@
-"""Native search kernels: int8 top-k scan, identifier tokenize, static embed, BM25."""
+"""Native search kernels: int8 top-k scan, identifier tokenize, static embed, BM25, quantize."""
 
 from std.algorithm import parallelize
-from std.math import sqrt
-from std.sys.info import num_performance_cores, simd_width_of as simdwidthof
+from std.math import abs, copysign, sqrt
+from std.memory import alloc
+from std.sys.info import num_performance_cores, simd_width_of
 
 comptime F32Ptr = UnsafePointer[Float32, AnyOrigin[mut=True]]
 comptime F64Ptr = UnsafePointer[Float64, AnyOrigin[mut=True]]
@@ -10,7 +11,8 @@ comptime I8Ptr = UnsafePointer[Int8, AnyOrigin[mut=True]]
 comptime I32Ptr = UnsafePointer[Int32, AnyOrigin[mut=True]]
 comptime I64Ptr = UnsafePointer[Int64, AnyOrigin[mut=True]]
 comptime U8Ptr = UnsafePointer[UInt8, AnyOrigin[mut=True]]
-comptime I8W = simdwidthof[DType.int8]()
+comptime I8W = simd_width_of[DType.int8]()
+comptime F64W = simd_width_of[DType.float64]()
 comptime PARALLEL_WORK_THRESHOLD = 100_000_000
 comptime TOKEN_PREFIX_LOW = UInt32(2774198458)
 comptime TOKEN_PREFIX_HIGH = UInt32(4130110811)
@@ -455,23 +457,39 @@ def project_ngrams(
         start += 1
 
 
-def embed_token(values: F64Ptr, dim: Int, token: U8Ptr, length: Int, frequency: Int):
+def embed_token(
+    values: F64Ptr,
+    dim: Int,
+    token: U8Ptr,
+    length: Int,
+    frequency: Int,
+    scratch: U8Ptr,
+):
     var token_weight = 1.5 * sqrt(Float64(frequency))
     var low = crc32_update(token, length, TOKEN_PREFIX_LOW)
     var high = crc32_update(token, length, TOKEN_PREFIX_HIGH)
     project_hashed(values, dim, low, high, token_weight)
 
-    var marked = List[UInt8](capacity=length + 2)
-    marked.append(START_MARKER)
+    scratch[0] = START_MARKER
     var i = 0
     while i < length:
-        marked.append(token[i])
+        scratch[i + 1] = token[i]
         i += 1
-    marked.append(END_MARKER)
-    var marked_ptr = u8p(Int(marked.unsafe_ptr()))
-    var marked_len = len(marked)
-    project_ngrams(values, dim, marked_ptr, marked_len, 3, 0.45)
-    project_ngrams(values, dim, marked_ptr, marked_len, 4, 0.65)
+    scratch[length + 1] = END_MARKER
+    var marked_len = length + 2
+    project_ngrams(values, dim, scratch, marked_len, 3, 0.45)
+    project_ngrams(values, dim, scratch, marked_len, 4, 0.65)
+
+
+def zero_f64(values: F64Ptr, count: Int):
+    var zero = SIMD[DType.float64, F64W](0)
+    var index = 0
+    while index + F64W <= count:
+        values.store(index, zero)
+        index += F64W
+    while index < count:
+        values[index] = 0.0
+        index += 1
 
 
 @export("mjj_static_embed")
@@ -504,19 +522,29 @@ def mjj_static_embed(
     var lengths = i32p(lengths_addr)
     var freqs = i32p(freqs_addr)
     var values = f64p(out_addr)
-    var i = 0
-    while i < dim:
-        values[i] = 0.0
-        i += 1
+    zero_f64(values, dim)
+    var max_len = 0
     var index = 0
+    while index < token_count:
+        max_len = max(max_len, Int(lengths[index]))
+        index += 1
+    var scratch_buf = alloc[UInt8](max_len + 2)
+    var scratch = u8p(Int(scratch_buf))
+    index = 0
     while index < token_count:
         var length = Int(lengths[index])
         var frequency = Int(freqs[index])
         if length > 0 and frequency > 0:
             embed_token(
-                values, dim, tokens + Int(offsets[index]), length, frequency
+                values,
+                dim,
+                tokens + Int(offsets[index]),
+                length,
+                frequency,
+                scratch,
             )
         index += 1
+    scratch_buf.free()
     return 0
 
 
@@ -566,3 +594,58 @@ def mjj_bm25_accumulate(
         )
         index += 1
     return posting_len
+
+
+@export("mjj_quantize_i8")
+def mjj_quantize_i8(
+    values_addr: Int,
+    output_addr: Int,
+    count: Int,
+    scale_out_addr: Int,
+) abi("C") -> Int:
+    """SIMD symmetric int8 quantise into int64 lanes (Python ``array('q')``).
+
+    Writes the scale to ``scale_out_addr``. Matches the Python rounding rule:
+    ``int(value * inverse ± 0.5)`` clamped to ``[-127, 127]``.
+    """
+    if values_addr == 0 or output_addr == 0 or scale_out_addr == 0 or count < 0:
+        return 1
+    var values = f64p(values_addr)
+    var output = i64p(output_addr)
+    var scale_out = f64p(scale_out_addr)
+    if count == 0:
+        scale_out[0] = 1.0
+        return 0
+
+    var peak_vec = SIMD[DType.float64, F64W](0)
+    var index = 0
+    while index + F64W <= count:
+        peak_vec = max(peak_vec, abs(values.load[width=F64W](index)))
+        index += F64W
+    var peak = peak_vec.reduce_max()
+    while index < count:
+        peak = max(peak, abs(values[index]))
+        index += 1
+
+    var scale = peak / 127.0 if peak else 1.0
+    var inverse = 1.0 / scale
+    var lo = SIMD[DType.int64, F64W](-127)
+    var hi = SIMD[DType.int64, F64W](127)
+    index = 0
+    while index + F64W <= count:
+        var v = values.load[width=F64W](index)
+        var bias = copysign(SIMD[DType.float64, F64W](0.5), v)
+        var rounded = (v * inverse + bias).cast[DType.int64]()
+        output.store(index, min(max(rounded, lo), hi))
+        index += F64W
+    while index < count:
+        var value = values[index]
+        var rounded = Int(value * inverse + (0.5 if value >= 0.0 else -0.5))
+        if rounded < -127:
+            rounded = -127
+        elif rounded > 127:
+            rounded = 127
+        output[index] = Int64(rounded)
+        index += 1
+    scale_out[0] = scale
+    return 0

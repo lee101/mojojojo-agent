@@ -46,6 +46,7 @@ it locally with:
 
 ```bash
 pixi run mojo-check
+./scripts/mojo-profile.sh   # mojolint / mojoasm / mojoffi via ../dotfiles/tools/mojo
 ```
 
 `.github/workflows/mojo.yml` performs this build on every push and pull request.
@@ -62,7 +63,9 @@ pixi run mojo-check                   # build/libmjj_search.so
 ```
 
 See [docs/native-runtime.md](docs/native-runtime.md) for discovery order and the
-tree-sitter / `mojo-tree-sitter` boundary.
+tree-sitter / `mojo-tree-sitter` boundary. Lean into Mojo for contiguous numeric
+SIMD (quantize, int8 scan) and posting loops; skip GPU for search — intensity is
+below ~2 flops/byte and the card is usually contended.
 
 ## Validation
 

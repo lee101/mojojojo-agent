@@ -89,8 +89,8 @@ Shared libraries are discovered, never imported as Python modules:
 4. packaged / system paths
 
 When several candidates load, MJJ prefers the library that exports the fullest
-ABI (`search`, `tokenize`, `embed`, `bm25`). Missing symbols degrade that path
-only; the harness keeps running.
+ABI (`search`, `tokenize`, `embed`, `bm25`, `quantize`). Missing symbols degrade
+that path only; the harness keeps running.
 
 Local peer overrides while developing both sides:
 

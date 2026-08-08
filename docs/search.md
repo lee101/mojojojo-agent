@@ -170,9 +170,11 @@ only latency changes. `MJJ_ACCEL=0` disables the tokenize/embed/BM25 exports
 while leaving the optional int8 scan available when the library is present.
 
 `mjj/search/embed.mojo` supplies `mjj_search_i8_mmap`, `mjj_tokenize`,
-`mjj_static_embed`, and `mjj_bm25_accumulate` for a repository-specific build. It
-is never compiled in the agent loop. Embedding L2 normalisation stays in CPython
-so persisted index factors remain bit-compatible with the Python fallback.
+`mjj_static_embed`, `mjj_bm25_accumulate`, and `mjj_quantize_i8` for a
+repository-specific build. It is never compiled in the agent loop. Embedding L2
+normalisation stays in CPython so persisted index factors remain bit-compatible
+with the Python fallback. Embed scratch reuse avoids a per-token `List` alloc;
+quantize uses AVX2-width float64 SIMD.
 
 ## Measured benchmark
 
@@ -194,25 +196,33 @@ source-context reads, and formatting. The `rg` comparison is
 the ranked evidence with reading its complete top-result file. Returned tokens
 use the harness's dependency-free four-characters-per-token estimate.
 
-### Mojo tokenize / embed / BM25 microbench (2026-08-08)
+### Mojo tokenize / embed / BM25 / quantize microbench (2026-08-08)
 
 Measured on this checkout with `build/libmjj_search.so` from `pixi run mojo-check`
-(`MJJ_ACCEL=1`). Tokenize/embed rows are medians from `python -m mjj.kernels.bench`;
-BM25 compares pure Python against `mjj_bm25_accumulate` directly (5,000-row posting,
-median of 7×40 loops).
+(`MJJ_ACCEL=1`). Tokenize/embed/BM25 rows are medians from `python -m mjj.kernels.bench`;
+quantize ABI compares pure Python against `mjj_quantize_i8` directly (256-d,
+median of 7×1000 loops). Cold index is median of 3 fresh builds of this repo.
 
 | candidate | Python µs | Mojo µs | decision |
 | --- | ---: | ---: | --- |
-| identifier tokenizer | 3573.6 | 2150.8 | keep |
-| static embedding 256d | 12601.0 | 1256.9 | keep |
-| BM25 posting, 5,000 rows | 2340.3 | 43.4 | keep |
+| identifier tokenizer | 2803.7 | 2064.1 | keep |
+| static embedding 256d | 12928.9 | 1185.1 | keep |
+| BM25 posting, 5,000 rows | 1963.7 | 56.9 | keep |
+| quantize 256 ABI | 72.1 | 7.6 | keep |
 
-Cold index of this repository (207 files / 2083 chunks, median of 3 builds):
-
-| path | median build |
+| path | median cold index |
 | --- | ---: |
-| Python fallback (`MJJ_ACCEL=0`) | 917.695 ms |
-| Mojo tokenize + embed | 603.173 ms |
+| Python fallback (`MJJ_ACCEL=0`) | 2.513 s |
+| Mojo tokenize + embed + quantize + BM25 ABI | 1.630 s |
+
+Profile / codegen (dotfiles toolkit at `../dotfiles/tools/mojo`):
+
+```bash
+./scripts/mojo-profile.sh
+```
+
+GPU stays off this path: int8 scan and quantize are memory-bound / low flops-per-byte;
+`mojogpu --check` on this host also shows the card already heavily shared.
 
 ### Hybrid search vs `rg` (2026-08-07, this repository)
 

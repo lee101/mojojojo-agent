@@ -135,6 +135,22 @@ def test_bm25_kernel_exact_randomised() -> None:
             _wait_for_native(bm25_accumulate)
 
 
+def test_native_quantize_matches_python_when_abi_present() -> None:
+    from mjj.search.vectors import native_quantize_i8, _default_backend
+
+    backend = _default_backend()
+    if not backend.quantize_available:
+        pytest.skip("Mojo search ABI with quantize not loaded")
+    rng = random.Random(0x51)
+    values = [rng.uniform(-100.0, 100.0) for _ in range(256)]
+    expected, expected_scale = _quantize_reference(values)
+    numeric = array("d", values)
+    native_out = array("q", [0]) * len(values)
+    scale = native_quantize_i8(numeric, native_out)
+    assert scale == expected_scale
+    assert list(native_out) == expected
+
+
 def test_native_bm25_matches_python_when_abi_present() -> None:
     from mjj.search.vectors import native_bm25_accumulate, _default_backend
 

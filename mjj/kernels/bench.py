@@ -178,7 +178,7 @@ def compact_benchmark() -> None:
         )
     )
 
-    from mjj.search.vectors import native_bm25_accumulate
+    from mjj.search.vectors import native_bm25_accumulate, native_quantize_i8
 
     if native_bm25_accumulate(
         document_ids, frequencies, lengths, array("d", [0.0]) * count, *parameters
@@ -210,6 +210,31 @@ def compact_benchmark() -> None:
                 pure,
                 abi,
                 "keep" if abi < pure else "loss",
+            )
+        )
+
+    if native_quantize_i8(numeric, array("q", [0]) * len(numeric)) is None:
+        rows.append(
+            (
+                "quantize 256 ABI",
+                "mojo ABI",
+                reference,
+                None,
+                "fallback",
+            )
+        )
+    else:
+        abi_q = _median_us(
+            lambda: native_quantize_i8(numeric, array("q", [0]) * len(numeric)),
+            loops=1_000,
+        )
+        rows.append(
+            (
+                "quantize 256 ABI",
+                "mojo ABI",
+                reference,
+                abi_q,
+                "keep" if abi_q < reference else "loss",
             )
         )
 

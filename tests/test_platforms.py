@@ -12,6 +12,7 @@ def test_every_core_tool_imports_on_the_current_platform() -> None:
         "apply_patch",
         "check",
         "checkpoint",
+        "commit",
         "delegate",
         "display_image",
         "list",

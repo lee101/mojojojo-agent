@@ -27,7 +27,7 @@ Python-hosted coding agent with optional Mojo hot paths. It ships as the
 | token and tool boundary | `mjj/ledger.py`, `mjj/tools/` |
 | instructions, skills, plugins, MCP | `mjj/project_docs.py`, `mjj/skills.py`, `mjj/agent_plugins.py`, `mjj/plugins.py`, `mjj/mcp.py` |
 | search and repository map | `mjj/search/`, `mjj/repo_map.py` |
-| edits, syntax, LSP, undo | `mjj/tools/patch.py`, `mjj/syntax.py`, `mjj/lsp.py`, `mjj/checkpoints.py` |
+| edits, syntax, LSP, undo | `mjj/tools/patch.py`, `mjj/syntax.py`, `mjj/hygiene.py`, `mjj/lsp.py`, `mjj/checkpoints.py` |
 | local/remote execution | `mjj/exec/`, `mjj/kernels/` |
 | CLI, TUI, hosted server | `mjj/cli.py`, `mjj/tui.py`, `mjj/server.py` |
 

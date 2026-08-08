@@ -182,11 +182,17 @@ files through `mojojojo-compiler`; JavaScript, shell, C/C++, Ruby, PHP, and Lua
 use their installed language checker. Compiler output remains ledger-bounded.
 
 Set `"format": true` to explicitly run a discovered formatter before checking.
-MJJ prefers project-local Ruff/Black and Prettier, then already-installed
-`gofmt`, `rustfmt`, or `clang-format`. Formatting passes through approval,
-checkpoints every target first, and restores those files when a formatter
+Set `"fix": true` for installed autofixers (`ruff check --fix`, eslint
+`--fix`). Set `"typecheck": true` to run discovered lint/type checkers (ruff,
+`ty`/`basedpyright`/`pyright`, `tsc --noEmit`) and fail when they report
+issues. MJJ prefers project-local Ruff/Black and Prettier, then already-installed
+`gofmt`, `rustfmt`, or `clang-format`. Formatting and autofix pass through
+approval, checkpoint every target first, and restore those files when a mutator
 fails. On Windows, an installed `pwsh` or Windows PowerShell parser provides
 compiler checks for `.ps1` files, and project `.exe`/`.cmd` tools are detected.
+
+Successful `apply_patch` calls also honor `tools.post_edit` (`off` / `format` /
+`fix` / `full`) so format and autofix can run without an extra model turn.
 
 ## `verify`
 
@@ -194,6 +200,12 @@ compiler checks for `.ps1` files, and project `.exe`/`.cmd` tools are detected.
 `make test` / `pytest` / `scripts/self-test.sh`. Prefer it after meaningful
 edits instead of inventing ad-hoc shell. Override with `command` when needed.
 CLI twin for the harness itself: `mjj self-test` (offline core pytest slice).
+
+## `commit`
+
+`commit` stages files changed this run (or explicit `paths`, or `all=true` for
+`git add -u`) and creates one git commit with the supplied message. Prefer it
+after `check` / `verify` are clean. It is approval-gated like other mutations.
 
 ## `py`
 

@@ -94,6 +94,7 @@ def _agent(args):
             session=session,
             goal_store=goal_store,
             project_doc_max_bytes=args.resolved_config.project_doc_max_bytes,
+            post_edit=args.resolved_config.post_edit,
         )
     except Exception:
         registry.close()

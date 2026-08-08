@@ -47,6 +47,13 @@ def _describe(tool: str, details: dict) -> str:
         paths = details.get("paths")
         suffix = ", ".join(map(str, paths[:8])) if isinstance(paths, list) else "files"
         return f"formatting of {suffix}"
+    if tool in {"fix", "post_edit"}:
+        paths = details.get("paths")
+        suffix = ", ".join(map(str, paths[:8])) if isinstance(paths, list) else "files"
+        return f"{tool} of {suffix}"
+    if tool == "commit":
+        message = str(details.get("message") or "commit")
+        return f"git commit {message[:120]}"
     if tool == "py":
         return "local Python execution"
     return f"tool {tool}"

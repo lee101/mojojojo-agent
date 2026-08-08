@@ -41,6 +41,7 @@ paths = ["../skills"]
             "MJJ_EFFORT": "max",
             "MJJ_AUTO_NEXT_IDEA": "true",
             "MJJ_AUTO_MAX_TURNS": "3",
+            "MJJ_POST_EDIT": "full",
         },
     )
 
@@ -50,6 +51,7 @@ paths = ["../skills"]
     assert config.verbosity == "high"
     assert config.permission_mode == "ask"
     assert config.tool_budget == 321
+    assert config.post_edit == "full"
     assert config.project_doc_max_bytes == 4096
     assert config.auto_next_steps is True
     assert config.auto_next_idea is True
@@ -72,6 +74,7 @@ def test_explicit_config_is_last_file_layer(tmp_path: Path):
         ("[agent]\nprovider='mystery'\n", "agent.provider"),
         ("[agent]\npermission_mode='reckless'\n", "agent.permission_mode"),
         ("[tools]\nbudget=0\n", "tools.budget"),
+        ("[tools]\npost_edit='maybe'\n", "tools.post_edit"),
         ("[skills]\npaths='nope'\n", "skills.paths"),
         ("[agent]\nproject_doc_max_bytes=-1\n", "agent.project_doc_max_bytes"),
         ("[agent]\nauto_max_turns=-1\n", "agent.auto_max_turns"),

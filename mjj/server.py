@@ -704,6 +704,7 @@ class AgentService:
             session=state.session,
             approve=lambda _name, _request: False,
             include_user_instructions=False,
+            post_edit="off",
         )
         agent.items = state.items
         agent.steering = state.steering

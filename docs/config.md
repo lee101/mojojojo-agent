@@ -30,6 +30,7 @@ auto_max_turns = 0
 
 [tools]
 budget = 1600
+post_edit = "fix" # off, format, fix, or full
 disabled = []
 
 [skills]
@@ -46,7 +47,8 @@ max_tools = 32
 ```
 
 Supported environment equivalents are `MJJ_PROVIDER`, `MJJ_MODEL`, `MJJ_EFFORT`,
-`MJJ_VERBOSITY`, `MJJ_PERMISSION_MODE`, `MJJ_TOOL_BUDGET`, `MJJ_PROJECT_DOC_MAX_BYTES`,
+`MJJ_VERBOSITY`, `MJJ_PERMISSION_MODE`, `MJJ_TOOL_BUDGET`, `MJJ_POST_EDIT`,
+`MJJ_PROJECT_DOC_MAX_BYTES`,
 `MJJ_AUTO_NEXT_STEPS`, `MJJ_AUTO_NEXT_IDEA`, `MJJ_AUTO_MAX_TURNS`,
 comma-separated `MJJ_DISABLE_TOOLS`, and path-separator-delimited
 `MJJ_SKILL_PATHS`. `MJJ_CACHE_MODE` accepts `auto`, `off`, `implicit`, or
@@ -58,6 +60,11 @@ The concise CLI surface is `--loop steps|ideas|full|forever` plus
 `--loop-turns N`; interactive sessions use `/loop` with the same values.
 Credentials and executor endpoints keep their existing dedicated environment
 variables and never appear in `mjj config` output.
+
+`tools.post_edit` runs deterministic formatters and autofixers after a
+successful `apply_patch`: `off`, `format`, `fix` (format plus ruff/eslint
+`--fix`, default), or `full` (also report remaining lint/typecheck). Missing
+binaries are a no-op. Ask/read-only modes still go through approval.
 
 Project-doc discovery includes `AGENTS.override.md`, `AGENTS.md`, `CLAUDE.md`,
 and deprecated `CONTEXT.md`, plus one bounded user rule. Set

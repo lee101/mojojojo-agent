@@ -19,6 +19,7 @@ except ImportError:  # pragma: no cover - Python 3.10
 EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
 VERBOSITIES = ("low", "medium", "high")
 PROVIDERS = ("auto", "deepseek", "openpaths", "openrouter", "openai", "custom")
+POST_EDIT_MODES = ("off", "format", "fix", "full")
 MAX_MCP_SERVERS = 16
 MAX_PLUGINS = 8
 PLUGIN_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
@@ -60,6 +61,7 @@ class Config:
     verbosity: str = "low"
     permission_mode: str = "auto"
     tool_budget: int = 1600
+    post_edit: str = "fix"
     project_doc_max_bytes: int = 32 * 1024
     auto_next_steps: bool = False
     auto_next_idea: bool = False
@@ -125,6 +127,7 @@ def load(
         "MJJ_VERBOSITY": "verbosity",
         "MJJ_PERMISSION_MODE": "permission_mode",
         "MJJ_TOOL_BUDGET": "tool_budget",
+        "MJJ_POST_EDIT": "post_edit",
         "MJJ_PROJECT_DOC_MAX_BYTES": "project_doc_max_bytes",
         "MJJ_AUTO_MAX_TURNS": "auto_max_turns",
     }
@@ -204,6 +207,8 @@ def _merge_document(
             values[key] = agent[key]
     if "budget" in tools:
         values["tool_budget"] = tools["budget"]
+    if "post_edit" in tools:
+        values["post_edit"] = tools["post_edit"]
     if "disabled" in tools:
         values["disabled_tools"] = tools["disabled"]
     if "paths" in skills:
@@ -295,6 +300,7 @@ def _validated(values: Mapping[str, Any]) -> Config:
     verbosity = values.get("verbosity", Config.verbosity)
     permission_mode = values.get("permission_mode", Config.permission_mode)
     budget = values.get("tool_budget", Config.tool_budget)
+    post_edit = values.get("post_edit", Config.post_edit)
     project_doc_max_bytes = values.get(
         "project_doc_max_bytes", Config.project_doc_max_bytes
     )
@@ -327,6 +333,11 @@ def _validated(values: Mapping[str, Any]) -> Config:
         raise ConfigError("tools.budget must be a positive integer") from exc
     if budget <= 0:
         raise ConfigError("tools.budget must be a positive integer")
+    if not isinstance(post_edit, str) or post_edit.strip().lower() not in POST_EDIT_MODES:
+        raise ConfigError(
+            "tools.post_edit must be one of " + ", ".join(POST_EDIT_MODES)
+        )
+    post_edit = post_edit.strip().lower()
     if isinstance(project_doc_max_bytes, bool):
         raise ConfigError("agent.project_doc_max_bytes must be a non-negative integer")
     try:
@@ -405,6 +416,7 @@ def _validated(values: Mapping[str, Any]) -> Config:
         verbosity=verbosity,
         permission_mode=permission_mode,
         tool_budget=budget,
+        post_edit=post_edit,
         project_doc_max_bytes=project_doc_max_bytes,
         auto_next_steps=auto_next_steps,
         auto_next_idea=auto_next_idea,

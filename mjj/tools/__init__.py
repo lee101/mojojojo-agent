@@ -21,6 +21,7 @@ MODULES = (
     "navigate",
     "check",
     "verify",
+    "commit",
     "display",
     "read_image",
     "py_exec",

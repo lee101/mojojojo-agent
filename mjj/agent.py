@@ -53,6 +53,7 @@ class Agent:
     session: Session | None = None
     instructions: str | None = None
     project_doc_max_bytes: int = DEFAULT_MAX_BYTES
+    post_edit: str = "fix"
     include_user_instructions: bool = True
     project_instructions: ProjectInstructions = field(
         init=False, default_factory=ProjectInstructions
@@ -83,7 +84,8 @@ class Agent:
             state={
                 "scoped-project-docs": ScopedProjectDocs(
                     self.cwd, max_bytes=nested_budget
-                )
+                ),
+                "post_edit": self.post_edit,
             },
         )
         self.ctx.state["model-client"] = self.client

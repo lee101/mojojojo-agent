@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..checkpoints import CheckpointError, store_for
+from ..hygiene import apply_post_edit
 from ..syntax import SyntaxCheck, validate_source
 from .base import ToolContext, ToolResult
 
@@ -107,6 +108,15 @@ class ApplyPatchTool:
         changed = ctx.state.setdefault("changed-files", set())
         if isinstance(changed, set):
             changed.update(summaries)
+        root = ctx.cwd.resolve()
+        touched = [
+            root / path
+            for path in summaries
+            if (root / path).is_file()
+        ]
+        hygiene = apply_post_edit(ctx, touched)
+        if hygiene.text:
+            lines.append(hygiene.text)
         return _result(
             ctx,
             "\n".join(lines),
@@ -115,6 +125,10 @@ class ApplyPatchTool:
             syntax=[check.__dict__ for check in checks],
             checkpoint=checkpoint,
             checkpoint_error=checkpoint_error,
+            post_edit=hygiene.text or None,
+            post_edit_ok=hygiene.ok,
+            formatted=hygiene.formatted or None,
+            fixed=hygiene.fixed or None,
         )
 
 

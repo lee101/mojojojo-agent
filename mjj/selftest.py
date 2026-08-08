@@ -13,6 +13,7 @@ CORE_TESTS = (
     "tests/test_plan.py",
     "tests/test_goals.py",
     "tests/test_check.py",
+    "tests/test_hygiene.py",
     "tests/test_verify.py",
     "tests/test_subagent_plan.py",
     "tests/test_cli.py",

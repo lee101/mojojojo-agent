@@ -170,11 +170,12 @@ only latency changes. `MJJ_ACCEL=0` disables the tokenize/embed/BM25 exports
 while leaving the optional int8 scan available when the library is present.
 
 `mjj/search/embed.mojo` supplies `mjj_search_i8_mmap`, `mjj_tokenize`,
-`mjj_static_embed`, `mjj_bm25_accumulate`, and `mjj_quantize_i8` for a
-repository-specific build. It is never compiled in the agent loop. Embedding L2
-normalisation stays in CPython so persisted index factors remain bit-compatible
-with the Python fallback. Embed scratch reuse avoids a per-token `List` alloc;
-quantize uses AVX2-width float64 SIMD.
+`mjj_static_embed`, `mjj_static_embed_batch`, `mjj_bm25_accumulate`, and
+`mjj_quantize_i8` for a repository-specific build. It is never compiled in the
+agent loop. Embedding L2 normalisation stays in CPython so persisted index
+factors remain bit-compatible with the Python fallback. Embed scratch reuse
+avoids a per-token `List` alloc; batch embed amortises one ctypes call and one
+scratch alloc across many bags; quantize uses AVX2-width float64 SIMD.
 
 ## Measured benchmark
 
@@ -202,11 +203,14 @@ Measured on this checkout with `build/libmjj_search.so` from `pixi run mojo-chec
 (`MJJ_ACCEL=1`). Tokenize/embed/BM25 rows are medians from `python -m mjj.kernels.bench`;
 quantize ABI compares pure Python against `mjj_quantize_i8` directly (256-d,
 median of 7×1000 loops). Cold index is median of 3 fresh builds of this repo.
+Batch embed is 64 short token bags (ctypes-amortisation regime).
 
 | candidate | Python µs | Mojo µs | decision |
 | --- | ---: | ---: | --- |
 | identifier tokenizer | 2803.7 | 2064.1 | keep |
 | static embedding 256d | 12928.9 | 1185.1 | keep |
+| static embed batch x64 (vs singles) | 3406.4 | 2598.8 | keep |
+| static embed batch x64 (vs python) | 7554.8 | 2598.8 | keep |
 | BM25 posting, 5,000 rows | 1963.7 | 56.9 | keep |
 | quantize 256 ABI | 72.1 | 7.6 | keep |
 

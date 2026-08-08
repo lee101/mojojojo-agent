@@ -100,6 +100,34 @@ def _check_embed(library: ctypes.CDLL) -> None:
     assert norm > 0.0
 
 
+def _check_embed_batch(library: ctypes.CDLL) -> None:
+    embed_batch = library.mjj_static_embed_batch
+    integer = ctypes.c_ssize_t
+    embed_batch.argtypes = [integer] * 8
+    embed_batch.restype = ctypes.c_int
+
+    tokens = b"http" + b"xml"
+    offsets = (ctypes.c_int32 * 2)(0, 4)
+    lengths = (ctypes.c_int32 * 2)(4, 3)
+    freqs = (ctypes.c_int32 * 2)(1, 2)
+    bag_offsets = (ctypes.c_int32 * 3)(0, 1, 2)
+    values = (ctypes.c_double * 16)()
+    token_buf = (ctypes.c_uint8 * len(tokens)).from_buffer_copy(tokens)
+    status = embed_batch(
+        ctypes.addressof(token_buf),
+        ctypes.addressof(offsets),
+        ctypes.addressof(lengths),
+        ctypes.addressof(freqs),
+        ctypes.addressof(bag_offsets),
+        2,
+        ctypes.addressof(values),
+        8,
+    )
+    assert status == 0, status
+    assert any(value != 0.0 for value in values[:8]), list(values[:8])
+    assert any(value != 0.0 for value in values[8:]), list(values[8:])
+
+
 def _check_bm25(library: ctypes.CDLL) -> None:
     bm25 = library.mjj_bm25_accumulate
     integer = ctypes.c_ssize_t
@@ -164,6 +192,7 @@ def main() -> int:
     _check_search(library)
     _check_tokenize(library)
     _check_embed(library)
+    _check_embed_batch(library)
     _check_bm25(library)
     _check_quantize(library)
     print("native search ABI ok")

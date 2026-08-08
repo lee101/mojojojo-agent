@@ -116,6 +116,7 @@ def test_native_tokenize_and_embed_match_python_when_abi_present() -> None:
     from mjj.search.lexical import tokenize_python
     from mjj.search.vectors import (
         native_static_embedding_tokens,
+        native_static_embedding_tokens_batch,
         native_tokenize,
         static_embedding_tokens_python,
         _default_backend,
@@ -130,12 +131,18 @@ def test_native_tokenize_and_embed_match_python_when_abi_present() -> None:
         "lowercase lowercase 123 123 snake_case HTTPServer XMLHttpRequest",
         "version2HTTPServer path/to/file.py CAPS lowerUPPER42Next",
     )
-    for text in texts:
+    bags = [tokenize_python(text) for text in texts]
+    for text, tokens in zip(texts, bags):
         assert native_tokenize(text) == tokenize_python(text)
-        tokens = tokenize_python(text)
         assert native_static_embedding_tokens(tokens, 256) == (
             static_embedding_tokens_python(tokens, 256)
         )
+    if backend.embed_batch_available:
+        batch = native_static_embedding_tokens_batch(bags, 256)
+        assert batch is not None
+        assert batch == [
+            static_embedding_tokens_python(tokens, 256) for tokens in bags
+        ]
 
 
 def test_mjj_accel_disables_native_tokenize_and_embed(
@@ -148,7 +155,36 @@ def test_mjj_accel_disables_native_tokenize_and_embed(
     vector_module._BACKEND = None
     assert vector_module.native_tokenize("HTTPServer") is None
     assert vector_module.native_static_embedding_tokens(["http"], 8) is None
+    assert vector_module.native_static_embedding_tokens_batch([["http"]], 8) is None
     assert tokenize("HTTPServer") == tokenize_python("HTTPServer")
+    vector_module._BACKEND = None
+
+
+def test_static_embedding_tokens_batch_matches_singles(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from mjj.search.lexical import tokenize_python
+    from mjj.search.vectors import (
+        static_embedding_tokens,
+        static_embedding_tokens_batch,
+        static_embedding_tokens_python,
+    )
+
+    bags = [
+        tokenize_python("HTTPServer.fetch_user"),
+        tokenize_python("xmlhttprequest path/to/file.py"),
+        [],
+    ]
+    assert static_embedding_tokens_batch(bags, 256) == [
+        static_embedding_tokens(bag, 256) for bag in bags
+    ]
+    monkeypatch.setenv("MJJ_ACCEL", "0")
+    from mjj.search import vectors as vector_module
+
+    vector_module._BACKEND = None
+    assert static_embedding_tokens_batch(bags, 64) == [
+        static_embedding_tokens_python(bag, 64) for bag in bags
+    ]
     vector_module._BACKEND = None
 
 

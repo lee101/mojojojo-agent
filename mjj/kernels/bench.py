@@ -36,6 +36,7 @@ from mjj.search.lexical import tokenize_python
 from mjj.search.vectors import (
     Int8Vectors,
     native_static_embedding_tokens,
+    native_static_embedding_tokens_batch,
     native_tokenize,
     quantize,
     static_embedding_tokens_python,
@@ -291,6 +292,59 @@ def compact_benchmark() -> None:
                 python_embed,
                 accelerated,
                 "keep" if accelerated < python_embed else "loss",
+            )
+        )
+
+    # Many short bags amortise ctypes; huge single bags are packing-bound either way.
+    batch_bags = [
+        tokenize_python(
+            f"HTTPServer{index}.fetch_user auth_token path/to/source.py"
+        )
+        for index in range(64)
+    ]
+    python_batch = _median_us(
+        lambda: [
+            static_embedding_tokens_python(bag) for bag in batch_bags
+        ],
+        loops=10,
+    )
+    if native_static_embedding_tokens_batch(batch_bags) is None:
+        rows.append(
+            (
+                "static embed batch x64",
+                "mojo batch ABI",
+                python_batch,
+                None,
+                "fallback",
+            )
+        )
+    else:
+        single_loop = _median_us(
+            lambda: [
+                native_static_embedding_tokens(bag) for bag in batch_bags
+            ],
+            loops=10,
+        )
+        batch = _median_us(
+            lambda: native_static_embedding_tokens_batch(batch_bags),
+            loops=10,
+        )
+        rows.append(
+            (
+                "static embed batch x64",
+                "mojo batch vs singles",
+                single_loop,
+                batch,
+                "keep" if batch < single_loop else "loss",
+            )
+        )
+        rows.append(
+            (
+                "static embed batch x64",
+                "mojo batch vs python",
+                python_batch,
+                batch,
+                "keep" if batch < python_batch else "loss",
             )
         )
 

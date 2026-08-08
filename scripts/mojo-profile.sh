@@ -39,7 +39,7 @@ mojolint "$src" || true
 echo
 mojoffi "$src" --check "$lib" || true
 echo
-for sym in mjj_search_i8_mmap mjj_tokenize mjj_static_embed mjj_bm25_accumulate mjj_quantize_i8; do
+for sym in mjj_search_i8_mmap mjj_tokenize mjj_static_embed mjj_static_embed_batch mjj_bm25_accumulate mjj_quantize_i8; do
   echo "### mojoasm $sym"
   mojoasm "$src" "$sym" || true
   echo

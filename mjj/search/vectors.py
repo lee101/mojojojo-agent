@@ -107,6 +107,22 @@ def static_embedding_tokens(
     return static_embedding_tokens_python(materialised, dim)
 
 
+def static_embedding_tokens_batch(
+    bags: Sequence[Iterable[str]],
+    dim: int = DIMENSION,
+) -> list[list[float]]:
+    """Embed many token bags; uses one Mojo call when the batch ABI is present."""
+    if dim <= 0:
+        raise ValueError("vector dimension must be positive")
+    materialised = [list(bag) for bag in bags]
+    native = native_static_embedding_tokens_batch(materialised, dim)
+    if native is not None:
+        return native
+    return [
+        static_embedding_tokens_python(bag, dim) for bag in materialised
+    ]
+
+
 def quantize(values: Sequence[float]) -> tuple[bytes, float]:
     """Symmetrically quantise a vector; return bytes and scale/norm factor."""
     numeric = array("d", (float(value) for value in values))
@@ -169,11 +185,20 @@ class MojoBackend:
         self.search_function = None
         self.tokenize_function = None
         self.embed_function = None
+        self.embed_batch_function = None
         self.bm25_function = None
         self.quantize_function = None
         integer = ctypes.c_ssize_t
         best: tuple[
-            int, object, object, object, object, object, object, str
+            int,
+            object,
+            object,
+            object,
+            object,
+            object,
+            object,
+            object,
+            str,
         ] | None = None
         for candidate in _library_candidates():
             try:
@@ -199,6 +224,7 @@ class MojoBackend:
                 search.restype = None
                 tokenize = getattr(library, "mjj_tokenize", None)
                 embed = getattr(library, "mjj_static_embed", None)
+                embed_batch = getattr(library, "mjj_static_embed_batch", None)
                 bm25 = getattr(library, "mjj_bm25_accumulate", None)
                 quantize = getattr(library, "mjj_quantize_i8", None)
                 if tokenize is not None:
@@ -207,6 +233,9 @@ class MojoBackend:
                 if embed is not None:
                     embed.argtypes = [integer] * 7
                     embed.restype = ctypes.c_int
+                if embed_batch is not None:
+                    embed_batch.argtypes = [integer] * 8
+                    embed_batch.restype = ctypes.c_int
                 if bm25 is not None:
                     bm25.argtypes = [
                         integer,
@@ -226,7 +255,13 @@ class MojoBackend:
                     quantize.restype = ctypes.c_int
                 score = 1 + sum(
                     function is not None
-                    for function in (tokenize, embed, bm25, quantize)
+                    for function in (
+                        tokenize,
+                        embed,
+                        embed_batch,
+                        bm25,
+                        quantize,
+                    )
                 )
                 if best is None or score > best[0]:
                     best = (
@@ -235,11 +270,12 @@ class MojoBackend:
                         search,
                         tokenize,
                         embed,
+                        embed_batch,
                         bm25,
                         quantize,
                         candidate,
                     )
-                if score >= 5:
+                if score >= 6:
                     break
             except (AttributeError, OSError) as exc:
                 self.error = str(exc)
@@ -250,6 +286,7 @@ class MojoBackend:
                 self.search_function,
                 self.tokenize_function,
                 self.embed_function,
+                self.embed_batch_function,
                 self.bm25_function,
                 self.quantize_function,
                 self.path,
@@ -266,6 +303,10 @@ class MojoBackend:
     @property
     def embed_available(self) -> bool:
         return self.embed_function is not None and _accel_requested()
+
+    @property
+    def embed_batch_available(self) -> bool:
+        return self.embed_batch_function is not None and _accel_requested()
 
     @property
     def bm25_available(self) -> bool:
@@ -345,19 +386,12 @@ def native_tokenize(value: str) -> list[str] | None:
     return None
 
 
-def native_static_embedding_tokens(
+def _pack_token_bag(
     tokens: Iterable[str],
-    dim: int = DIMENSION,
-) -> list[float] | None:
-    """Mojo projection + CPython L2; ``None`` when the ABI is unavailable."""
-    backend = _default_backend()
-    if not backend.embed_available or dim <= 0:
-        return None
+) -> tuple[list[bytes], array, array, array]:
     frequencies: dict[str, int] = {}
     for token in tokens:
         frequencies[token] = frequencies.get(token, 0) + 1
-    if not frequencies:
-        return [0.0] * dim
     parts: list[bytes] = []
     offsets = array("i")
     lengths = array("i")
@@ -370,6 +404,20 @@ def native_static_embedding_tokens(
         freqs.append(int(frequency))
         parts.append(encoded)
         cursor += len(encoded)
+    return parts, offsets, lengths, freqs
+
+
+def native_static_embedding_tokens(
+    tokens: Iterable[str],
+    dim: int = DIMENSION,
+) -> list[float] | None:
+    """Mojo projection + CPython L2; ``None`` when the ABI is unavailable."""
+    backend = _default_backend()
+    if not backend.embed_available or dim <= 0:
+        return None
+    parts, offsets, lengths, freqs = _pack_token_bag(tokens)
+    if not offsets:
+        return [0.0] * dim
     blob = bytearray(b"".join(parts))
     values = array("d", [0.0]) * dim
     blob_address, blob_holder = _address(blob, ctypes.c_uint8)
@@ -389,7 +437,89 @@ def native_static_embedding_tokens(
     )
     if status != 0:
         return None
-    return _l2_normalize([float(value) for value in values])
+    return _l2_normalize(list(values))
+
+
+def native_static_embedding_tokens_batch(
+    bags: Sequence[Iterable[str]],
+    dim: int = DIMENSION,
+) -> list[list[float]] | None:
+    """One Mojo batch projection + per-row CPython L2; ``None`` if unavailable.
+
+    Falls back to repeated single-bag native embeds when only ``mjj_static_embed``
+    is present, so callers still avoid the Python projection loop.
+    """
+    backend = _default_backend()
+    if dim <= 0:
+        return None
+    materialised = [list(bag) for bag in bags]
+    bag_count = len(materialised)
+    if bag_count == 0:
+        return []
+    if not backend.embed_batch_available:
+        if not backend.embed_available:
+            return None
+        results: list[list[float]] = []
+        for bag in materialised:
+            embedded = native_static_embedding_tokens(bag, dim)
+            if embedded is None:
+                return None
+            results.append(embedded)
+        return results
+
+    blob = bytearray()
+    offsets = array("i")
+    lengths = array("i")
+    freqs = array("i")
+    bag_offsets = array("i", [0])
+    for bag in materialised:
+        frequencies: dict[str, int] = {}
+        for token in bag:
+            frequencies[token] = frequencies.get(token, 0) + 1
+        for token, frequency in frequencies.items():
+            encoded = token.encode("utf-8", "surrogatepass")
+            offsets.append(len(blob))
+            lengths.append(len(encoded))
+            freqs.append(frequency)
+            blob.extend(encoded)
+        bag_offsets.append(len(offsets))
+
+    values = array("d", [0.0]) * (bag_count * dim)
+    if not offsets:
+        return [[0.0] * dim for _ in range(bag_count)]
+    blob_address, blob_holder = _address(blob, ctypes.c_uint8)
+    offsets_address, offsets_holder = _address(offsets, ctypes.c_int32)
+    lengths_address, lengths_holder = _address(lengths, ctypes.c_int32)
+    freqs_address, freqs_holder = _address(freqs, ctypes.c_int32)
+    bag_offsets_address, bag_offsets_holder = _address(
+        bag_offsets, ctypes.c_int32
+    )
+    values_address, values_holder = _address(values, ctypes.c_double)
+    _ = (
+        blob_holder,
+        offsets_holder,
+        lengths_holder,
+        freqs_holder,
+        bag_offsets_holder,
+        values_holder,
+    )
+    status = backend.embed_batch_function(
+        blob_address,
+        offsets_address,
+        lengths_address,
+        freqs_address,
+        bag_offsets_address,
+        bag_count,
+        values_address,
+        dim,
+    )
+    if status != 0:
+        return None
+    flat = list(values)
+    return [
+        _l2_normalize(flat[index * dim:(index + 1) * dim])
+        for index in range(bag_count)
+    ]
 
 
 def native_bm25_accumulate(

@@ -492,6 +492,35 @@ def zero_f64(values: F64Ptr, count: Int):
         index += 1
 
 
+def embed_bag(
+    tokens: U8Ptr,
+    offsets: I32Ptr,
+    lengths: I32Ptr,
+    freqs: I32Ptr,
+    token_start: Int,
+    token_end: Int,
+    values: F64Ptr,
+    dim: Int,
+    scratch: U8Ptr,
+):
+    """Project one token bag into ``values``; leaves the vector unnormalized."""
+    zero_f64(values, dim)
+    var index = token_start
+    while index < token_end:
+        var length = Int(lengths[index])
+        var frequency = Int(freqs[index])
+        if length > 0 and frequency > 0:
+            embed_token(
+                values,
+                dim,
+                tokens + Int(offsets[index]),
+                length,
+                frequency,
+                scratch,
+            )
+        index += 1
+
+
 @export("mjj_static_embed")
 def mjj_static_embed(
     tokens_addr: Int,
@@ -522,7 +551,6 @@ def mjj_static_embed(
     var lengths = i32p(lengths_addr)
     var freqs = i32p(freqs_addr)
     var values = f64p(out_addr)
-    zero_f64(values, dim)
     var max_len = 0
     var index = 0
     while index < token_count:
@@ -530,20 +558,86 @@ def mjj_static_embed(
         index += 1
     var scratch_buf = alloc[UInt8](max_len + 2)
     var scratch = u8p(Int(scratch_buf))
-    index = 0
-    while index < token_count:
-        var length = Int(lengths[index])
-        var frequency = Int(freqs[index])
-        if length > 0 and frequency > 0:
-            embed_token(
-                values,
-                dim,
-                tokens + Int(offsets[index]),
-                length,
-                frequency,
-                scratch,
-            )
+    embed_bag(
+        tokens,
+        offsets,
+        lengths,
+        freqs,
+        0,
+        token_count,
+        values,
+        dim,
+        scratch,
+    )
+    scratch_buf.free()
+    return 0
+
+
+@export("mjj_static_embed_batch")
+def mjj_static_embed_batch(
+    tokens_addr: Int,
+    offsets_addr: Int,
+    lengths_addr: Int,
+    freqs_addr: Int,
+    bag_offsets_addr: Int,
+    bag_count: Int,
+    out_addr: Int,
+    dim: Int,
+) abi("C") -> Int:
+    """Project many token bags into contiguous unnormalized float64 rows.
+
+    ``bag_offsets`` is CSR-style ``Int32[bag_count + 1]`` into the shared
+    offsets/lengths/freqs arrays. Output is row-major ``bag_count * dim``.
+    Caller L2-normalises each row in CPython for factor bit-compatibility.
+    """
+    if bag_count < 0 or dim <= 0:
+        return 1
+    if bag_count == 0:
+        return 0
+    if (
+        tokens_addr == 0
+        or offsets_addr == 0
+        or lengths_addr == 0
+        or freqs_addr == 0
+        or bag_offsets_addr == 0
+        or out_addr == 0
+    ):
+        return 1
+    var tokens = u8p(tokens_addr)
+    var offsets = i32p(offsets_addr)
+    var lengths = i32p(lengths_addr)
+    var freqs = i32p(freqs_addr)
+    var bag_offsets = i32p(bag_offsets_addr)
+    var values = f64p(out_addr)
+    var total_tokens = Int(bag_offsets[bag_count])
+    if total_tokens < 0 or Int(bag_offsets[0]) != 0:
+        return 1
+    var max_len = 0
+    var index = 0
+    while index < total_tokens:
+        max_len = max(max_len, Int(lengths[index]))
         index += 1
+    var scratch_buf = alloc[UInt8](max_len + 2)
+    var scratch = u8p(Int(scratch_buf))
+    var bag = 0
+    while bag < bag_count:
+        var start = Int(bag_offsets[bag])
+        var end = Int(bag_offsets[bag + 1])
+        if start < 0 or end < start or end > total_tokens:
+            scratch_buf.free()
+            return 1
+        embed_bag(
+            tokens,
+            offsets,
+            lengths,
+            freqs,
+            start,
+            end,
+            values + bag * dim,
+            dim,
+            scratch,
+        )
+        bag += 1
     scratch_buf.free()
     return 0
 

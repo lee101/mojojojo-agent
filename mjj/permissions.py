@@ -47,10 +47,15 @@ def _describe(tool: str, details: dict) -> str:
         paths = details.get("paths")
         suffix = ", ".join(map(str, paths[:8])) if isinstance(paths, list) else "files"
         return f"formatting of {suffix}"
-    if tool in {"fix", "post_edit"}:
+    if tool in {"fix", "post_edit", "fix_all", "code_action"}:
         paths = details.get("paths")
         suffix = ", ".join(map(str, paths[:8])) if isinstance(paths, list) else "files"
         return f"{tool} of {suffix}"
+    if tool == "rename":
+        name = str(details.get("new_name") or "symbol")
+        paths = details.get("paths")
+        suffix = ", ".join(map(str, paths[:8])) if isinstance(paths, list) else "files"
+        return f"rename to {name} in {suffix}"
     if tool == "commit":
         message = str(details.get("message") or "commit")
         return f"git commit {message[:120]}"

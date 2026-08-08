@@ -8,7 +8,16 @@ from urllib.parse import urlparse
 from urllib.request import url2pathname
 
 from ..checkpoints import CheckpointError, store_for
-from ..lsp import LspError, request_lsp, request_lsp_call_hierarchy, server_for
+from ..lsp import (
+    Diagnostic,
+    LspError,
+    collect_diagnostics,
+    format_document,
+    request_code_actions,
+    request_lsp,
+    request_lsp_call_hierarchy,
+    server_for,
+)
 from ..repo_map import render_repo_map
 from ..search.index import RepositoryIndex, build_index
 from ..syntax import validate_source
@@ -29,12 +38,18 @@ _ACTIONS = {
     "incoming_calls",
     "outgoing_calls",
     "rename",
+    "diagnostics",
+    "format",
+    "code_action",
+    "fix_all",
 }
+_NO_POSITION = {"symbols", "diagnostics", "format", "fix_all"}
+_MUTATING = {"rename", "format", "code_action", "fix_all"}
 
 
 class NavigateTool:
     name = "navigate"
-    description = "LSP navigation, call hierarchy, and safe rename."
+    description = "LSP navigate/diagnostics/format/fix_all/rename."
     parameters = {
         "type": "object",
         "properties": {
@@ -78,7 +93,7 @@ class NavigateTool:
         if len(new_name) > 256:
             return self._error(ctx, "new_name must not exceed 256 characters")
         position = None
-        if action != "symbols":
+        if action not in _NO_POSITION:
             line = args.get("line")
             column = args.get("column")
             if isinstance(line, bool) or not isinstance(line, int) or line < 1:
@@ -97,6 +112,38 @@ class NavigateTool:
                 lsp_position = (
                     _lsp_position(path, position) if position is not None else None
                 )
+                if action == "diagnostics":
+                    diagnostics = collect_diagnostics(server, root=root, path=path)
+                    return self._diagnostics_result(
+                        ctx, diagnostics, relative, server.name
+                    )
+                if action == "format":
+                    edits = format_document(server, root=root, path=path)
+                    if not edits:
+                        return self._result(
+                            ctx,
+                            "format: language server returned no edits",
+                            server=server.name,
+                            strategy="lsp",
+                            results=0,
+                        )
+                    return self._apply_edit(
+                        ctx,
+                        {"changes": {path.as_uri(): edits}},
+                        label="format",
+                        server_name=server.name,
+                        detail=relative,
+                    )
+                if action in {"code_action", "fix_all"}:
+                    return self._code_action(
+                        ctx,
+                        server,
+                        path,
+                        relative,
+                        lsp_position,
+                        query=query.strip(),
+                        fix_all=action == "fix_all",
+                    )
                 if action in {"incoming_calls", "outgoing_calls"}:
                     assert lsp_position is not None
                     raw = request_lsp_call_hierarchy(
@@ -121,7 +168,13 @@ class NavigateTool:
                         params=params,
                     )
                 if action == "rename":
-                    return self._rename(ctx, raw, new_name.strip(), server.name)
+                    return self._apply_edit(
+                        ctx,
+                        raw,
+                        label="rename",
+                        server_name=server.name,
+                        detail=new_name.strip(),
+                    )
                 output, count = _render_lsp(action, raw, root, query, path=path)
                 if output:
                     return self._result(
@@ -140,46 +193,151 @@ class NavigateTool:
                         results=0,
                     )
             except (OSError, ValueError, TypeError, KeyError, LspError) as exc:
-                if action in {"rename", "incoming_calls", "outgoing_calls"}:
+                if action in _MUTATING or action in {
+                    "incoming_calls",
+                    "outgoing_calls",
+                    "diagnostics",
+                }:
                     return self._error(ctx, f"{action}: {exc}")
-        if action in {"rename", "outgoing_calls"}:
+        if action in _MUTATING or action in {"outgoing_calls", "diagnostics"}:
             return self._error(ctx, f"{action} requires an installed language server")
         return self._fallback(ctx, action, path, relative, position, query)
 
-    def _rename(
+    def _diagnostics_result(
+        self,
+        ctx: ToolContext,
+        diagnostics: list[Diagnostic],
+        relative: str,
+        server_name: str,
+    ) -> ToolResult:
+        if not diagnostics:
+            return self._result(
+                ctx,
+                f"diagnostics ✓ {relative} · clean",
+                server=server_name,
+                strategy="lsp",
+                results=0,
+            )
+        lines = [item.render(relative) for item in diagnostics]
+        errors = sum(1 for item in diagnostics if item.severity == "error")
+        warnings = sum(1 for item in diagnostics if item.severity == "warning")
+        header = (
+            f"diagnostics {relative} · {errors} error{'' if errors == 1 else 's'} · "
+            f"{warnings} warning{'' if warnings == 1 else 's'}"
+        )
+        return self._result(
+            ctx,
+            header + "\n" + "\n".join(lines),
+            ok=errors == 0,
+            server=server_name,
+            strategy="lsp",
+            results=len(diagnostics),
+            errors=errors,
+            warnings=warnings,
+        )
+
+    def _code_action(
+        self,
+        ctx: ToolContext,
+        server,
+        path: Path,
+        relative: str,
+        position: dict | None,
+        *,
+        query: str,
+        fix_all: bool,
+    ) -> ToolResult:
+        only = ("source.fixAll",) if fix_all else ()
+        actions = request_code_actions(
+            server,
+            root=ctx.cwd.resolve(),
+            path=path,
+            position=position,
+            only=only,
+        )
+        if not actions:
+            label = "fix_all" if fix_all else "code_action"
+            return self._result(
+                ctx,
+                f"{label}: no actions",
+                server=server.name,
+                strategy="lsp",
+                results=0,
+            )
+        if fix_all or query:
+            selected = _select_code_actions(actions, query=query, fix_all=fix_all)
+            if not selected:
+                listed = _render_code_actions(actions)
+                return self._error(
+                    ctx,
+                    "no matching code action"
+                    + (f"\n{listed}" if listed else ""),
+                )
+            edits = [action.get("edit") for action in selected if isinstance(action.get("edit"), dict)]
+            if not edits:
+                return self._error(
+                    ctx,
+                    "matched code action has no workspace edit (command-only unsupported)",
+                )
+            merged = _merge_workspace_edits(edits)
+            return self._apply_edit(
+                ctx,
+                merged,
+                label="fix_all" if fix_all else "code_action",
+                server_name=server.name,
+                detail=query or relative,
+            )
+        return self._result(
+            ctx,
+            _render_code_actions(actions),
+            server=server.name,
+            strategy="lsp",
+            results=len(actions),
+        )
+
+    def _apply_edit(
         self,
         ctx: ToolContext,
         raw,
-        new_name: str,
+        *,
+        label: str,
         server_name: str,
+        detail: str = "",
     ) -> ToolResult:
         try:
             plans, originals, edit_count = _plan_workspace_edit(
                 raw, ctx.cwd.resolve()
             )
         except (OSError, UnicodeError, ValueError) as exc:
-            return self._error(ctx, f"rename rejected: {exc}")
+            return self._error(ctx, f"{label} rejected: {exc}")
         if not plans:
-            return self._error(ctx, "language server returned no rename edits")
+            return self._error(ctx, f"language server returned no {label} edits")
         relative = sorted(path.relative_to(ctx.cwd.resolve()).as_posix() for path in plans)
         if ctx.approve is not None:
             try:
-                approved = ctx.approve(
-                    "rename",
-                    {"new_name": new_name, "paths": relative, "edits": edit_count},
-                )
+                payload = {
+                    "paths": relative,
+                    "edits": edit_count,
+                }
+                if label == "rename":
+                    payload["new_name"] = detail
+                else:
+                    payload["detail"] = detail
+                approved = ctx.approve(label, payload)
             except Exception as exc:
-                return self._error(ctx, f"rename approval failed: {exc}")
+                return self._error(ctx, f"{label} approval failed: {exc}")
             if not approved:
                 return ToolResult.error(
-                    ctx.ledger.clip("navigate", "rename denied"), denied=True
+                    ctx.ledger.clip("navigate", f"{label} denied"), denied=True
                 )
         snapshots = {path: _snapshot(path) for path in plans}
         if any(
             snapshot.content != originals[path]
             for path, snapshot in snapshots.items()
         ):
-            return self._error(ctx, "rename targets changed while approval was pending")
+            return self._error(
+                ctx, f"{label} targets changed while approval was pending"
+            )
         checkpoint = None
         checkpoint_error = ""
         store = None
@@ -194,7 +352,7 @@ class NavigateTool:
         except OSError as exc:
             if pending is not None and store is not None:
                 store.cancel(pending)
-            return self._error(ctx, f"rename failed: {exc}")
+            return self._error(ctx, f"{label} failed: {exc}")
         if pending is not None and store is not None:
             try:
                 checkpoint = store.finish(pending, expected=plans).identifier
@@ -205,7 +363,7 @@ class NavigateTool:
         if isinstance(changed, set):
             changed.update(relative)
         lines = [
-            f"rename ✓ {edit_count} edit{'' if edit_count == 1 else 's'} "
+            f"{label} ✓ {edit_count} edit{'' if edit_count == 1 else 's'} "
             f"across {len(plans)} file{'' if len(plans) == 1 else 's'}",
             *relative,
         ]
@@ -281,15 +439,74 @@ class NavigateTool:
             return self._error(ctx, str(exc))
 
     @staticmethod
-    def _result(ctx: ToolContext, text: str, **meta) -> ToolResult:
+    def _result(ctx: ToolContext, text: str, *, ok: bool = True, **meta) -> ToolResult:
         return ToolResult(
             ctx.ledger.clip("navigate", text, hint="narrow the symbol or path"),
+            ok=ok,
             meta=meta,
         )
 
     @staticmethod
     def _error(ctx: ToolContext, text: str) -> ToolResult:
         return ToolResult.error(ctx.ledger.clip("navigate", text))
+
+
+def _select_code_actions(
+    actions: list[dict], *, query: str, fix_all: bool
+) -> list[dict]:
+    if fix_all:
+        selected = [
+            action
+            for action in actions
+            if isinstance(action.get("edit"), dict)
+            and (
+                str(action.get("kind") or "").startswith("source.fixAll")
+                or "fix" in str(action.get("title") or "").lower()
+            )
+        ]
+        if selected:
+            return selected
+        return [action for action in actions if isinstance(action.get("edit"), dict)][:1]
+    needle = query.lower()
+    matches = []
+    for action in actions:
+        title = str(action.get("title") or "")
+        kind = str(action.get("kind") or "")
+        if needle in title.lower() or needle in kind.lower():
+            matches.append(action)
+    return matches[:1]
+
+
+def _render_code_actions(actions: list[dict]) -> str:
+    lines = []
+    for index, action in enumerate(actions[:20], start=1):
+        title = str(action.get("title") or "untitled")
+        kind = str(action.get("kind") or "")
+        preferred = " preferred" if action.get("isPreferred") else ""
+        edit = " edit" if isinstance(action.get("edit"), dict) else ""
+        suffix = f" · {kind}" if kind else ""
+        lines.append(f"{index}. {title}{suffix}{preferred}{edit}")
+    return "\n".join(lines)
+
+
+def _merge_workspace_edits(edits: list[dict]) -> dict:
+    changes: dict[str, list] = {}
+    document_changes: list = []
+    for edit in edits:
+        raw_changes = edit.get("changes")
+        if isinstance(raw_changes, dict):
+            for uri, items in raw_changes.items():
+                if isinstance(items, list):
+                    changes.setdefault(str(uri), []).extend(items)
+        raw_docs = edit.get("documentChanges")
+        if isinstance(raw_docs, list):
+            document_changes.extend(raw_docs)
+    merged: dict = {}
+    if changes:
+        merged["changes"] = changes
+    if document_changes:
+        merged["documentChanges"] = document_changes
+    return merged
 
 
 def _request(

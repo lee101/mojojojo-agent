@@ -107,7 +107,7 @@ and latency, not model task success, and must be regenerated when the corpus,
 backend, or machine changes.
 
 The same four-characters-per-token estimator records the optional tool schemas:
-`list` map parameters 43 tokens, `checkpoint` 79, `navigate` 126, `delegate`
+`list` map parameters 43 tokens, `checkpoint` 79, `navigate` 137, `delegate`
 112, and `update_plan` 124. MCP and plugins cost zero schema tokens when not
 configured. Treat these as wire-size measurements, never quality or speedup
 claims.

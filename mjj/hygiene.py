@@ -17,6 +17,7 @@ from .tools.base import ToolContext
 
 POST_EDIT_MODES = ("off", "format", "fix", "full")
 MAX_REPORT_CHARS = 1_200
+MAX_POST_EDIT_LSP_FILES = 3
 
 
 @dataclass(frozen=True)
@@ -291,6 +292,7 @@ def apply_post_edit(
     reports: list[str] = []
     if resolved == "full":
         reports = run_reports(ctx, typecheck_commands(root, existing))
+        reports.extend(_lsp_diagnostic_reports(ctx, existing))
     elif resolved == "fix":
         # After autofix, surface remaining lint so the model can finish the job.
         reports = run_reports(
@@ -301,6 +303,7 @@ def apply_post_edit(
                 if command[0] == "ruff"
             ],
         )
+        reports.extend(_lsp_diagnostic_reports(ctx, existing, limit=3))
 
     lines: list[str] = []
     if formatted:
@@ -322,3 +325,38 @@ def apply_post_edit(
         checkpoint=checkpoint,
         reports=tuple(reports),
     )
+
+
+def _lsp_diagnostic_reports(
+    ctx: ToolContext,
+    paths: list[Path],
+    *,
+    limit: int = MAX_POST_EDIT_LSP_FILES,
+) -> list[str]:
+    if ctx.state.get("disable-lsp"):
+        return []
+    try:
+        from .lsp import collect_diagnostics, server_for
+    except Exception:
+        return []
+    messages: list[str] = []
+    root = ctx.cwd.resolve()
+    for path in paths[:limit]:
+        if path.stat().st_size > 2 * 1024 * 1024:
+            continue
+        server = server_for(path)
+        if server is None:
+            continue
+        try:
+            diagnostics = collect_diagnostics(
+                server, root=root, path=path, timeout=2.0
+            )
+        except Exception:
+            continue
+        relative = path.relative_to(root).as_posix()
+        for item in diagnostics:
+            if item.severity in {"error", "warning"}:
+                messages.append(f"lsp: {item.render(relative)}")
+        if len(messages) >= 20:
+            break
+    return messages[:20]

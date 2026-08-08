@@ -1,20 +1,32 @@
-# LSP refactors and call hierarchy
+# LSP refactors, diagnostics, and call hierarchy
 
 The `navigate` tool uses already-installed language servers for semantic
-definition, reference, hover, document-symbol, incoming-call, outgoing-call,
-and rename operations. It never downloads a server.
+definition, reference, hover, document-symbol, diagnostics, formatting, code
+actions, incoming/outgoing calls, and rename. It never downloads a server.
 
-Call hierarchy uses the LSP two-step protocol in one server session:
-`textDocument/prepareCallHierarchy` selects the symbol, followed by
-`callHierarchy/incomingCalls` or `callHierarchy/outgoingCalls`. Results are
-bounded to 20 unique `path:line:column` entries. Incoming calls can use the
-hybrid index as a conservative reference fallback; outgoing calls require an
-LSP because text search cannot infer them safely.
+## Read actions
 
-Rename is a workspace mutation and has a stricter contract:
+| action | needs position | notes |
+| --- | --- | --- |
+| `definition` / `references` / `hover` | yes | index fallback when no LSP |
+| `symbols` | no | document symbols, or index map fallback |
+| `diagnostics` | no | `publishDiagnostics` and/or pull diagnostics |
+| `incoming_calls` / `outgoing_calls` | yes | two-step call hierarchy; outgoing needs LSP |
+| `code_action` | yes | list actions, or apply one matching `query` |
+
+## Mutating actions
+
+| action | needs position | notes |
+| --- | --- | --- |
+| `format` | no | `textDocument/formatting` → atomic workspace edit |
+| `fix_all` | no | prefers `source.fixAll` code actions |
+| `code_action` + `query` | yes | applies the first title/kind match with an edit |
+| `rename` | yes | symbol rename via `WorkspaceEdit` |
+
+Mutation contract:
 
 - an installed language server must return a `WorkspaceEdit`; MJJ never uses
-  global text replacement as a rename fallback;
+  global text replacement as a rename/format fallback;
 - only text edits to existing regular files inside the workspace are accepted;
   file create, delete, rename, non-file URI, symlink, and escaping edits fail;
 - at most 1,000 edits across 50 files and 8 MiB of output are accepted;
@@ -23,15 +35,24 @@ Rename is a workspace mutation and has a stricter contract:
 - every changed file passes the existing syntax check;
 - Ask and Read-only permission modes apply before mutation;
 - the multi-file write is atomic with rollback and an external checkpoint, so
-  `/undo` can restore the pre-rename state unless later edits create a conflict.
+  `/undo` can restore the pre-mutation state unless later edits conflict.
 
 Examples:
 
 ```json
+{"action":"diagnostics","path":"mjj/agent.py"}
+{"action":"format","path":"mjj/agent.py"}
+{"action":"fix_all","path":"mjj/agent.py"}
+{"action":"code_action","path":"mjj/agent.py","line":151,"column":20,"query":"organize"}
 {"action":"incoming_calls","path":"mjj/agent.py","line":151,"column":20}
 {"action":"rename","path":"mjj/agent.py","line":151,"column":20,"new_name":"run_turn"}
 ```
 
+When `tools.post_edit` is `fix` or `full`, successful `apply_patch` also
+samples LSP diagnostics for a few touched files so type/lint errors return in
+the same tool result.
+
 Hosted sessions retain the existing index-only policy because starting project
-language servers may execute repository configuration. Rename and outgoing-call
-requests therefore fail visibly in hosted mode instead of weakening isolation.
+language servers may execute repository configuration. Rename, format,
+diagnostics, code actions, and outgoing-call requests therefore fail visibly in
+hosted mode instead of weakening isolation.

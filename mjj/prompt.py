@@ -27,6 +27,8 @@ Tools:
 - `py` to compute. It runs natively (Python compiled to Mojo), so measuring is
   cheaper than reasoning about performance in your head. Use it for real work:
   parsing, counting, simulating, checking a hypothesis against data.
+- `navigate` for LSP definition/references/diagnostics/format/fix_all/rename
+  when a language server is installed.
 - `check` for syntax, optional format/fix/typecheck; `verify` for the
   project's self-test after meaningful edits; `commit` once checks are clean.
 - Patches may auto-format/autofix changed files when `tools.post_edit` is on.

@@ -20,6 +20,8 @@ class LspError(RuntimeError):
 
 
 MAX_MESSAGE_BYTES = 8 * 1024 * 1024
+MAX_DIAGNOSTICS = 40
+SEVERITY_LABELS = {1: "error", 2: "warning", 3: "info", 4: "hint"}
 
 
 @dataclass(frozen=True)
@@ -27,6 +29,22 @@ class LspServer:
     language: str
     name: str
     command: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class Diagnostic:
+    line: int
+    column: int
+    severity: str
+    message: str
+    source: str = ""
+    code: str = ""
+
+    def render(self, path: str) -> str:
+        where = f"{path}:{self.line}:{self.column}"
+        code = f" {self.code}" if self.code else ""
+        source = f" [{self.source}]" if self.source else ""
+        return f"{where} {self.severity}{source}{code}: {self.message}"
 
 
 _SERVERS = {
@@ -84,17 +102,7 @@ def request_lsp(
     client = _Client(server.command, root)
     try:
         client.start(timeout)
-        client.notify(
-            "textDocument/didOpen",
-            {
-                "textDocument": {
-                    "uri": path.as_uri(),
-                    "languageId": server.language,
-                    "version": 1,
-                    "text": path.read_text(encoding="utf-8", errors="replace"),
-                }
-            },
-        )
+        client.open(path, server.language)
         return client.request(method, params, timeout)
     finally:
         client.close()
@@ -115,17 +123,7 @@ def request_lsp_call_hierarchy(
     client = _Client(server.command, root)
     try:
         client.start(timeout)
-        client.notify(
-            "textDocument/didOpen",
-            {
-                "textDocument": {
-                    "uri": path.as_uri(),
-                    "languageId": server.language,
-                    "version": 1,
-                    "text": path.read_text(encoding="utf-8", errors="replace"),
-                }
-            },
-        )
+        client.open(path, server.language)
         prepared = client.request(
             "textDocument/prepareCallHierarchy",
             {
@@ -147,6 +145,112 @@ def request_lsp_call_hierarchy(
         client.close()
 
 
+def collect_diagnostics(
+    server: LspServer,
+    *,
+    root: Path,
+    path: Path,
+    timeout: float = 3.0,
+) -> list[Diagnostic]:
+    """Open a file and wait briefly for publishDiagnostics / pull diagnostics."""
+    client = _Client(server.command, root)
+    try:
+        client.start(min(timeout, 8.0))
+        client.open(path, server.language)
+        client.notify(
+            "textDocument/didSave",
+            {"textDocument": {"uri": path.as_uri()}},
+        )
+        uri = path.as_uri()
+        pulled = client.try_pull_diagnostics(uri, timeout=min(1.0, timeout))
+        cached = client.diagnostics.get(uri) or []
+        if cached:
+            return cached[:MAX_DIAGNOSTICS]
+        if pulled:
+            return pulled[:MAX_DIAGNOSTICS]
+        return client.wait_diagnostics(uri, timeout)[:MAX_DIAGNOSTICS]
+    finally:
+        client.close()
+
+
+def format_document(
+    server: LspServer,
+    *,
+    root: Path,
+    path: Path,
+    timeout: float = 8.0,
+) -> list[dict]:
+    client = _Client(server.command, root)
+    try:
+        client.start(timeout)
+        client.open(path, server.language)
+        result = client.request(
+            "textDocument/formatting",
+            {
+                "textDocument": {"uri": path.as_uri()},
+                "options": {"tabSize": 4, "insertSpaces": True},
+            },
+            timeout,
+        )
+        if result is None:
+            return []
+        if not isinstance(result, list):
+            raise LspError("formatting result must be an array of text edits")
+        return [edit for edit in result if isinstance(edit, dict)]
+    finally:
+        client.close()
+
+
+def request_code_actions(
+    server: LspServer,
+    *,
+    root: Path,
+    path: Path,
+    position: dict | None = None,
+    only: tuple[str, ...] = (),
+    timeout: float = 8.0,
+) -> list[dict]:
+    client = _Client(server.command, root)
+    try:
+        client.start(timeout)
+        client.open(path, server.language)
+        if position is None:
+            range_value = {
+                "start": {"line": 0, "character": 0},
+                "end": {"line": 0, "character": 0},
+            }
+        else:
+            range_value = {"start": position, "end": position}
+        context: dict = {"diagnostics": []}
+        if only:
+            context["only"] = list(only)
+        result = client.request(
+            "textDocument/codeAction",
+            {
+                "textDocument": {"uri": path.as_uri()},
+                "range": range_value,
+                "context": context,
+            },
+            timeout,
+        )
+        if result is None:
+            return []
+        if not isinstance(result, list):
+            raise LspError("codeAction result must be an array")
+        actions: list[dict] = []
+        for item in result:
+            if not isinstance(item, dict):
+                continue
+            # Command-only items without an edit are not auto-applicable.
+            if "edit" in item or "arguments" in item or item.get("command"):
+                actions.append(item)
+            elif "title" in item:
+                actions.append(item)
+        return actions[:40]
+    finally:
+        client.close()
+
+
 class _Client:
     def __init__(self, command: tuple[str, ...], root: Path) -> None:
         self.command = command
@@ -154,6 +258,8 @@ class _Client:
         self.process: subprocess.Popen | None = None
         self.messages: queue.Queue[dict | None] = queue.Queue()
         self.sequence = 0
+        self.diagnostics: dict[str, list[Diagnostic]] = {}
+        self._diagnostics_event = threading.Event()
 
     def start(self, timeout: float) -> None:
         try:
@@ -178,12 +284,54 @@ class _Client:
             {
                 "processId": os.getpid(),
                 "rootUri": self.root.as_uri(),
-                "capabilities": {"textDocument": {}},
+                "capabilities": {
+                    "textDocument": {
+                        "synchronization": {"didSave": True},
+                        "publishDiagnostics": {},
+                        "codeAction": {
+                            "codeActionLiteralSupport": {
+                                "codeActionKind": {
+                                    "valueSet": [
+                                        "",
+                                        "quickfix",
+                                        "refactor",
+                                        "source",
+                                        "source.organizeImports",
+                                        "source.fixAll",
+                                    ]
+                                }
+                            }
+                        },
+                        "formatting": {},
+                        "rename": {},
+                        "diagnostic": {},
+                    },
+                    "workspace": {
+                        "workspaceEdit": {
+                            "documentChanges": True,
+                            "resourceOperations": ["rename", "create", "delete"],
+                        },
+                        "applyEdit": False,
+                    },
+                },
                 "clientInfo": {"name": "mjj", "version": "0.3"},
             },
             timeout,
         )
         self.notify("initialized", {})
+
+    def open(self, path: Path, language: str) -> None:
+        self.notify(
+            "textDocument/didOpen",
+            {
+                "textDocument": {
+                    "uri": path.as_uri(),
+                    "languageId": language,
+                    "version": 1,
+                    "text": path.read_text(encoding="utf-8", errors="replace"),
+                }
+            },
+        )
 
     def request(self, method: str, params: dict, timeout: float):
         self.sequence += 1
@@ -200,6 +348,8 @@ class _Client:
                 raise LspError(f"{method} timed out after {timeout:g}s") from exc
             if message is None:
                 raise LspError(f"language server exited during {method}")
+            if self._ingest_notification(message):
+                continue
             if "id" in message and isinstance(message.get("method"), str):
                 self._send(
                     {
@@ -220,6 +370,79 @@ class _Client:
 
     def notify(self, method: str, params: dict) -> None:
         self._send({"jsonrpc": "2.0", "method": method, "params": params})
+
+    def wait_diagnostics(self, uri: str, timeout: float) -> list[Diagnostic]:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if uri in self.diagnostics:
+                return list(self.diagnostics[uri])
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            try:
+                message = self.messages.get(timeout=min(0.2, remaining))
+            except queue.Empty:
+                continue
+            if message is None:
+                break
+            if self._ingest_notification(message):
+                continue
+            if "id" in message and isinstance(message.get("method"), str):
+                self._send(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": message["id"],
+                        "result": _client_result(
+                            message["method"], message.get("params")
+                        ),
+                    }
+                )
+        return list(self.diagnostics.get(uri, []))
+
+    def try_pull_diagnostics(
+        self, uri: str, *, timeout: float
+    ) -> list[Diagnostic] | None:
+        try:
+            result = self.request(
+                "textDocument/diagnostic",
+                {"textDocument": {"uri": uri}},
+                timeout,
+            )
+        except LspError:
+            return None
+        if not isinstance(result, dict):
+            return None
+        items = result.get("items")
+        if not isinstance(items, list):
+            return None
+        diagnostics = [
+            diagnostic
+            for item in items
+            if (diagnostic := _parse_diagnostic(item)) is not None
+        ]
+        if diagnostics or uri not in self.diagnostics:
+            self.diagnostics[uri] = diagnostics
+        return diagnostics
+
+    def _ingest_notification(self, message: dict) -> bool:
+        method = message.get("method")
+        if method != "textDocument/publishDiagnostics":
+            return False
+        params = message.get("params")
+        if not isinstance(params, dict):
+            return True
+        uri = params.get("uri")
+        raw = params.get("diagnostics")
+        if not isinstance(uri, str) or not isinstance(raw, list):
+            return True
+        parsed = [
+            diagnostic
+            for item in raw
+            if (diagnostic := _parse_diagnostic(item)) is not None
+        ]
+        self.diagnostics[uri] = parsed
+        self._diagnostics_event.set()
+        return True
 
     def _send(self, message: dict) -> None:
         if self.process is None or self.process.stdin is None:
@@ -246,6 +469,36 @@ class _Client:
                 self.process.wait(timeout=0.5)
             except subprocess.SubprocessError:
                 self.process.kill()
+
+
+def _parse_diagnostic(item) -> Diagnostic | None:
+    if not isinstance(item, dict):
+        return None
+    range_value = item.get("range")
+    if not isinstance(range_value, dict):
+        return None
+    start = range_value.get("start")
+    if not isinstance(start, dict):
+        return None
+    line = start.get("line")
+    character = start.get("character")
+    if not isinstance(line, int) or not isinstance(character, int):
+        return None
+    message = str(item.get("message") or "").strip()
+    if not message:
+        return None
+    severity = SEVERITY_LABELS.get(item.get("severity"), "info")
+    code = item.get("code")
+    if isinstance(code, dict):
+        code = code.get("value")
+    return Diagnostic(
+        line=line + 1,
+        column=character + 1,
+        severity=severity,
+        message=message[:400],
+        source=str(item.get("source") or "")[:40],
+        code=str(code or "")[:40],
+    )
 
 
 def _read_messages(stream, messages: queue.Queue[dict | None]) -> None:
@@ -288,5 +541,9 @@ def _client_result(method: str, params):
     if method == "workspace/workspaceFolders":
         return None
     if method == "window/showMessageRequest":
+        return None
+    if method == "window/workDoneProgress/create":
+        return None
+    if method == "client/registerCapability":
         return None
     return None

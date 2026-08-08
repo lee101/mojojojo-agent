@@ -454,3 +454,207 @@ def test_navigation_accepts_position_at_trailing_empty_line(
     assert seen == {"line": 1, "character": 0}
     assert not result.ok
     assert "no identifier" in result.output
+
+
+def test_diagnostics_render_publish_results(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "module.py"
+    path.write_text("value = 1\n", encoding="utf-8")
+    from mjj.lsp import Diagnostic
+
+    monkeypatch.setattr(
+        navigate_module,
+        "server_for",
+        lambda _path: LspServer("python", "fixture-lsp", ("fixture",)),
+    )
+    monkeypatch.setattr(
+        navigate_module,
+        "collect_diagnostics",
+        lambda *_args, **_kwargs: [
+            Diagnostic(1, 1, "error", "Undefined name `x`", source="Pyright", code="reportUndefinedVariable")
+        ],
+    )
+
+    result = NavigateTool().run(
+        {"action": "diagnostics", "path": "module.py"},
+        ToolContext(tmp_path, Ledger()),
+    )
+
+    assert not result.ok
+    assert "1 error" in result.output
+    assert "module.py:1:1 error" in result.output
+    assert result.meta["strategy"] == "lsp"
+
+
+def test_format_applies_text_edits(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "module.py"
+    path.write_text("value=1\n", encoding="utf-8")
+    monkeypatch.setenv("MJJ_CHECKPOINT_ROOT", str(tmp_path / "checkpoints"))
+    monkeypatch.setattr(
+        navigate_module,
+        "server_for",
+        lambda _path: LspServer("python", "fixture-lsp", ("fixture",)),
+    )
+    monkeypatch.setattr(
+        navigate_module,
+        "format_document",
+        lambda *_args, **_kwargs: [
+            {
+                "range": {
+                    "start": {"line": 0, "character": 0},
+                    "end": {"line": 0, "character": 7},
+                },
+                "newText": "value = 1",
+            }
+        ],
+    )
+
+    result = NavigateTool().run(
+        {"action": "format", "path": "module.py"},
+        ToolContext(tmp_path, Ledger()),
+    )
+
+    assert result.ok
+    assert path.read_text() == "value = 1\n"
+    assert "format ✓" in result.output
+    assert result.meta["checkpoint"]
+
+
+def test_fix_all_applies_matching_code_action(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "module.py"
+    path.write_text("import os\nvalue = 1\n", encoding="utf-8")
+    monkeypatch.setenv("MJJ_CHECKPOINT_ROOT", str(tmp_path / "checkpoints"))
+    monkeypatch.setattr(
+        navigate_module,
+        "server_for",
+        lambda _path: LspServer("python", "fixture-lsp", ("fixture",)),
+    )
+    monkeypatch.setattr(
+        navigate_module,
+        "request_code_actions",
+        lambda *_args, **_kwargs: [
+            {
+                "title": "Fix all auto-fixable problems",
+                "kind": "source.fixAll",
+                "edit": {
+                    "changes": {
+                        path.as_uri(): [
+                            {
+                                "range": {
+                                    "start": {"line": 0, "character": 0},
+                                    "end": {"line": 1, "character": 0},
+                                },
+                                "newText": "",
+                            }
+                        ]
+                    }
+                },
+            }
+        ],
+    )
+
+    result = NavigateTool().run(
+        {"action": "fix_all", "path": "module.py"},
+        ToolContext(tmp_path, Ledger()),
+    )
+
+    assert result.ok
+    assert path.read_text() == "value = 1\n"
+    assert "fix_all ✓" in result.output
+
+
+def test_code_action_lists_when_query_missing(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "module.py"
+    path.write_text("value = 1\n", encoding="utf-8")
+    monkeypatch.setattr(
+        navigate_module,
+        "server_for",
+        lambda _path: LspServer("python", "fixture-lsp", ("fixture",)),
+    )
+    monkeypatch.setattr(
+        navigate_module,
+        "request_code_actions",
+        lambda *_args, **_kwargs: [
+            {"title": "Organize Imports", "kind": "source.organizeImports"},
+            {
+                "title": "Add type annotation",
+                "kind": "quickfix",
+                "isPreferred": True,
+                "edit": {"changes": {}},
+            },
+        ],
+    )
+
+    result = NavigateTool().run(
+        {"action": "code_action", "path": "module.py", "line": 1, "column": 1},
+        ToolContext(tmp_path, Ledger()),
+    )
+
+    assert result.ok
+    assert "1. Organize Imports · source.organizeImports" in result.output
+    assert "preferred" in result.output
+
+
+def test_real_stdio_lsp_collects_publish_diagnostics(tmp_path, monkeypatch) -> None:
+    server = tmp_path / "fake_lsp.py"
+    server.write_text(
+        """import json, sys
+def receive():
+    headers = {}
+    while True:
+        line = sys.stdin.buffer.readline()
+        if not line:
+            return None
+        if line in (b'\\r\\n', b'\\n'):
+            break
+        key, value = line.decode().split(':', 1)
+        headers[key.lower()] = value.strip()
+    return json.loads(sys.stdin.buffer.read(int(headers['content-length'])))
+def send(value):
+    payload = json.dumps(value, separators=(',', ':')).encode()
+    sys.stdout.buffer.write(f'Content-Length: {len(payload)}\\r\\n\\r\\n'.encode() + payload)
+    sys.stdout.buffer.flush()
+opened = None
+while True:
+    message = receive()
+    if message is None or message.get('method') == 'exit':
+        break
+    if message.get('method') == 'textDocument/didOpen':
+        opened = message['params']['textDocument']['uri']
+        send({
+            'jsonrpc': '2.0',
+            'method': 'textDocument/publishDiagnostics',
+            'params': {
+                'uri': opened,
+                'diagnostics': [{
+                    'range': {'start': {'line': 0, 'character': 0}, 'end': {'line': 0, 'character': 1}},
+                    'severity': 1,
+                    'source': 'fixture',
+                    'message': 'boom',
+                }],
+            },
+        })
+        continue
+    if 'id' not in message:
+        continue
+    if message['method'] == 'initialize':
+        result = {'capabilities': {'textDocumentSync': 1}}
+    elif message['method'] == 'textDocument/diagnostic':
+        result = {'kind': 'full', 'items': []}
+    else:
+        result = None
+    send({'jsonrpc': '2.0', 'id': message['id'], 'result': result})
+"""
+    )
+    path = tmp_path / "module.py"
+    path.write_text("x\n")
+    monkeypatch.setenv("MJJ_LSP_PYTHON", f"{sys.executable} {server}")
+
+    from mjj.lsp import collect_diagnostics, server_for
+
+    diagnostics = collect_diagnostics(
+        server_for(path), root=tmp_path, path=path, timeout=3.0
+    )
+
+    assert len(diagnostics) == 1
+    assert diagnostics[0].severity == "error"
+    assert diagnostics[0].message == "boom"

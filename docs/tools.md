@@ -126,17 +126,21 @@ See [search.md](search.md) for grounding, persistence, and measurements.
 ## `navigate`
 
 `navigate` provides `definition`, `references`, `hover`, document `symbols`,
-incoming/outgoing calls, and semantic `rename` for a one-based file position.
-It starts only an already-installed Pyright, TypeScript, Rust, Go, Clang, or
-Ruby language server and downloads nothing. Safe read operations fall back to
-the incremental hybrid index. Rename never falls back to text replacement: LSP
-workspace edits are approval-gated, workspace-confined, syntax-checked, atomic,
-and checkpointed. See [LSP refactors and call hierarchy](lsp-refactors.md).
-Hosted sessions always use the index fallback because language-server project
-configuration may be executable.
+`diagnostics`, LSP `format`, `code_action` / `fix_all`, incoming/outgoing
+calls, and semantic `rename`. Position is required except for symbols,
+diagnostics, format, and fix_all. It starts only an already-installed Pyright,
+TypeScript, Rust, Go, Clang, or Ruby language server and downloads nothing. Safe
+read operations fall back to the incremental hybrid index. Mutating LSP edits
+never fall back to text replacement: workspace edits are approval-gated,
+workspace-confined, syntax-checked, atomic, and checkpointed. See
+[LSP refactors and call hierarchy](lsp-refactors.md). Hosted sessions always use
+the index fallback because language-server project configuration may be
+executable.
 
 ```json
 {"action":"definition","path":"mjj/agent.py","line":151,"column":20}
+{"action":"diagnostics","path":"mjj/agent.py"}
+{"action":"fix_all","path":"mjj/tools/check.py"}
 ```
 
 ## `display_image`

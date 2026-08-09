@@ -1,18 +1,18 @@
 # Native runtime boundary
 
 MJJ keeps its control plane portable while moving bounded computation into Mojo.
-On Python 3.11 and newer, the base wheel has no third-party runtime dependency.
-This makes headless execution, search, and the stdlib interactive composer a
-small deployment target without weakening the guarded-fallback rule.
+The standard wheel includes the interactive composer and normalized vision so a
+normal install always has completion, hotkeys, and bounded image handling. The
+stdlib composer and image-header path remain guarded fallbacks when those
+runtime imports are unavailable.
 
 ```bash
-uv tool install mojojojo-agent          # lean base
-uv tool install 'mojojojo-agent[full]'  # rich TUI and normalized vision
+uv tool install mojojojo-agent
 ```
 
-The standalone release executable includes `full` so its user-facing keyboard
-and image behavior stays consistent on Windows, Linux, and macOS. Imports remain
-lazy: headless commands do not initialize the composer or pixel decoder.
+The standalone release executable has the same user-facing keyboard and image
+behavior on Windows, Linux, and macOS. Imports remain lazy: headless commands do
+not initialize the composer or pixel decoder.
 Native-library probing is also lazy, and file completion does not walk the
 workspace until the user types an `@file` or image completion.
 
@@ -35,18 +35,18 @@ response-time claims.
 
 | resolved package | product boundary |
 | --- | --- |
-| `pillow` | optional `vision`/`full`; WebP normalization and ANSI previews |
-| `prompt-toolkit` | optional `tui`/`full`; completion, history, multiline editing, and portable hotkeys |
-| `wcwidth` | transitive only through optional prompt-toolkit |
+| `pillow` | standard dependency; WebP normalization and ANSI previews |
+| `prompt-toolkit` | standard dependency; completion, history, multiline editing, and portable hotkeys |
+| `wcwidth` | transitive through prompt-toolkit |
 | `pytest`, `pytest-asyncio`, `iniconfig`, `pluggy`, `packaging`, `pygments`, `colorama` | development/test environment only; absent from wheel requirements |
 | `typing-extensions` | resolver compatibility dependency where required; not imported by the MJJ runtime |
 | `tomli` | Python 3.10 compatibility only; Python 3.11+ uses `tomllib` from the standard library |
 
 The stdlib image path reads bounded PNG, JPEG, GIF, and WebP headers and sends
 an input unchanged only when its longest edge is at most 2048 pixels. Larger
-inputs fail with an actionable request for the `vision` extra rather than being
-silently sent at high token cost. Kitty preview invokes `icat` directly; ANSI
-pixel rendering requires `vision`.
+inputs fail with an actionable dependency error rather than being silently sent
+at high token cost. Kitty preview invokes `icat` directly; ANSI pixel rendering
+uses Pillow.
 
 ## Why the control plane is not pure Mojo yet
 
@@ -74,7 +74,7 @@ Keep the split sharp:
 | `uv` | Python package, extras, tests, wheels |
 | `pixi` | pinned Mojo nightly and `mojo build` of shared libraries |
 
-Extras stay optional so the base wheel stays dependency-free on Python 3.11+:
+Native and syntax acceleration stay optional:
 
 | extra | peer / package | role |
 | --- | --- | --- |

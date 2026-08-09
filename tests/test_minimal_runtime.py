@@ -57,19 +57,19 @@ def test_stdlib_interactive_composer_starts_without_site_packages(tmp_path) -> N
 
     assert completed.returncode == 0, completed.stderr
     assert "stdlib composer" in completed.stdout
+    assert "mojojojo-agent[full]" not in completed.stdout
     assert "coding agent" in completed.stdout
 
 
-def test_base_wheel_declares_no_third_party_dependency_on_modern_python() -> None:
+def test_base_wheel_includes_the_complete_interactive_experience() -> None:
     project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
 
-    assert project["project"]["dependencies"] == [
-        "tomli>=2; python_version < '3.11'"
-    ]
-    assert set(project["project"]["optional-dependencies"]["full"]) == {
+    assert set(project["project"]["dependencies"]) == {
         "pillow>=10.4",
         "prompt-toolkit>=3.0.52",
+        "tomli>=2; python_version < '3.11'",
     }
+    assert project["project"]["optional-dependencies"]["full"] == []
 
 
 def test_sdist_explicitly_excludes_generated_and_vendored_files() -> None:

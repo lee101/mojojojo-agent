@@ -41,15 +41,15 @@ irm https://mojojojo.cc/install.ps1 | iex
 
 The installers select the correct release, verify its SHA-256 checksum, and do
 not require a system Python. The feature-complete Python package is also
-available:
+available and includes completion, hotkeys, and normalized vision by default:
 
 ```bash
-uv tool install 'mojojojo-agent[full]'
+uv tool install mojojojo-agent
 ```
 
-Use `uv tool install mojojojo-agent` for the dependency-free base on Python
-3.11+. It uses a stdlib line composer and accepts already-bounded common image
-formats. See the [native runtime guide](docs/native-runtime.md).
+The old `full`, `tui`, and `vision` extras remain accepted as compatibility
+aliases. A stdlib line-composer fallback still keeps MJJ usable when runtime
+imports are unavailable. See the [native runtime guide](docs/native-runtime.md).
 
 ## Start in a minute
 
@@ -134,7 +134,7 @@ hit in advance.
 ## Productive terminal workflow
 
 - Searchable slash commands, per-directory prompt history, completion, multiline editing, and
-  portable model/reasoning hotkeys in the full build.
+  portable model/reasoning hotkeys in every standard install.
 - `@path` and `@path:START-END` attach bounded context; image mentions use the
   same vision path as `--image`.
 - `/permissions` switches between `auto`, `ask`, and `read-only`.

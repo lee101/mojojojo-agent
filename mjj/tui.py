@@ -776,8 +776,8 @@ class InteractiveApp:
         )
         if not RICH_TUI:
             print(
-                "\x1b[2mstdlib composer · install mojojojo-agent[full] "
-                "for completion and hotkeys\x1b[0m"
+                "\x1b[2mstdlib composer · completion and hotkeys unavailable; "
+                "unset MJJ_TUI=basic or reinstall mojojojo-agent\x1b[0m"
             )
         warnings = self.agent.registry.warnings
         if self.history_warning:

@@ -646,7 +646,9 @@ class ModelClient:
                     call["name"] = function.get("name") or call["name"]
                     arguments = function.get("arguments")
                     if arguments:
-                        if is_delta or not call["arguments"]:
+                        if is_delta:
+                            _append_tool_argument(call["arguments"], arguments)
+                        elif not call["arguments"]:
                             call["arguments"].append(arguments)
 
         reasoning_text = "".join(reasoning_parts)
@@ -696,6 +698,30 @@ def _retryable_message(message: str) -> bool:
         token in lowered
         for token in ("rate limit", "overloaded", "timeout", "temporarily")
     )
+
+
+def _append_tool_argument(parts: list[str], fragment: str) -> None:
+    """Append a streamed tool-argument fragment once.
+
+    A few OpenAI-compatible gateways emit the complete tool call after the
+    delta stream as another delta-shaped chunk. Appending that replay creates
+    adjacent JSON objects (``{...}{...}``), which later reaches the tool
+    dispatcher as ``Extra data``. Keep ordinary fragments unchanged, but drop
+    an exact replay once the accumulated argument is already valid JSON.
+    """
+    current = "".join(parts)
+    if current and _is_json_document(current):
+        if fragment == current or fragment.startswith(current):
+            return
+    parts.append(fragment)
+
+
+def _is_json_document(value: str) -> bool:
+    try:
+        parsed = json.loads(value)
+    except (TypeError, ValueError):
+        return False
+    return isinstance(parsed, dict)
 
 
 def _stream_required(exc: ModelError) -> bool:

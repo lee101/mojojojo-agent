@@ -536,6 +536,45 @@ def test_chat_stream_is_normalized_to_agent_events(monkeypatch):
     ]
 
 
+def test_chat_stream_drops_replayed_complete_tool_arguments(monkeypatch):
+    credential = Credential(
+        "api_key", "op-test", "https://example.test/v1",
+        provider="deepseek", api_style="chat_completions",
+    )
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            chunks = [
+                {"choices": [{"delta": {"tool_calls": [{
+                    "index": 0,
+                    "id": "c1",
+                    "function": {"name": "search", "arguments": '{"query":"native"}'},
+                }]}}]},
+                # Some compatible gateways replay the complete arguments as a
+                # second delta instead of ending the stream cleanly.
+                {"choices": [{"delta": {"tool_calls": [{
+                    "index": 0,
+                    "function": {"arguments": '{"query":"native"}'},
+                }]}}]},
+                {"choices": [], "usage": {"prompt_tokens": 8, "completion_tokens": 4}},
+            ]
+            for chunk in chunks:
+                yield f"data: {json.dumps(chunk)}\n".encode()
+                yield b"\n"
+            yield b"data: [DONE]\n\n"
+
+    monkeypatch.setattr("mjj.model.urllib.request.urlopen", lambda *_a, **_k: Response())
+    events = list(ModelClient()._stream_chat_once(credential, {"model": "deepseek-v4-flash"}))
+    calls = [event.item for event in events if event.type == "response.output_item.done"]
+    assert calls[0]["arguments"] == '{"query":"native"}'
+
+
 def test_chat_stream_keeps_reasoning_content_for_tool_replay(monkeypatch):
     credential = Credential(
         "api_key",

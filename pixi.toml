@@ -20,4 +20,4 @@ depends-on = ["mojo-build"]
 depends-on = ["mojo-smoke"]
 
 [dependencies]
-mojo = "==1.0.0b3.dev2026072406"
+mojo = "==1.1.0.dev2026081105"

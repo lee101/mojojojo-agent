@@ -1,9 +1,8 @@
 """Native search kernels: int8 top-k scan, identifier tokenize, static embed, BM25, quantize."""
 
-from std.algorithm import parallelize
 from std.math import abs, copysign, sqrt
 from std.memory import alloc
-from std.sys.info import num_performance_cores, simd_width_of
+from std.sys.info import simd_width_of
 
 comptime F32Ptr = UnsafePointer[Float32, AnyOrigin[mut=True]]
 comptime F64Ptr = UnsafePointer[Float64, AnyOrigin[mut=True]]
@@ -13,7 +12,6 @@ comptime I64Ptr = UnsafePointer[Int64, AnyOrigin[mut=True]]
 comptime U8Ptr = UnsafePointer[UInt8, AnyOrigin[mut=True]]
 comptime I8W = simd_width_of[DType.int8]()
 comptime F64W = simd_width_of[DType.float64]()
-comptime PARALLEL_WORK_THRESHOLD = 100_000_000
 comptime TOKEN_PREFIX_LOW = UInt32(2774198458)
 comptime TOKEN_PREFIX_HIGH = UInt32(4130110811)
 comptime NGRAM_PREFIX_LOW = UInt32(911368588)
@@ -80,25 +78,12 @@ def score_rows(
     count: Int,
     dim: Int,
 ):
-    var workers = 1
-    if count * dim >= PARALLEL_WORK_THRESHOLD:
-        workers = min(num_performance_cores(), max(1, count // 8_000))
-
-    @parameter
-    def scan(worker: Int):
-        var start = worker * count // workers
-        var end = (worker + 1) * count // workers
-        for row in range(start, end):
-            scores[row] = (
-                Float32(Int(dot_i8_ptr(query, data + row * dim, dim)))
-                * query_factor
-                * factors[row]
-            )
-
-    if count * dim >= PARALLEL_WORK_THRESHOLD and workers > 1:
-        parallelize[scan](workers, workers)
-    else:
-        scan(0)
+    for row in range(count):
+        scores[row] = (
+            Float32(Int(dot_i8_ptr(query, data + row * dim, dim)))
+            * query_factor
+            * factors[row]
+        )
 
 
 @export("mjj_search_i8_mmap")
@@ -154,32 +139,16 @@ def mjj_search_i8_mmap(
         output_ids[slot] = ids[row]
 
 
-def crc32_table() -> InlineArray[UInt32, 256]:
-    var table = InlineArray[UInt32, 256](fill=0)
-    var index = 0
-    while index < 256:
-        var crc = UInt32(index)
-        var bit = 0
-        while bit < 8:
-            if (crc & 1) != 0:
-                crc = (crc >> 1) ^ 0xEDB88320
-            else:
-                crc = crc >> 1
-            bit += 1
-        table[index] = crc
-        index += 1
-    return table
-
-
-comptime CRC32_TABLE = crc32_table()
-
-
 def crc32_update(data: U8Ptr, length: Int, value: UInt32) -> UInt32:
     var crc = value ^ 0xFFFFFFFF
     var i = 0
     while i < length:
-        var index = Int((crc ^ UInt32(Int(data[i]))) & 0xFF)
-        crc = CRC32_TABLE[index] ^ (crc >> 8)
+        crc ^= UInt32(Int(data[i]))
+        for _ in range(8):
+            if (crc & 1) != 0:
+                crc = (crc >> 1) ^ 0xEDB88320
+            else:
+                crc = crc >> 1
         i += 1
     return crc ^ 0xFFFFFFFF
 

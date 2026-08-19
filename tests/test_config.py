@@ -254,3 +254,19 @@ def test_persist_user_agent_settings_preserves_other_sections(tmp_path: Path):
     assert 'effort = "low"' in text
     assert "[tools]" in text
     assert "budget = 99" in text
+
+
+def test_routing_defaults_to_the_cost_floor_and_validates(tmp_path) -> None:
+    from mjj import config as config_module
+
+    assert config_module.load(tmp_path, environ={}).routing == "floor"
+    assert (
+        config_module.load(tmp_path, environ={"MJJ_ROUTING": "cheap"}).routing == "cheap"
+    )
+    path = tmp_path / ".mjj" / "config.toml"
+    path.parent.mkdir()
+    path.write_text('[agent]\nrouting = "config"\n', encoding="utf-8")
+    assert config_module.load(tmp_path, environ={}).routing == "config"
+    path.write_text('[agent]\nrouting = "free"\n', encoding="utf-8")
+    with pytest.raises(config_module.ConfigError):
+        config_module.load(tmp_path, environ={})

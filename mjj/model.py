@@ -23,7 +23,17 @@ from dataclasses import dataclass, field
 from typing import Any, Iterator
 
 from .auth import AuthError, Credential, CredentialResolver
-from .model_routes import closest_effort, resolve_model, supported_efforts
+from .model_routes import (
+    DEFAULT_ROUTING,
+    closest_effort,
+    normalize_routing,
+    openrouter_sort,
+    resolve_model,
+    routed_model,
+    routing_strategy,
+    supported_efforts,
+    task_tier,
+)
 from .prompt import for_model as prompt_for_model
 from .prompt import split_cache_layers
 from .prompt_cache import CACHE_MODES, PromptCacheOptimizer
@@ -185,6 +195,7 @@ class ModelClient:
     cache_key: str = ""
     max_output_tokens: int = 0
     cache_mode: str = DEFAULT_CACHE_MODE
+    routing: str = DEFAULT_ROUTING
     cache_optimizer: PromptCacheOptimizer = field(
         default_factory=PromptCacheOptimizer
     )
@@ -199,6 +210,7 @@ class ModelClient:
     last_effective_effort: str = field(default="", init=False)
 
     def __post_init__(self) -> None:
+        self.routing = normalize_routing(self.routing)
         if self.cache_mode not in CACHE_MODES:
             self.cache_mode = "auto"
         self.cache_optimizer.mode = self.cache_mode
@@ -267,7 +279,8 @@ class ModelClient:
         return body
 
     def effective_model(self, credential: Credential) -> str:
-        return resolve_model(self.model, credential.provider, credential.default_model)
+        requested = routed_model(self.model, self.routing)
+        return resolve_model(requested, credential.provider, credential.default_model)
 
     def effective_effort(self, model: str = "") -> str:
         supported = self._effort_overrides.get(model) or (
@@ -276,6 +289,27 @@ class ModelClient:
         effective = closest_effort(self.effort, supported) if supported else self.effort
         self.last_effective_effort = effective
         return effective
+
+    def _apply_routing(
+        self, body: dict[str, Any], credential: Credential, model: str
+    ) -> None:
+        """Ask the gateway for the cheapest healthy route it can serve.
+
+        Both gateways already default to price ordering, but stating it keeps
+        the bill predictable when a gateway default changes, and it is the only
+        way to reach the cheap-task tier without repinning the model.
+        """
+        if credential.provider == "openpaths":
+            strategy = routing_strategy(self.routing)
+            if strategy:
+                body["routing_strategy"] = strategy
+            tier = task_tier(self.routing, model)
+            if tier:
+                body["task_tier"] = tier
+        elif credential.provider == "openrouter":
+            sort = openrouter_sort(self.routing)
+            if sort:
+                body["provider"] = {"sort": sort}
 
     def cache_status(self) -> dict:
         status = self.cache_optimizer.status()
@@ -310,6 +344,7 @@ class ModelClient:
             "tool_choice": "auto" if tools else None,
             "stream": True,
         }
+        self._apply_routing(body, credential, model)
         if credential.provider == "openrouter":
             body["reasoning"] = {"effort": self.effective_effort(model)}
         elif credential.provider == "deepseek" or _is_deepseek_model(model):
@@ -419,6 +454,24 @@ class ModelClient:
                     if effective != previous:
                         self._effort_overrides[model] = supported
                         continue
+                if _quota_exhausted(exc) and not emitted_content:
+                    # A plan quota that resets in hours is not a rate limit;
+                    # backing off cannot clear it. Step down to another keyed
+                    # provider instead of burning the turn on retries.
+                    if self.resolver.mark_exhausted(credential):
+                        yield Event(
+                            "mjj.provider_fallback",
+                            {
+                                "provider": credential.provider,
+                                "message": (
+                                    f"{credential.provider} quota reached; "
+                                    "switching provider"
+                                ),
+                            },
+                        )
+                        attempt = 0
+                        continue
+                    raise
                 attempt += 1
                 if _compaction_unsupported(exc, body):
                     # Older models and the ChatGPT backend may lag the public
@@ -442,7 +495,14 @@ class ModelClient:
                             "mjj.request_fallback",
                             {"message": "stream unavailable; retrying as one request"},
                         )
-                        yield from self._request_once(credential, body)
+                        try:
+                            yield from self._request_once(credential, body)
+                        except ModelError as fallback_exc:
+                            # A backend that refuses non-streaming tells us
+                            # nothing; keep the error that ended the stream.
+                            if _stream_required(fallback_exc):
+                                raise exc from fallback_exc
+                            raise
                         return
                     raise
                 yield Event(
@@ -722,6 +782,14 @@ def _is_json_document(value: str) -> bool:
     except (TypeError, ValueError):
         return False
     return isinstance(parsed, dict)
+
+
+def _quota_exhausted(exc: ModelError) -> bool:
+    """Distinguish a spent plan quota from a transient rate limit."""
+    if exc.status != 429:
+        return False
+    text = str(exc).lower()
+    return "usage_limit_reached" in text or "usage limit has been reached" in text
 
 
 def _stream_required(exc: ModelError) -> bool:

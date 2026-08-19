@@ -731,3 +731,98 @@ def test_chat_history_echoes_deepseek_reasoning_on_tool_turns():
             }
         ],
     }
+
+
+QUOTA_ERROR = ModelError(
+    'HTTP 429: {"error":{"type":"usage_limit_reached",'
+    '"message":"The usage limit has been reached","resets_in_seconds":94482}}',
+    status=429,
+    retryable=True,
+)
+
+
+class SteppingResolver:
+    """Resolver that hands out a second provider once the first is exhausted."""
+
+    def __init__(self):
+        self.exhausted: set[str] = set()
+        self.handed: list[str] = []
+
+    def mark_exhausted(self, credential):
+        self.exhausted.add(credential.provider)
+        return "deepseek" not in self.exhausted
+
+    def resolve(self, force=False, fallback=False):
+        provider = "deepseek" if self.exhausted else "openai"
+        self.handed.append(provider)
+        return Credential(
+            "api_key",
+            "sk-test",
+            "https://example.test/v1",
+            provider=provider,
+            api_style="chat_completions" if provider == "deepseek" else "responses",
+            default_model="deepseek-v4-flash",
+        )
+
+
+def test_spent_plan_quota_steps_down_to_another_provider(monkeypatch):
+    resolver = SteppingResolver()
+    client = ModelClient(resolver=resolver, max_retries=4)
+    seen = []
+
+    def once(credential, _body):
+        seen.append(credential.provider)
+        if credential.provider == "openai":
+            raise QUOTA_ERROR
+        yield Event("response.completed", {"response": {"usage": {}}})
+
+    monkeypatch.setattr(client, "_stream_once", once)
+    monkeypatch.setattr("mjj.model.time.sleep", lambda _seconds: None)
+
+    events = list(client.stream([], "brief"))
+
+    # No backoff retries: the quota resets in a day, not in four seconds.
+    assert [event.type for event in events] == [
+        "mjj.provider_fallback",
+        "response.completed",
+    ]
+    assert seen == ["openai", "deepseek"]
+
+
+def test_spent_quota_without_an_alternative_reports_the_real_limit(monkeypatch):
+    resolver = SteppingResolver()
+    resolver.exhausted.add("deepseek")
+    client = ModelClient(resolver=resolver, max_retries=4)
+
+    def once(_credential, _body):
+        raise QUOTA_ERROR
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(client, "_stream_once", once)
+    monkeypatch.setattr("mjj.model.time.sleep", lambda _seconds: None)
+
+    with pytest.raises(ModelError, match="usage_limit_reached"):
+        list(client.stream([], "brief"))
+
+
+def test_nonstream_fallback_never_masks_the_error_that_ended_the_stream(monkeypatch):
+    client = ModelClient(resolver=Resolver(), max_retries=0)
+
+    def stream_once(_credential, _body):
+        raise ModelError("HTTP 500: upstream reset", status=500, retryable=True)
+        yield  # pragma: no cover
+
+    def request_once(_credential, _body):
+        raise ModelError(
+            'HTTP 400: {"detail":"Stream must be set to true"}',
+            status=400,
+            retryable=True,
+        )
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(client, "_stream_once", stream_once)
+    monkeypatch.setattr(client, "_request_once", request_once)
+    monkeypatch.setattr("mjj.model.time.sleep", lambda _seconds: None)
+
+    with pytest.raises(ModelError, match="upstream reset"):
+        list(client.stream([], "brief"))

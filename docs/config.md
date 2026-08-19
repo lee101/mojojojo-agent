@@ -10,8 +10,8 @@ Configuration resolves in this order, from lowest to highest precedence:
 
 `mjj config` prints the resolved non-secret values and the files that supplied
 them. An explicit `--config PATH` is an additional file layer after the normal
-user and project files. Interactive `/model`, `/provider`, `/reasoning`, and
-`/verbosity` (plus the matching hotkeys) write those defaults back into
+user and project files. Interactive `/model`, `/provider`, `/reasoning`,
+`/routing`, and `/verbosity` (plus the matching hotkeys) write those defaults back into
 `$MJJ_HOME/config.toml` so the next launch keeps them. Choosing a model that
 belongs to exactly one concrete provider while `provider = "auto"` also locks
 the provider onto that backend.
@@ -21,6 +21,7 @@ the provider onto that backend.
 provider = "auto"
 model = "auto"
 effort = "high"
+routing = "floor" # floor, cheap, config, fast, or auto — see models-and-cache.md
 verbosity = "low"
 permission_mode = "auto" # auto, ask, or read-only
 project_doc_max_bytes = 32768
@@ -47,7 +48,7 @@ max_tools = 32
 ```
 
 Supported environment equivalents are `MJJ_PROVIDER`, `MJJ_MODEL`, `MJJ_EFFORT`,
-`MJJ_VERBOSITY`, `MJJ_PERMISSION_MODE`, `MJJ_TOOL_BUDGET`, `MJJ_POST_EDIT`,
+`MJJ_ROUTING`, `MJJ_VERBOSITY`, `MJJ_PERMISSION_MODE`, `MJJ_TOOL_BUDGET`, `MJJ_POST_EDIT`,
 `MJJ_PROJECT_DOC_MAX_BYTES`,
 `MJJ_AUTO_NEXT_STEPS`, `MJJ_AUTO_NEXT_IDEA`, `MJJ_AUTO_MAX_TURNS`,
 comma-separated `MJJ_DISABLE_TOOLS`, and path-separator-delimited

@@ -121,6 +121,69 @@ def describe_model(model: str) -> str:
     return route.purpose if route else ""
 
 
+# Gateway cost/latency preference. "floor" keeps the chosen capability tier and
+# asks the gateway for the cheapest healthy provider serving it; "cheap" also
+# drops the capability tier to the gateway's cheap-task table.
+ROUTING_MODES = ("auto", "floor", "cheap", "config", "fast")
+DEFAULT_ROUTING = "floor"
+
+_ROUTING_STRATEGY = {
+    "floor": "price",
+    "cheap": "price",
+    "config": "config",
+    "fast": "fastest",
+}
+# OpenRouter spells the same preference as provider.sort.
+_OPENROUTER_SORT = {"floor": "price", "cheap": "price", "fast": "throughput"}
+_TASK_TIER = {"cheap": "easy", "fast": "fast"}
+# Aliases that are a default rather than a deliberate capability pick, so the
+# cost floor may rewrite them.
+_CHEAPABLE = ("auto", "auto-code", "auto-fast")
+
+
+def normalize_routing(routing: str) -> str:
+    mode = (routing or "").strip().lower()
+    return mode if mode in ROUTING_MODES else DEFAULT_ROUTING
+
+
+def routing_strategy(routing: str) -> str:
+    """Gateway ``routing_strategy`` value, or "" to accept the default."""
+    return _ROUTING_STRATEGY.get(normalize_routing(routing), "")
+
+
+def openrouter_sort(routing: str) -> str:
+    return _OPENROUTER_SORT.get(normalize_routing(routing), "")
+
+
+def task_tier(routing: str, model: str) -> str:
+    """Cross-provider tier hint.
+
+    Only sent for auto aliases: the gateway lets ``task_tier`` override an
+    explicit model id, and a pinned model must stay pinned.
+    """
+    if not is_auto_route(model):
+        return ""
+    return _TASK_TIER.get(normalize_routing(routing), "")
+
+
+def is_auto_route(model: str) -> bool:
+    requested = model.strip().lower()
+    if auto_model(requested) is not None:
+        return True
+    leaf = requested.rsplit("/", 1)[-1]
+    return leaf == "auto" or leaf.startswith("auto-")
+
+
+def routed_model(model: str, routing: str) -> str:
+    """Bias a default auto alias toward the cost floor."""
+    if normalize_routing(routing) != "cheap":
+        return model
+    requested = model.strip().lower()
+    route = auto_model(requested)
+    resolved = route.id if route else requested
+    return "auto-cheap" if resolved in _CHEAPABLE else model
+
+
 def closest_effort(requested: str, supported: tuple[str, ...]) -> str:
     """Keep the caller's intent while selecting a value the model accepts."""
     requested = requested.strip().lower()

@@ -8,6 +8,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
 
+from .model_routes import DEFAULT_ROUTING, ROUTING_MODES
 from .permissions import PERMISSION_MODES
 
 try:
@@ -58,6 +59,7 @@ class Config:
     provider: str = "auto"
     model: str = "auto"
     effort: str = "high"
+    routing: str = DEFAULT_ROUTING
     verbosity: str = "low"
     permission_mode: str = "auto"
     tool_budget: int = 1600
@@ -124,6 +126,7 @@ def load(
         "MJJ_PROVIDER": "provider",
         "MJJ_MODEL": "model",
         "MJJ_EFFORT": "effort",
+        "MJJ_ROUTING": "routing",
         "MJJ_VERBOSITY": "verbosity",
         "MJJ_PERMISSION_MODE": "permission_mode",
         "MJJ_TOOL_BUDGET": "tool_budget",
@@ -196,6 +199,7 @@ def _merge_document(
         "provider",
         "model",
         "effort",
+        "routing",
         "verbosity",
         "permission_mode",
         "project_doc_max_bytes",
@@ -297,6 +301,7 @@ def _validated(values: Mapping[str, Any]) -> Config:
     provider = values.get("provider", Config.provider)
     model = values.get("model", Config.model)
     effort = values.get("effort", Config.effort)
+    routing = values.get("routing", Config.routing)
     verbosity = values.get("verbosity", Config.verbosity)
     permission_mode = values.get("permission_mode", Config.permission_mode)
     budget = values.get("tool_budget", Config.tool_budget)
@@ -317,6 +322,8 @@ def _validated(values: Mapping[str, Any]) -> Config:
         raise ConfigError("agent.model must be a non-empty string")
     if effort not in EFFORTS:
         raise ConfigError(f"agent.effort must be one of {', '.join(EFFORTS)}")
+    if routing not in ROUTING_MODES:
+        raise ConfigError(f"agent.routing must be one of {', '.join(ROUTING_MODES)}")
     if verbosity not in VERBOSITIES:
         raise ConfigError(
             f"agent.verbosity must be one of {', '.join(VERBOSITIES)}"
@@ -413,6 +420,7 @@ def _validated(values: Mapping[str, Any]) -> Config:
         provider=provider,
         model=model.strip(),
         effort=effort,
+        routing=routing,
         verbosity=verbosity,
         permission_mode=permission_mode,
         tool_budget=budget,
@@ -448,6 +456,7 @@ def persist_user_agent_settings(
     model: str | None = None,
     provider: str | None = None,
     effort: str | None = None,
+    routing: str | None = None,
     verbosity: str | None = None,
     environ: Mapping[str, str] | None = None,
 ) -> Path:
@@ -462,6 +471,7 @@ def persist_user_agent_settings(
             ("model", model),
             ("provider", provider),
             ("effort", effort),
+            ("routing", routing),
             ("verbosity", verbosity),
         )
         if value is not None
@@ -472,6 +482,8 @@ def persist_user_agent_settings(
         raise ConfigError(f"agent.provider must be one of {', '.join(PROVIDERS)}")
     if "effort" in updates and updates["effort"] not in EFFORTS:
         raise ConfigError(f"agent.effort must be one of {', '.join(EFFORTS)}")
+    if "routing" in updates and updates["routing"] not in ROUTING_MODES:
+        raise ConfigError(f"agent.routing must be one of {', '.join(ROUTING_MODES)}")
     if "verbosity" in updates and updates["verbosity"] not in VERBOSITIES:
         raise ConfigError(
             f"agent.verbosity must be one of {', '.join(VERBOSITIES)}"

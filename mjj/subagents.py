@@ -194,6 +194,7 @@ class SubagentRunner:
             model=parent.model,
             provider=parent.provider,
             effort=parent.effort,
+            routing=parent.routing,
             summary=parent.summary,
             verbosity=parent.verbosity,
             resolver=parent.resolver,

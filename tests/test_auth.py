@@ -311,3 +311,34 @@ def test_chatgpt_login_delegates_to_codex_device_flow(tmp_path, monkeypatch):
     assert command == ["/bin/codex", "login", "--device-auth"]
     assert kwargs["env"]["CODEX_HOME"] == str(tmp_path / "codex-home")
     assert (tmp_path / "codex-home").is_dir()
+
+
+def test_auto_steps_past_an_exhausted_plan_to_the_cheapest_keyed_provider(monkeypatch):
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-deepseek")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-openrouter")
+    monkeypatch.delenv("OPENPATHS_API_KEY", raising=False)
+    monkeypatch.delenv("MJJ_OPENPATHS_API_KEY", raising=False)
+    monkeypatch.delenv("MJJ_DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.delenv("MJJ_OPENROUTER_API_KEY", raising=False)
+    resolver = auth.CredentialResolver(provider="auto", model="auto")
+
+    assert resolver.alternatives() == ("deepseek", "openrouter")
+    assert resolver.mark_exhausted(
+        auth.Credential("chatgpt", "t", "https://example.test", provider="openai")
+    )
+    assert resolver.resolve().provider == "deepseek"
+
+    assert resolver.mark_exhausted(resolver.resolve())
+    assert resolver.resolve().provider == "openrouter"
+
+    assert not resolver.mark_exhausted(resolver.resolve())
+
+
+def test_explicit_provider_never_silently_switches_on_a_spent_quota(monkeypatch):
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-deepseek")
+    resolver = auth.CredentialResolver(provider="openrouter", model="auto")
+
+    assert resolver.alternatives() == ()
+    assert not resolver.mark_exhausted(
+        auth.Credential("api_key", "t", "https://example.test", provider="openrouter")
+    )

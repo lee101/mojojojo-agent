@@ -118,7 +118,7 @@ from .config import EFFORTS, PROVIDERS, VERBOSITIES, persist_user_agent_settings
 from .context_files import IMAGE_SUFFIXES, discover_project_files
 from .goals import GoalStore
 from .media import ImageAttachment, ImageInputError, prepare_image
-from .model_routes import AUTO_MODEL_IDS, describe_model
+from .model_routes import AUTO_MODEL_IDS, ROUTING_MODES, describe_model
 from .permissions import PERMISSION_MODES, PermissionPolicy
 from .prompt_cache import CACHE_MODES
 from .session import (
@@ -142,6 +142,7 @@ COMMANDS = {
     "/provider": "show or set auto/deepseek/openpaths/openrouter/openai/custom",
     "/effort": "show or set reasoning effort",
     "/reasoning": "alias for /effort",
+    "/routing": "show or set gateway cost routing (floor is cheapest)",
     "/verbosity": "show or set response verbosity",
     "/image": "attach an image to the next prompt",
     "/images": "show queued image attachments",
@@ -218,6 +219,7 @@ VALUE_CHOICES = {
     "/provider": PROVIDERS,
     "/effort": EFFORTS,
     "/reasoning": EFFORTS,
+    "/routing": ROUTING_MODES,
     "/verbosity": VERBOSITIES,
     "/cache": CACHE_MODES,
     "/permissions": PERMISSION_MODES,
@@ -1028,6 +1030,8 @@ class InteractiveApp:
             self._show_tips()
         elif command in ("/effort", "/reasoning"):
             self._set_choice("effort", value, EFFORTS)
+        elif command == "/routing":
+            self._set_choice("routing", value, ROUTING_MODES)
         elif command == "/verbosity":
             self._set_choice("verbosity", value, VERBOSITIES)
         elif command == "/model":
@@ -1078,6 +1082,7 @@ class InteractiveApp:
                             self.agent.client.last_effective_effort
                             or self.agent.client.effort
                         ),
+                        "routing": self.agent.client.routing,
                         "verbosity": self.agent.client.verbosity,
                         "cache": self.agent.client.cache_status(),
                         "permission_mode": self.permission_policy.mode,
@@ -1393,7 +1398,7 @@ class InteractiveApp:
                 print(exc)
                 return
             setattr(self.agent.client, name, current)
-            if name in {"effort", "verbosity"}:
+            if name in {"effort", "routing", "verbosity"}:
                 self._remember_defaults()
         print(f"{name}: {current}")
 
@@ -1457,6 +1462,7 @@ class InteractiveApp:
                 model=self.agent.client.model,
                 provider=self.provider,
                 effort=self.agent.client.effort,
+                routing=self.agent.client.routing,
                 verbosity=self.agent.client.verbosity,
             )
         except Exception as exc:  # noqa: BLE001 - never block the session on prefs

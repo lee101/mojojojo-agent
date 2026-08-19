@@ -28,6 +28,27 @@ Legacy OpenPaths-style intents remain accepted: `auto-medium-task` maps to
 The reasoning column is a starting recommendation, not an override. An explicit
 `--effort` or live `/reasoning` choice is preserved.
 
+## Cost routing
+
+`--routing` (config `agent.routing`, env `MJJ_ROUTING`, live `/routing`) states
+which route a gateway should pick when several can serve the request. It is a
+gateway preference, not a second model selector.
+
+| mode | OpenPaths | OpenRouter | effect |
+| --- | --- | --- | --- |
+| `floor` (default) | `routing_strategy: price` | `provider.sort: price` | cheapest healthy provider for the tier already chosen |
+| `cheap` | `price` plus `task_tier: easy` | `provider.sort: price` | also drops the capability tier to the gateway's cheap-task table |
+| `config` | `routing_strategy: config` | — | catalogue order, no price reordering |
+| `fast` | `routing_strategy: fastest` | `provider.sort: throughput` | latency bias |
+| `auto` | — | — | send nothing and accept the gateway default |
+
+Both gateways already default to price ordering; `floor` states it so the bill
+does not move when a gateway default does. `cheap` only rewrites the default
+`auto`, `auto-code`, and `auto-fast` aliases — a deliberate `auto-best` or a
+pinned model id such as `deepseek-v4-flash` is never rerouted, because
+`task_tier` outranks the model name at the gateway. Direct providers
+(DeepSeek, OpenAI, custom) receive no routing fields.
+
 The map deliberately records tiers rather than dollar prices. Model prices,
 availability, and gateway catalogs change independently. OpenAI's current
 [model guidance](https://developers.openai.com/api/docs/guides/latest-model)

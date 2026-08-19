@@ -62,6 +62,7 @@ def _agent(args):
         model=args.model,
         provider=args.provider,
         effort=args.effort,
+        routing=getattr(args, "routing", None) or args.resolved_config.routing,
         verbosity=args.verbosity,
         resolver=auth.CredentialResolver(provider=args.provider, model=args.model),
     )
@@ -424,6 +425,7 @@ def cmd_config(args) -> int:
         provider=args.provider,
         model=args.model,
         effort=args.effort,
+        routing=getattr(args, "routing", None) or args.resolved_config.routing,
         verbosity=args.verbosity,
         tool_budget=args.tool_budget,
         plugins=args.plugins,
@@ -560,6 +562,7 @@ def main(argv: list[str] | None = None) -> int:
         EFFORTS,
         PERMISSION_MODES,
         PROVIDERS,
+        ROUTING_MODES,
         VERBOSITIES,
         load as load_config,
     )
@@ -580,6 +583,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--provider", default=config.provider, choices=PROVIDERS)
     parser.add_argument("--model", default=config.model)
     parser.add_argument("--effort", default=config.effort, choices=EFFORTS)
+    parser.add_argument("--routing", default=config.routing, choices=ROUTING_MODES)
     parser.add_argument("--verbosity", default=config.verbosity, choices=VERBOSITIES)
     parser.add_argument(
         "--permission-mode", default=config.permission_mode, choices=PERMISSION_MODES
@@ -616,6 +620,7 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--provider", choices=PROVIDERS, default=argparse.SUPPRESS)
     run.add_argument("--model", default=argparse.SUPPRESS)
     run.add_argument("--effort", choices=EFFORTS, default=argparse.SUPPRESS)
+    run.add_argument("--routing", choices=ROUTING_MODES, default=argparse.SUPPRESS)
     run.add_argument("--verbosity", choices=VERBOSITIES, default=argparse.SUPPRESS)
     run.add_argument(
         "--permission-mode", choices=PERMISSION_MODES, default=argparse.SUPPRESS
@@ -669,6 +674,7 @@ def main(argv: list[str] | None = None) -> int:
     chat.add_argument("--provider", choices=PROVIDERS, default=argparse.SUPPRESS)
     chat.add_argument("--model", default=argparse.SUPPRESS)
     chat.add_argument("--effort", choices=EFFORTS, default=argparse.SUPPRESS)
+    chat.add_argument("--routing", choices=ROUTING_MODES, default=argparse.SUPPRESS)
     chat.add_argument(
         "--permission-mode", choices=PERMISSION_MODES, default=argparse.SUPPRESS
     )

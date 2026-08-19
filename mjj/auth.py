@@ -370,11 +370,32 @@ class CredentialResolver:
     max_plan: MaxPlanCredentials = field(default_factory=MaxPlanCredentials)
     provider: str = "auto"
     model: str = "auto"
+    # Providers whose plan quota is spent for hours. Retrying them wastes the
+    # turn, so ``auto`` steps down the chain instead of failing the run.
+    exhausted: set[str] = field(default_factory=set)
+
+    def mark_exhausted(self, credential: Credential) -> bool:
+        """Record a spent quota; report whether another route is available."""
+        self.exhausted.add(credential.provider or "openai")
+        return bool(self.alternatives())
+
+    def alternatives(self) -> tuple[str, ...]:
+        """Keyed providers still worth trying, cheapest-first."""
+        if self.provider.strip().lower() != "auto":
+            return ()
+        return tuple(
+            name
+            for name in ("deepseek", "openpaths", "openrouter")
+            if name not in self.exhausted and provider_key(name)[0]
+        )
 
     def resolve(self, force: bool = False, fallback: bool = False) -> Credential:
         requested = self.provider.strip().lower()
         if requested not in ("auto", "openai"):
             return provider_credential(requested)
+        if self.exhausted:
+            for name in self.alternatives():
+                return provider_credential(name)
         if requested == "openai":
             # Explicit openai: prefer a real API key, then ChatGPT/Codex session.
             if provider_key("openai")[0]:

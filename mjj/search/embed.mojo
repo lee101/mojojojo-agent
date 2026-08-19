@@ -4,12 +4,12 @@ from std.math import abs, copysign, sqrt
 from std.memory import alloc
 from std.sys.info import simd_width_of
 
-comptime F32Ptr = UnsafePointer[Float32, AnyOrigin[mut=True]]
-comptime F64Ptr = UnsafePointer[Float64, AnyOrigin[mut=True]]
-comptime I8Ptr = UnsafePointer[Int8, AnyOrigin[mut=True]]
-comptime I32Ptr = UnsafePointer[Int32, AnyOrigin[mut=True]]
-comptime I64Ptr = UnsafePointer[Int64, AnyOrigin[mut=True]]
-comptime U8Ptr = UnsafePointer[UInt8, AnyOrigin[mut=True]]
+comptime F32Ptr = Pointer[Float32, MutAnyOrigin]
+comptime F64Ptr = Pointer[Float64, MutAnyOrigin]
+comptime I8Ptr = Pointer[Int8, MutAnyOrigin]
+comptime I32Ptr = Pointer[Int32, MutAnyOrigin]
+comptime I64Ptr = Pointer[Int64, MutAnyOrigin]
+comptime U8Ptr = Pointer[UInt8, MutAnyOrigin]
 comptime I8W = simd_width_of[DType.int8]()
 comptime F64W = simd_width_of[DType.float64]()
 comptime TOKEN_PREFIX_LOW = UInt32(2774198458)
@@ -50,21 +50,21 @@ def dot_i8_ptr(a: I8Ptr, b: I8Ptr, n: Int) -> Int32:
     var acc1 = SIMD[DType.int32, I8W](0)
     var i = 0
     while i + 2 * I8W <= n:
-        var av0 = a.load[width=I8W](i).cast[DType.int32]()
-        var bv0 = b.load[width=I8W](i).cast[DType.int32]()
-        var av1 = a.load[width=I8W](i + I8W).cast[DType.int32]()
-        var bv1 = b.load[width=I8W](i + I8W).cast[DType.int32]()
+        var av0 = a.unsafe_load[width=I8W](i).cast[DType.int32]()
+        var bv0 = b.unsafe_load[width=I8W](i).cast[DType.int32]()
+        var av1 = a.unsafe_load[width=I8W](i + I8W).cast[DType.int32]()
+        var bv1 = b.unsafe_load[width=I8W](i + I8W).cast[DType.int32]()
         acc0 += av0 * bv0
         acc1 += av1 * bv1
         i += 2 * I8W
     while i + I8W <= n:
-        var av = a.load[width=I8W](i).cast[DType.int32]()
-        var bv = b.load[width=I8W](i).cast[DType.int32]()
+        var av = a.unsafe_load[width=I8W](i).cast[DType.int32]()
+        var bv = b.unsafe_load[width=I8W](i).cast[DType.int32]()
         acc0 += av * bv
         i += I8W
     var total = (acc0 + acc1).reduce_add()
     while i < n:
-        total += Int32(Int(a[i])) * Int32(Int(b[i]))
+        total += Int32(Int(a[unsafe_offset=i])) * Int32(Int(b[unsafe_offset=i]))
         i += 1
     return total
 
@@ -79,10 +79,10 @@ def score_rows(
     dim: Int,
 ):
     for row in range(count):
-        scores[row] = (
-            Float32(Int(dot_i8_ptr(query, data + row * dim, dim)))
+        scores[unsafe_offset=row] = (
+            Float32(Int(dot_i8_ptr(query, data.unsafe_offset(row * dim), dim)))
             * query_factor
-            * factors[row]
+            * factors[unsafe_offset=row]
         )
 
 
@@ -124,26 +124,26 @@ def mjj_search_i8_mmap(
     score_rows(data, factors, query, query_factor, scores, count, dim)
 
     for slot in range(wanted):
-        output_ids[slot] = -1
-        output_scores[slot] = -1.0e30
+        output_ids[unsafe_offset=slot] = -1
+        output_scores[unsafe_offset=slot] = -1.0e30
     for row in range(count):
-        var value = scores[row]
-        if value <= output_scores[wanted - 1]:
+        var value = scores[unsafe_offset=row]
+        if value <= output_scores[unsafe_offset=wanted - 1]:
             continue
         var slot = wanted - 1
-        while slot > 0 and value > output_scores[slot - 1]:
-            output_scores[slot] = output_scores[slot - 1]
-            output_ids[slot] = output_ids[slot - 1]
+        while slot > 0 and value > output_scores[unsafe_offset=slot - 1]:
+            output_scores[unsafe_offset=slot] = output_scores[unsafe_offset=slot - 1]
+            output_ids[unsafe_offset=slot] = output_ids[unsafe_offset=slot - 1]
             slot -= 1
-        output_scores[slot] = value
-        output_ids[slot] = ids[row]
+        output_scores[unsafe_offset=slot] = value
+        output_ids[unsafe_offset=slot] = ids[unsafe_offset=row]
 
 
 def crc32_update(data: U8Ptr, length: Int, value: UInt32) -> UInt32:
     var crc = value ^ 0xFFFFFFFF
     var i = 0
     while i < length:
-        crc ^= UInt32(Int(data[i]))
+        crc ^= UInt32(Int(data[unsafe_offset=i]))
         for _ in range(8):
             if (crc & 1) != 0:
                 crc = (crc >> 1) ^ 0xEDB88320
@@ -184,15 +184,15 @@ def to_ascii_lower(byte: UInt8) -> UInt8:
 def camel_boundary_before(word: U8Ptr, length: Int, index: Int) -> Bool:
     if index <= 0 or index >= length:
         return False
-    var prev = word[index - 1]
-    var curr = word[index]
+    var prev = word[unsafe_offset=index - 1]
+    var curr = word[unsafe_offset=index]
     if (is_ascii_lower(prev) or is_ascii_digit(prev)) and is_ascii_upper(curr):
         return True
     if (
         is_ascii_upper(prev)
         and is_ascii_upper(curr)
         and index + 1 < length
-        and is_ascii_lower(word[index + 1])
+        and is_ascii_lower(word[unsafe_offset=index + 1])
     ):
         return True
     return False
@@ -203,7 +203,7 @@ def word_all_lower_or_digit(word: U8Ptr, length: Int) -> Bool:
     var all_lower = True
     var i = 0
     while i < length:
-        var byte = word[i]
+        var byte = word[unsafe_offset=i]
         if not is_ascii_digit(byte):
             all_digit = False
         if not is_ascii_lower(byte):
@@ -227,11 +227,11 @@ def emit_token(
     """Copy one lowercased token. Returns (token_count, out_len, ok)."""
     if token_count >= max_tokens or out_len + length > out_cap:
         return (token_count, out_len, False)
-    offsets[token_count] = Int32(out_len)
-    lengths[token_count] = Int32(length)
+    offsets[unsafe_offset=token_count] = Int32(out_len)
+    lengths[unsafe_offset=token_count] = Int32(length)
     var i = 0
     while i < length:
-        dest[out_len + i] = to_ascii_lower(source[start + i])
+        dest[unsafe_offset=out_len + i] = to_ascii_lower(source[unsafe_offset=start + i])
         i += 1
     return (token_count + 1, out_len + length, True)
 
@@ -248,7 +248,7 @@ def emit_word_tokens(
     max_tokens: Int,
     token_count: Int,
 ) -> Tuple[Int, Int, Bool]:
-    var word = text + start
+    var word = text.unsafe_offset(start)
     var count = token_count
     var written = out_len
     var ok = True
@@ -342,11 +342,11 @@ def mjj_tokenize(
     var ok = True
     var index = 0
     while index < text_len:
-        var byte = text[index]
+        var byte = text[unsafe_offset=index]
         if is_ascii_alpha(byte):
             var start = index
             index += 1
-            while index < text_len and is_ascii_alnum(text[index]):
+            while index < text_len and is_ascii_alnum(text[unsafe_offset=index]):
                 index += 1
             token_count, out_len, ok = emit_word_tokens(
                 text,
@@ -361,13 +361,13 @@ def mjj_tokenize(
                 token_count,
             )
             if not ok:
-                token_count_out[0] = Int64(token_count)
-                out_len_out[0] = Int64(out_len)
+                token_count_out[unsafe_offset=0] = Int64(token_count)
+                out_len_out[unsafe_offset=0] = Int64(out_len)
                 return 1
         elif is_ascii_digit(byte):
             var start = index
             index += 1
-            while index < text_len and is_ascii_digit(text[index]):
+            while index < text_len and is_ascii_digit(text[unsafe_offset=index]):
                 index += 1
             token_count, out_len, ok = emit_word_tokens(
                 text,
@@ -382,13 +382,13 @@ def mjj_tokenize(
                 token_count,
             )
             if not ok:
-                token_count_out[0] = Int64(token_count)
-                out_len_out[0] = Int64(out_len)
+                token_count_out[unsafe_offset=0] = Int64(token_count)
+                out_len_out[unsafe_offset=0] = Int64(out_len)
                 return 1
         else:
             index += 1
-    token_count_out[0] = Int64(token_count)
-    out_len_out[0] = Int64(out_len)
+    token_count_out[unsafe_offset=0] = Int64(token_count)
+    out_len_out[unsafe_offset=0] = Int64(out_len)
     return 0
 
 
@@ -402,9 +402,9 @@ def project_hashed(
     var hashed = UInt64(Int(low)) | (UInt64(Int(high)) << 32)
     var position = Int(hashed % UInt64(dim))
     if (hashed & HASH_SIGN_BIT) != 0:
-        values[position] += weight
+        values[unsafe_offset=position] += weight
     else:
-        values[position] -= weight
+        values[unsafe_offset=position] -= weight
 
 
 def project_ngrams(
@@ -419,7 +419,7 @@ def project_ngrams(
         return
     var start = 0
     while start <= marked_len - width:
-        var span = marked + start
+        var span = marked.unsafe_offset(start)
         var low = crc32_update(span, width, NGRAM_PREFIX_LOW)
         var high = crc32_update(span, width, NGRAM_PREFIX_HIGH)
         project_hashed(values, dim, low, high, weight)
@@ -439,12 +439,12 @@ def embed_token(
     var high = crc32_update(token, length, TOKEN_PREFIX_HIGH)
     project_hashed(values, dim, low, high, token_weight)
 
-    scratch[0] = START_MARKER
+    scratch[unsafe_offset=0] = START_MARKER
     var i = 0
     while i < length:
-        scratch[i + 1] = token[i]
+        scratch[unsafe_offset=i + 1] = token[unsafe_offset=i]
         i += 1
-    scratch[length + 1] = END_MARKER
+    scratch[unsafe_offset=length + 1] = END_MARKER
     var marked_len = length + 2
     project_ngrams(values, dim, scratch, marked_len, 3, 0.45)
     project_ngrams(values, dim, scratch, marked_len, 4, 0.65)
@@ -454,10 +454,10 @@ def zero_f64(values: F64Ptr, count: Int):
     var zero = SIMD[DType.float64, F64W](0)
     var index = 0
     while index + F64W <= count:
-        values.store(index, zero)
+        values.unsafe_store(index, zero)
         index += F64W
     while index < count:
-        values[index] = 0.0
+        values[unsafe_offset=index] = 0.0
         index += 1
 
 
@@ -476,13 +476,13 @@ def embed_bag(
     zero_f64(values, dim)
     var index = token_start
     while index < token_end:
-        var length = Int(lengths[index])
-        var frequency = Int(freqs[index])
+        var length = Int(lengths[unsafe_offset=index])
+        var frequency = Int(freqs[unsafe_offset=index])
         if length > 0 and frequency > 0:
             embed_token(
                 values,
                 dim,
-                tokens + Int(offsets[index]),
+                tokens.unsafe_offset(Int(offsets[unsafe_offset=index])),
                 length,
                 frequency,
                 scratch,
@@ -523,7 +523,7 @@ def mjj_static_embed(
     var max_len = 0
     var index = 0
     while index < token_count:
-        max_len = max(max_len, Int(lengths[index]))
+        max_len = max(max_len, Int(lengths[unsafe_offset=index]))
         index += 1
     var scratch_buf = alloc[UInt8](max_len + 2)
     var scratch = u8p(Int(scratch_buf))
@@ -538,7 +538,7 @@ def mjj_static_embed(
         dim,
         scratch,
     )
-    scratch_buf.free()
+    scratch_buf.unsafe_free()
     return 0
 
 
@@ -578,22 +578,22 @@ def mjj_static_embed_batch(
     var freqs = i32p(freqs_addr)
     var bag_offsets = i32p(bag_offsets_addr)
     var values = f64p(out_addr)
-    var total_tokens = Int(bag_offsets[bag_count])
-    if total_tokens < 0 or Int(bag_offsets[0]) != 0:
+    var total_tokens = Int(bag_offsets[unsafe_offset=bag_count])
+    if total_tokens < 0 or Int(bag_offsets[unsafe_offset=0]) != 0:
         return 1
     var max_len = 0
     var index = 0
     while index < total_tokens:
-        max_len = max(max_len, Int(lengths[index]))
+        max_len = max(max_len, Int(lengths[unsafe_offset=index]))
         index += 1
     var scratch_buf = alloc[UInt8](max_len + 2)
     var scratch = u8p(Int(scratch_buf))
     var bag = 0
     while bag < bag_count:
-        var start = Int(bag_offsets[bag])
-        var end = Int(bag_offsets[bag + 1])
+        var start = Int(bag_offsets[unsafe_offset=bag])
+        var end = Int(bag_offsets[unsafe_offset=bag + 1])
         if start < 0 or end < start or end > total_tokens:
-            scratch_buf.free()
+            scratch_buf.unsafe_free()
             return 1
         embed_bag(
             tokens,
@@ -602,12 +602,12 @@ def mjj_static_embed_batch(
             freqs,
             start,
             end,
-            values + bag * dim,
+            values.unsafe_offset(bag * dim),
             dim,
             scratch,
         )
         bag += 1
-    scratch_buf.free()
+    scratch_buf.unsafe_free()
     return 0
 
 
@@ -644,12 +644,12 @@ def mjj_bm25_accumulate(
     var scores = f64p(scores_addr)
     var index = 0
     while index < posting_len:
-        var document_id = Int(doc_ids[index])
-        var frequency = Float64(Int(freqs[index]))
+        var document_id = Int(doc_ids[unsafe_offset=index])
+        var frequency = Float64(Int(freqs[unsafe_offset=index]))
         var normalizer = k1 * (
-            1.0 - b + b * lengths[document_id] / average_length
+            1.0 - b + b * lengths[unsafe_offset=document_id] / average_length
         )
-        scores[document_id] += (
+        scores[unsafe_offset=document_id] += (
             inverse_frequency
             * (frequency * (k1 + 1.0))
             / (frequency + normalizer)
@@ -677,17 +677,17 @@ def mjj_quantize_i8(
     var output = i64p(output_addr)
     var scale_out = f64p(scale_out_addr)
     if count == 0:
-        scale_out[0] = 1.0
+        scale_out[unsafe_offset=0] = 1.0
         return 0
 
     var peak_vec = SIMD[DType.float64, F64W](0)
     var index = 0
     while index + F64W <= count:
-        peak_vec = max(peak_vec, abs(values.load[width=F64W](index)))
+        peak_vec = max(peak_vec, abs(values.unsafe_load[width=F64W](index)))
         index += F64W
     var peak = peak_vec.reduce_max()
     while index < count:
-        peak = max(peak, abs(values[index]))
+        peak = max(peak, abs(values[unsafe_offset=index]))
         index += 1
 
     var scale = peak / 127.0 if peak else 1.0
@@ -696,19 +696,19 @@ def mjj_quantize_i8(
     var hi = SIMD[DType.int64, F64W](127)
     index = 0
     while index + F64W <= count:
-        var v = values.load[width=F64W](index)
+        var v = values.unsafe_load[width=F64W](index)
         var bias = copysign(SIMD[DType.float64, F64W](0.5), v)
         var rounded = (v * inverse + bias).cast[DType.int64]()
-        output.store(index, min(max(rounded, lo), hi))
+        output.unsafe_store(index, min(max(rounded, lo), hi))
         index += F64W
     while index < count:
-        var value = values[index]
+        var value = values[unsafe_offset=index]
         var rounded = Int(value * inverse + (0.5 if value >= 0.0 else -0.5))
         if rounded < -127:
             rounded = -127
         elif rounded > 127:
             rounded = 127
-        output[index] = Int64(rounded)
+        output[unsafe_offset=index] = Int64(rounded)
         index += 1
-    scale_out[0] = scale
+    scale_out[unsafe_offset=0] = scale
     return 0

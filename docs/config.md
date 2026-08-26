@@ -54,8 +54,12 @@ Supported environment equivalents are `MJJ_PROVIDER`, `MJJ_MODEL`, `MJJ_EFFORT`,
 comma-separated `MJJ_DISABLE_TOOLS`, and path-separator-delimited
 `MJJ_SKILL_PATHS`. `MJJ_CACHE_MODE` accepts `auto`, `off`, `implicit`, or
 `explicit`; the live interactive control is `/cache`. `MJJ_PLUGINS` is a
-comma-separated list of installed plugin
-entry-point names. A zero project-doc budget disables `AGENTS.md` discovery.
+comma-separated list of installed plugin entry-point names. A zero
+project-doc budget disables `AGENTS.md` discovery.
+`MJJ_SUMMARIZER_URL` (with `MJJ_SUMMARIZER_MODEL` and
+`MJJ_SUMMARIZER_TIMEOUT`) enables optional semantic compression of oversized
+tool results through an OpenAI-compatible chat endpoint; without it the
+ledger's deterministic aggregation runs alone.
 An autonomy turn limit of zero means unlimited continuation until interrupted.
 The concise CLI surface is `--loop steps|ideas|full|forever` plus
 `--loop-turns N`; interactive sessions use `/loop` with the same values.

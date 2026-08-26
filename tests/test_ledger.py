@@ -161,3 +161,102 @@ def test_project_instruction_discovery_failure_is_a_bounded_tool_error(
     assert not result.ok
     assert len(result.output) <= 10 * CHARS_PER_TOKEN
     assert led.tool_calls == 1
+
+
+def test_signal_line_in_the_middle_survives_aggregation():
+    led = ledger(default=30)
+    lines = [f"compiling module {i}" for i in range(400)]
+    lines[200] = "ERROR: disk on fire"
+    out = led.clip("shell", "\n".join(lines))
+    assert "disk on fire" in out
+
+
+def test_repeated_lines_collapse_to_one_copy():
+    led = ledger(default=40)
+    text = "\n".join(["head context"] + ["WARN spam"] * 3000 + ["exit code: 1"])
+    out = led.clip("shell", text)
+    assert out.count("WARN spam") == 1
+    assert "2999 duplicate lines omitted" in out
+    assert led.drops[0].dropped_lines == 2999
+
+
+def test_file_addresses_count_as_signals():
+    led = ledger(default=30)
+    lines = [f"step {i} ok" for i in range(300)]
+    lines[150] = "src/parse.py:42: unexpected token"
+    out = led.clip("shell", "\n".join(lines))
+    assert "src/parse.py:42" in out
+
+
+def test_aggregation_never_exceeds_the_budget_with_hostile_signals():
+    import random
+
+    random.seed(7)
+    for budget in range(1, 60):
+        text = "\n".join(
+            random.choice(["error x", "warning y", "plain line", "a" * 200])
+            for _ in range(300)
+        )
+        out = ledger(default=budget).clip("shell", text)
+        assert len(out) <= budget * CHARS_PER_TOKEN
+
+
+def test_semantic_summary_is_off_without_a_url(monkeypatch):
+    from mjj import summarize
+
+    monkeypatch.delenv("MJJ_SUMMARIZER_URL", raising=False)
+
+    def refuse(*args, **kwargs):
+        raise AssertionError("network attempted without MJJ_SUMMARIZER_URL")
+
+    monkeypatch.setattr(summarize, "_post_json", refuse)
+    assert summarize.semantic_summary("x\n" * 1000, 400) is None
+    assert (
+        ledger(default=20).clip("read", "x\n" * 500, hint="h") is not None
+    )
+
+
+def test_semantic_summary_is_used_and_hedges_with_spill_address(tmp_path, monkeypatch):
+    from mjj import summarize
+
+    monkeypatch.setenv("MJJ_SUMMARIZER_URL", "http://127.0.0.1:9/v1")
+    monkeypatch.setenv("MJJ_SUMMARIZER_MODEL", "smollm3")
+    captured = {}
+
+    def fake_post(url, payload):
+        captured["url"] = url
+        captured["payload"] = payload
+        return {
+            "choices": [
+                {"message": {"content": "error: build failed\nexit code: 1"}}
+            ]
+        }
+
+    monkeypatch.setattr(summarize, "_post_json", fake_post)
+    led = Ledger(budget=Budget(default=200))
+    led.bind_workspace(tmp_path)
+    text = "\n".join(f"log {i}" for i in range(400)) + "\nFATAL: boom"
+    out = led.clip("shell", text, hint="rerun narrower")
+    match = re.search(r"\.mjj/tool-results/[\w.-]+\.txt", out)
+
+    assert "summarized by smollm3" in out
+    assert "build failed" in out
+    assert match is not None, out
+    assert (tmp_path / match.group(0)).read_text() == text
+    assert captured["url"].endswith("/chat/completions")
+    assert captured["payload"]["model"] == "smollm3"
+
+
+def test_semantic_failure_falls_back_to_aggregation(monkeypatch):
+    from mjj import summarize
+
+    monkeypatch.setenv("MJJ_SUMMARIZER_URL", "http://127.0.0.1:9/v1")
+
+    def refuse(*args, **kwargs):
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(summarize, "_post_json", refuse)
+    led = ledger(default=30)
+    lines = [f"compiling module {i}" for i in range(400)]
+    lines[200] = "ERROR: disk on fire"
+    assert "disk on fire" in led.clip("shell", "\n".join(lines))

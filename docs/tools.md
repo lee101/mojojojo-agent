@@ -3,9 +3,21 @@
 Every tool implements `mjj.tools.base.Tool` and returns a `ToolResult`. Tool
 text, including errors, passes through `ctx.ledger.clip()` exactly once. The
 ledger therefore remains the single output-budget policy. When clipping is
-necessary, the complete result is retained mode `0600` under
-`.mjj/tool-results/` for seven days (at most 256 files), and the bounded result
-includes that retrieval address.
+necessary the result is aggregated before it is bounded: repeated lines
+collapse to their first occurrence, signal lines (errors, warnings,
+`file:line` addresses) survive from anywhere in the output, and whatever
+budget remains goes to head/tail context. `bench/aggregation_bench.py`
+reproduces the measured savings and diagnostic retention against the previous
+positional policy. The complete result is retained mode `0600` under
+`.mjj/tool-results/` for seven days (at most 256 files), and the bounded
+result includes that retrieval address so the model can re-read what was
+withheld.
+
+Optionally, `MJJ_SUMMARIZER_URL` points at an OpenAI-compatible chat endpoint
+(a local llama.cpp server serving a small model such as SmolLM3); oversized
+results are then compressed semantically before aggregation, with the spill
+address kept as the hedge. Any backend failure degrades to deterministic
+aggregation.
 
 ## `read`
 

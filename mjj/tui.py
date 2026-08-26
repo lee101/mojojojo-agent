@@ -211,7 +211,7 @@ MODEL_PRESETS = {
         "openpaths/auto-hard",
         *AUTO_MODEL_IDS,
     ),
-    "openrouter": ("auto", "x-ai/grok-4.5", "openrouter/auto", *AUTO_MODEL_IDS),
+    "openrouter": ("stealth/ox-alpha", "auto", "x-ai/grok-4.5", "openrouter/auto", *AUTO_MODEL_IDS),
     "custom": ("auto",),
 }
 
@@ -343,6 +343,7 @@ _MODEL_DESCRIPTIONS = {
     "openpaths/auto-code": "OpenPaths coding router",
     "openpaths/auto-hard": "OpenPaths hard-task router",
     "openrouter/auto": "OpenRouter automatic routing",
+    "stealth/ox-alpha": "ox-alpha coding via OpenRouter",
 }
 
 

@@ -56,8 +56,8 @@ class ConfigError(ValueError):
 
 @dataclass(frozen=True)
 class Config:
-    provider: str = "auto"
-    model: str = "auto"
+    provider: str = "openrouter"
+    model: str = "stealth/ox-alpha"
     effort: str = "high"
     routing: str = DEFAULT_ROUTING
     verbosity: str = "low"

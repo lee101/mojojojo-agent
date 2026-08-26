@@ -18,8 +18,8 @@ the provider onto that backend.
 
 ```toml
 [agent]
-provider = "auto"
-model = "auto"
+provider = "openrouter"
+model = "stealth/ox-alpha"
 effort = "high"
 routing = "floor" # floor, cheap, config, fast, or auto — see models-and-cache.md
 verbosity = "low"

@@ -270,3 +270,13 @@ def test_routing_defaults_to_the_cost_floor_and_validates(tmp_path) -> None:
     path.write_text('[agent]\nrouting = "free"\n', encoding="utf-8")
     with pytest.raises(config_module.ConfigError):
         config_module.load(tmp_path, environ={})
+
+
+def test_bundled_defaults_target_openrouter_ox_alpha(tmp_path: Path):
+    resolved = load(
+        tmp_path,
+        environ={"MJJ_HOME": str(tmp_path / "empty-home")},
+    )
+
+    assert resolved.provider == "openrouter"
+    assert resolved.model == "stealth/ox-alpha"

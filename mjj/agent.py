@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import queue
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -320,10 +321,16 @@ class Agent:
         if item_type == "function_call":
             self.append(item)
             calls.append(item)
+            meta = {}
+            if item.get("name") == "shell":
+                command = _job_command(self.ctx.state, item.get("arguments", "") or "{}")
+                if command:
+                    meta["command"] = command
             return Step(
                 kind="tool_call",
                 name=item.get("name", ""),
                 text=item.get("arguments", ""),
+                meta=meta,
             )
         # Anything else (web_search_call, custom tool types) is still part of
         # the transcript the model expects to see next turn.
@@ -480,6 +487,45 @@ def render_exec(
     return (1 if failed else 0), final_text
 
 
+_PATCH_FILE = re.compile(r"\*\*\* (Add|Update|Delete) File: (.+)$", re.MULTILINE)
+
+
+def _job_command(state: object, arguments: str) -> str:
+    """Command preview for a queued shell job, for poll-step labels."""
+    try:
+        args = json.loads(arguments)
+    except ValueError:
+        return ""
+    if not isinstance(args, dict) or not args.get("job"):
+        return ""
+    jobs = state.get("shell-jobs") if isinstance(state, dict) else None
+    entry = jobs.get(str(args["job"])) if isinstance(jobs, dict) else None
+    command = getattr(entry, "command", "")
+    return str(command)[:160] if command else ""
+
+
+def _patch_label(patch: object) -> str:
+    """Name patched files so an edit line says what changed, not just 'editing'."""
+    if not isinstance(patch, str):
+        return "editing files"
+    verbs: dict[str, list[str]] = {}
+    for match in _PATCH_FILE.finditer(patch):
+        verbs.setdefault(match.group(1).lower(), []).append(match.group(2).strip())
+    if not verbs:
+        return "editing files"
+    parts = []
+    for verb in ("add", "update", "delete"):
+        paths = verbs.get(verb)
+        if not paths:
+            continue
+        names = ", ".join(paths[:2])
+        if len(paths) > 2:
+            names += f" +{len(paths) - 2} more"
+        parts.append(f"{verb} {names}")
+    label = " · ".join(parts)
+    return label[:110] + "…" if len(label) > 110 else label
+
+
 def _first_lines(text: str, count: int) -> str:
     lines = text.splitlines()
     if len(lines) <= count:
@@ -510,7 +556,7 @@ def tool_progress(step: Step, *, verbose: bool = False) -> str:
     if step.name.startswith("mcp__"):
         return f"calling {step.name}"
     if step.name == "apply_patch":
-        return "editing files"
+        return _patch_label(args.get("input"))
     if step.name == "checkpoint":
         return (
             f"restoring checkpoint {args.get('id', 'latest')}"
@@ -519,17 +565,30 @@ def tool_progress(step: Step, *, verbose: bool = False) -> str:
         )
     if step.name == "shell":
         if args.get("job"):
-            return f"shell {args['job']}"
+            command = str(step.meta.get("command") or "").strip()
+            return (
+                f"await {args['job']}: {command}"
+                if command
+                else f"await shell job {args['job']}"
+            )
         command = args.get("command", "")
         if isinstance(command, list):
             command = " ".join(str(part) for part in command)
-        return str(command)[:180]
+        return str(command)[:120]
     if step.name == "read":
-        return f"reading {args.get('path', '')}".rstrip()
+        path = str(args.get("path") or "")
+        start, end = args.get("start"), args.get("end")
+        if isinstance(start, int) and isinstance(end, int):
+            return f"reading {path} · lines {start}-{end}"
+        return f"reading {path}".rstrip()
     if step.name == "list":
         return f"list {args.get('path') or '.'}"
     if step.name == "search":
-        return f"search {args.get('query', '')}".rstrip()
+        query = str(args.get("query", "")).strip()
+        if len(query) > 80:
+            query = query[:79] + "…"
+        scope = args.get("path")
+        return f"search {query}".rstrip() + (f" · in {scope}" if scope else "")
     if step.name == "navigate":
         return f"{args.get('action', 'navigating')} {args.get('path', '')}".rstrip()
     if step.name == "check":

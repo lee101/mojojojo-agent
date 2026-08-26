@@ -889,7 +889,7 @@ class InteractiveApp:
                     print()
                     text_open = False
                 if not reasoning_open:
-                    print_formatted_text(ANSI("\x1b[2m  ░ "), end="")
+                    print_formatted_text(ANSI("\x1b[2m  ◌ thinking · "), end="")
                     reasoning_open = True
                 print(step.text, end="", flush=True)
             elif step.kind == "text":
@@ -927,7 +927,10 @@ class InteractiveApp:
                 elif step.name == "update_plan":
                     summary = _plan_summary(step)
                     print_formatted_text(ANSI(f"\x1b[2m    ✓ {summary}\x1b[0m"))
-                elif step.name in {"apply_patch", "checkpoint", "check"}:
+                elif step.name in {"apply_patch", "checkpoint"}:
+                    summary = _edit_summary(step.text)
+                    print_formatted_text(ANSI(f"\x1b[2m    ✓ {summary}\x1b[0m"))
+                elif step.name == "check":
                     summary = _compact_result(step.text)
                     print_formatted_text(ANSI(f"\x1b[2m    ✓ {summary}\x1b[0m"))
                 else:
@@ -1850,14 +1853,33 @@ def _compact_result(text: str, limit: int = 160) -> str:
     line = " ".join(text.split())
     return line if len(line) <= limit else line[: limit - 1] + "…"
 
+_CHECKPOINT_ID = re.compile(r"checkpoint ([0-9a-f]{8})[0-9a-f\-]+")
+_UNDO_HINT = " · undo with checkpoint action=undo"
+
+
+def _edit_summary(text: str, limit: int = 200) -> str:
+    """One-line edit outcome without checkpoint boilerplate."""
+    flat = " ".join(text.replace(_UNDO_HINT, "").split())
+    flat = _CHECKPOINT_ID.sub(r"checkpoint \1", flat)
+    return flat if len(flat) <= limit else flat[: limit - 1] + "…"
+
 
 def _result_preview(text: str, lines: int = 3, width: int = 240) -> str:
-    """Small useful preview; the ledger has already bounded the source text."""
+    """Head plus tail preview; the tail usually carries the exit code."""
     parts = text.splitlines()
-    shown = [f"    {line[:width]}" for line in parts[:lines]]
+    if len(parts) <= lines:
+        shown = parts
+    else:
+        hidden = len(parts) - lines - 1
+        shown = (
+            parts[:2]
+            + ([f"… {hidden} more lines"] if hidden else [])
+            + [parts[-1]]
+        )
+    body = [f"    {part[:width]}" for part in shown]
     if len(parts) > lines:
-        shown.append(f"    … {len(parts) - lines} more lines · Ctrl+T for full output")
-    return "\n".join(shown)
+        body.append(f"    … full output · Ctrl+T")
+    return "\n".join(body)
 
 
 def _plan_summary(step: Step) -> str:

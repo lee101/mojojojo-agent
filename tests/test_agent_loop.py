@@ -5,8 +5,9 @@ from __future__ import annotations
 import json
 
 from io import StringIO
+from types import SimpleNamespace
 
-from mjj.agent import Agent, Step, render_exec
+from mjj.agent import Agent, Step, _job_command, render_exec, tool_progress
 from mjj.ledger import Ledger
 from mjj.model import Event, ModelClient
 from mjj.tools.base import Registry, ToolResult
@@ -324,3 +325,51 @@ def test_exec_image_event_never_emits_terminal_control_sequences() -> None:
 
     assert code == 0 and final == "done"
     assert "\x1b" not in out.getvalue() + err.getvalue()
+
+
+def test_tool_progress_names_patch_files_verbs_and_ranges() -> None:
+    patch = (
+        "*** Begin Patch\n"
+        "*** Update File: web/src/App.tsx\n@@\n"
+        "*** Update File: web/src/styles.css\n@@\n"
+        "*** Add File: web/src/new.ts\n+const x = 1\n"
+        "*** End Patch"
+    )
+    label = tool_progress(
+        Step(kind="tool_call", name="apply_patch", text=json.dumps({"input": patch}))
+    )
+    assert label == "add web/src/new.ts · update web/src/App.tsx, web/src/styles.css"
+
+    ranged = tool_progress(
+        Step(
+            kind="tool_call",
+            name="read",
+            text=json.dumps({"path": "web/src/App.tsx", "start": 120, "end": 180}),
+        )
+    )
+    assert ranged == "reading web/src/App.tsx · lines 120-180"
+
+    scoped = tool_progress(
+        Step(
+            kind="tool_call",
+            name="search",
+            text=json.dumps({"query": "onNavigate(", "path": "web/src"}),
+        )
+    )
+    assert scoped == "search onNavigate( · in web/src"
+
+
+def test_shell_poll_label_carries_queued_command() -> None:
+    state = {"shell-jobs": {"s4": SimpleNamespace(command="bun run build")}}
+
+    assert _job_command(state, json.dumps({"job": "s4"})) == "bun run build"
+    assert _job_command({}, json.dumps({"job": "s9"})) == ""
+    label = tool_progress(
+        Step(
+            kind="tool_call",
+            name="shell",
+            meta={"command": "bun run build"},
+            text=json.dumps({"job": "s4"}),
+        )
+    )
+    assert label == "await s4: bun run build"

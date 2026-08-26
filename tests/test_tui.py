@@ -18,8 +18,10 @@ from mjj.tui import (
     DistinctFileHistory,
     InteractiveApp,
     WorkspaceCompleter,
+    _edit_summary,
     _model_choices,
     _pick_model,
+    _result_preview,
     _workspace_history_path,
 )
 
@@ -501,8 +503,9 @@ def test_tool_results_have_compact_preview_and_ctrl_t_full_transcript(
     compact = capsys.readouterr().out
     assert "pytest -q" in compact
     assert "↳" not in compact
-    assert "one" in compact and "… 1 more lines" in compact
-    assert "four" not in compact
+    assert "one" in compact and "two" in compact
+    assert "three" not in compact and "four" in compact
+    assert "full output · Ctrl+T" in compact
 
     app.transcript_expanded = True
     app._show_activity()
@@ -802,3 +805,30 @@ def test_successful_mutating_tool_result_gets_compact_confirmation(
 
     output = capsys.readouterr().out
     assert "✓ all checks passed more" in output
+
+
+def test_result_preview_keeps_exit_code_tail_visible() -> None:
+    text = (
+        "$ playwright test auth.spec.ts\n"
+        "Error: port 5173 is already used\n"
+        "error: script exited with code 1\n"
+        "exit code: 1"
+    )
+    preview = _result_preview(text)
+
+    assert preview.splitlines()[0].lstrip().startswith("$ playwright")
+    assert "exit code: 1" in preview
+    assert "full output · Ctrl+T" in preview
+
+
+def test_edit_summary_drops_checkpoint_boilerplate() -> None:
+    summary = _edit_summary(
+        "web/src/App.tsx: +20 -8\n"
+        "syntax ✓ 1 file\n"
+        "checkpoint 18cf3b337e36d105-d74cfe · undo with checkpoint action=undo"
+    )
+
+    assert summary == (
+        "web/src/App.tsx: +20 -8 syntax ✓ 1 file checkpoint 18cf3b33"
+    )
+    assert "undo with" not in summary

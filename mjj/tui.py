@@ -27,11 +27,11 @@ try:
         raise ImportError("basic TUI requested")
     from prompt_toolkit import PromptSession
     from prompt_toolkit import print_formatted_text as _pt_print_formatted_text
-    from prompt_toolkit.application import Application
+    from prompt_toolkit.application import Application, get_app_or_none
     from prompt_toolkit.completion import Completer, Completion
     from prompt_toolkit.formatted_text import ANSI, HTML, FormattedText
     from prompt_toolkit.filters import Condition
-    from prompt_toolkit.history import FileHistory, InMemoryHistory
+    from prompt_toolkit.history import FileHistory, History, InMemoryHistory
     from prompt_toolkit.input import DummyInput
     from prompt_toolkit.key_binding import KeyBindings
     from prompt_toolkit.layout import Layout, Window
@@ -77,12 +77,28 @@ except ImportError:
             def register(function):
                 self.bindings.append(type("Binding", (), {"keys": keys})())
                 return function
+
             return register
 
     KeyBindings = _KeyBindings
 
     def Condition(function):
         return function
+
+    class History:
+        def __init__(self) -> None:
+            self._loaded = False
+            self._loaded_strings: list[str] = []
+
+        def load_history_strings(self) -> list[str]:
+            return []
+
+        def store_string(self, string: str) -> None:
+            pass
+
+        def append_string(self, string: str) -> None:
+            self._loaded_strings.insert(0, string)
+            self.store_string(string)
 
     class FileHistory:
         def __init__(self, filename: str) -> None:
@@ -111,6 +127,7 @@ except ImportError:
 
     def secure_prompt(message: str, *, is_password: bool = False) -> str:
         return getpass.getpass(message) if is_password else input(message)
+
 
 from . import auth
 from .agent import Agent, Step, tool_progress
@@ -211,7 +228,13 @@ MODEL_PRESETS = {
         "openpaths/auto-hard",
         *AUTO_MODEL_IDS,
     ),
-    "openrouter": ("stealth/ox-alpha", "auto", "x-ai/grok-4.5", "openrouter/auto", *AUTO_MODEL_IDS),
+    "openrouter": (
+        "stealth/ox-alpha",
+        "auto",
+        "x-ai/grok-4.5",
+        "openrouter/auto",
+        *AUTO_MODEL_IDS,
+    ),
     "custom": ("auto",),
 }
 
@@ -228,7 +251,15 @@ VALUE_CHOICES = {
     "/goal": ("pause", "resume", "complete", "blocked", "clear", "set"),
     "/plan": ("approve", "cancel", "clear"),
     "/raw": ("on", "off", "toggle"),
-    "/login": ("chatgpt", "device", "deepseek", "openpaths", "openrouter", "openai", "custom"),
+    "/login": (
+        "chatgpt",
+        "device",
+        "deepseek",
+        "openpaths",
+        "openrouter",
+        "openai",
+        "custom",
+    ),
     "/logout": ("chatgpt", "deepseek", "openpaths", "openrouter", "openai", "custom"),
 }
 
@@ -254,6 +285,100 @@ def _workspace_history_path(cwd: str | Path) -> Path:
     if os.name != "nt":
         path.chmod(0o600)
     return path
+
+
+def _global_history_path() -> Path:
+    """Return the private prompt-history file shared by every directory."""
+    directory = auth.mjj_home() / "prompt-history"
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if os.name != "nt":
+        directory.chmod(0o700)
+    path = directory / "global.txt"
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT, 0o600)
+    os.close(descriptor)
+    if os.name != "nt":
+        path.chmod(0o600)
+    return path
+
+
+def _legacy_history_path() -> Path | None:
+    """Older releases kept one global file; keep it readable as a seed."""
+    path = auth.mjj_home() / "history"
+    try:
+        return (
+            path
+            if path.is_file() and path.stat().st_size <= MAX_HISTORY_BYTES * 4
+            else None
+        )
+    except OSError:
+        return None
+
+
+class LayeredFileHistory(History):
+    """Directory prompts first, then everything seen in any directory.
+
+    ``load_history_strings`` yields newest-first: local entries, then entries
+    that only exist in the shared layers, so plain ↑/↓ walks this directory's
+    commands before reaching commands from elsewhere. Every append is stored
+    in the writable layers (directory plus global) and stays unique.
+    """
+
+    def __init__(self, layers: list[tuple[FileHistory, str]]) -> None:
+        super().__init__()
+        self.layers = layers
+        self._tagged: list[tuple[str, str]] = []
+
+    def load_history_strings(self) -> list[str]:
+        self._ensure_loaded()
+        return [entry for entry, _ in self._tagged]
+
+    def tagged_entries(self) -> list[tuple[str, str]]:
+        """Newest-first ``(prompt, origin)`` pairs with duplicates removed."""
+        self._ensure_loaded()
+        return list(self._tagged)
+
+    def store_string(self, string: str) -> None:
+        origin = self.layers[0][1] if self.layers else ""
+        for history, _ in self.layers:
+            history.append_string(string)
+        self._tagged.insert(0, (string, origin))
+
+    def _ensure_loaded(self) -> None:
+        if self._loaded:
+            return
+        seen: set[str] = set()
+        merged: list[tuple[str, str]] = []
+        for history, origin in self.layers:
+            try:
+                entries = history.load_history_strings()
+            except OSError:
+                # A missing or unreadable layer must not end the agent.
+                continue
+            for entry in entries:
+                if entry not in seen:
+                    seen.add(entry)
+                    merged.append((entry, origin))
+        self._tagged = merged
+        # Keep the base-class cache aligned: `Buffer` consumes
+        # `History.load()`, which yields `self._loaded_strings`.
+        self._loaded_strings = [entry for entry, _ in merged]
+        self._loaded = True
+
+    def _invalidate(self) -> None:
+        self._loaded = False
+
+
+_HISTORY_SEARCH_LIMIT = 200
+_SEARCH_DISPLAY_WIDTH = 96
+
+
+def _search_display(entry: str) -> str:
+    line = entry.split("\n", 1)[0]
+    return (
+        line
+        if len(line) <= _SEARCH_DISPLAY_WIDTH
+        else line[: _SEARCH_DISPLAY_WIDTH - 1] + "…"
+    )
 
 
 class DistinctFileHistory(FileHistory):
@@ -305,9 +430,16 @@ class DistinctFileHistory(FileHistory):
 
 def _history_for_workspace(
     cwd: str | Path,
-) -> tuple[FileHistory | InMemoryHistory, str]:
+) -> tuple[History | InMemoryHistory, str]:
     try:
-        return DistinctFileHistory(str(_workspace_history_path(cwd))), ""
+        layers: list[tuple[FileHistory, str]] = [
+            (DistinctFileHistory(str(_workspace_history_path(cwd))), "this dir"),
+            (DistinctFileHistory(str(_global_history_path())), "global"),
+        ]
+        legacy = _legacy_history_path()
+        if legacy is not None:
+            layers.append((FileHistory(str(legacy)), "legacy"))
+        return LayeredFileHistory(layers), ""
     except OSError as exc:
         detail = str(exc).replace("\n", " ")[:160]
         return InMemoryHistory(), f"prompt history is in-memory: {detail}"
@@ -321,11 +453,7 @@ def _model_choices(provider: str) -> tuple[str, ...]:
             (
                 "auto",
                 *AUTO_MODEL_IDS,
-                *(
-                    model
-                    for models in MODEL_PRESETS.values()
-                    for model in models
-                ),
+                *(model for models in MODEL_PRESETS.values() for model in models),
             )
         )
     )
@@ -461,10 +589,14 @@ class WorkspaceCompleter(Completer):
         cwd: str | Path,
         *,
         provider: str | Callable[[], str] = "auto",
+        history: History | None = None,
+        searching: Callable[[], bool] | None = None,
     ):
         self.cwd = Path(cwd)
         self._files: tuple[str, ...] | None = None
         self._provider = provider
+        self._history = history
+        self._searching = searching or (lambda: False)
 
     @property
     def files(self) -> tuple[str, ...]:
@@ -479,6 +611,35 @@ class WorkspaceCompleter(Completer):
         return self._provider() if callable(self._provider) else self._provider
 
     def get_completions(self, document, complete_event):
+        text = document.text_before_cursor
+        if self._searching():
+            yield from self._history_matches(text)
+            return
+        yield from self._command_completions(document, complete_event)
+
+    def _history_matches(self, query: str):
+        """Live Ctrl+R matches: newest first across directory and global layers."""
+        if self._history is None:
+            return
+        needle = query.lower()
+        shown = 0
+        for entry, origin in self._history.tagged_entries():
+            if "\n" in entry:
+                # Multi-line prompts stay reachable through plain ↑/↓.
+                continue
+            if needle and needle not in entry.lower():
+                continue
+            yield Completion(
+                entry,
+                start_position=-len(query),
+                display=_search_display(entry),
+                display_meta=origin,
+            )
+            shown += 1
+            if shown >= _HISTORY_SEARCH_LIMIT:
+                return
+
+    def _command_completions(self, document, complete_event):
         text = document.text_before_cursor
         if text.startswith("/") and " " not in text:
             query = text[1:].lower()
@@ -552,11 +713,15 @@ class WorkspaceCompleter(Completer):
             return
         query = match.group(1).lower()
         matches = [path for path in self.files if query in path.lower()]
-        matches.sort(key=lambda path: (not path.lower().startswith(query), len(path), path))
+        matches.sort(
+            key=lambda path: (not path.lower().startswith(query), len(path), path)
+        )
         for path in matches[:50]:
             if " " in path:
                 path = f'"{path}"'
-            yield Completion(path, start_position=-len(match.group(1)), display_meta="file")
+            yield Completion(
+                path, start_position=-len(match.group(1)), display_meta="file"
+            )
 
 
 class SlashCompleter(WorkspaceCompleter):
@@ -576,6 +741,8 @@ class InteractiveApp:
     transcript_expanded: bool = False
     pending_prompts: list[str] = field(default_factory=list, repr=False)
     queue_submission: bool = field(default=False, repr=False)
+    searching: bool = False
+    saved_search_text: str | None = None
 
     def __post_init__(self) -> None:
         self.permission_policy = PermissionPolicy(
@@ -598,6 +765,8 @@ class InteractiveApp:
             completer=WorkspaceCompleter(
                 self.agent.cwd,
                 provider=lambda: self.provider,
+                history=history,
+                searching=lambda: self.searching,
             ),
             complete_while_typing=True,
             key_bindings=self.bindings,
@@ -616,7 +785,7 @@ class InteractiveApp:
 
         @bindings.add("left")
         def left(event) -> None:
-            if not event.current_buffer.text:
+            if not event.current_buffer.text and not self.searching:
                 self._cycle_effort(-1)
                 event.app.invalidate()
             else:
@@ -625,7 +794,7 @@ class InteractiveApp:
         @bindings.add("right")
         def right(event) -> None:
             buffer = event.current_buffer
-            if not buffer.text:
+            if not buffer.text and not self.searching:
                 self._cycle_effort(1)
                 event.app.invalidate()
             else:
@@ -633,12 +802,18 @@ class InteractiveApp:
 
         @bindings.add("s-up")
         def shift_up(event) -> None:
-            self._cycle_effort(1)
+            if self.searching:
+                event.current_buffer.complete_previous()
+            else:
+                self._cycle_effort(1)
             event.app.invalidate()
 
         @bindings.add("s-down")
         def shift_down(event) -> None:
-            self._cycle_effort(-1)
+            if self.searching:
+                event.current_buffer.complete_next()
+            else:
+                self._cycle_effort(-1)
             event.app.invalidate()
 
         @bindings.add("f2")
@@ -676,11 +851,60 @@ class InteractiveApp:
             self.queue_submission = True
             event.current_buffer.validate_and_handle()
 
+        search_filter = Condition(lambda: self.searching)
+
+        @bindings.add("c-r")
+        def enter_history_search(event) -> None:
+            self._begin_history_search(event)
+
+        @bindings.add("tab", filter=search_filter)
+        @bindings.add("enter", filter=search_filter)
+        def search_accept(event) -> None:
+            self._accept_history_search(event)
+
+        @bindings.add("escape", filter=search_filter)
+        @bindings.add("c-c", filter=search_filter)
+        def search_cancel(event) -> None:
+            self._cancel_history_search(event)
+
         return bindings
 
     @property
     def _turn_active(self) -> bool:
         return bool(getattr(self, "turn_active", False))
+
+    def _begin_history_search(self, event) -> None:
+        buffer = event.current_buffer
+        self.saved_search_text = buffer.text
+        self.searching = True
+        if buffer.complete_state is not None:
+            buffer.cancel_completion()
+        if get_app_or_none() is not None:
+            buffer.start_completion(select_first=False)
+        event.app.invalidate()
+
+    def _accept_history_search(self, event) -> None:
+        buffer = event.current_buffer
+        state = buffer.complete_state
+        completion = state.current_completion if state else None
+        if completion is None and state and state.completions:
+            completion = state.completions[0]
+        if completion is not None:
+            buffer.apply_completion(completion)
+        self._exit_search_mode(event)
+
+    def _cancel_history_search(self, event) -> None:
+        if self.saved_search_text is not None:
+            event.current_buffer.text = self.saved_search_text
+        self._exit_search_mode(event)
+
+    def _exit_search_mode(self, event) -> None:
+        self.searching = False
+        self.saved_search_text = None
+        buffer = event.current_buffer
+        if buffer.complete_state is not None:
+            buffer.cancel_completion()
+        event.app.invalidate()
 
     def _cycle_effort(self, direction: int) -> None:
         self.agent.client.effort = _cycle_choice(
@@ -735,7 +959,7 @@ class InteractiveApp:
             f" · provider {html.escape(self.provider)}"
             f"{auto}{goal_label}{plan_label}{images}{queued} · "
             f"{html.escape(cwd)}   Enter send · / commands · "
-            "Shift+↑/↓ reasoning · Ctrl+T details "
+            "Ctrl+R history · Shift+↑/↓ reasoning · Ctrl+T details "
         )
 
     def run(self) -> int:
@@ -761,7 +985,7 @@ class InteractiveApp:
 
     def _welcome(self) -> None:
         input_hint = (
-            "Shift+↑/↓ reasoning · Alt+Enter newline"
+            "Ctrl+R searches history · Shift+↑/↓ reasoning · Alt+Enter newline"
             if RICH_TUI
             else "/reasoning changes effort"
         )
@@ -784,11 +1008,15 @@ class InteractiveApp:
             )
         warnings = self.agent.registry.warnings
         if self.history_warning:
-            print_formatted_text(ANSI(f"\x1b[33mwarning: {self.history_warning}\x1b[0m"))
+            print_formatted_text(
+                ANSI(f"\x1b[33mwarning: {self.history_warning}\x1b[0m")
+            )
         for warning in warnings[:5]:
             print_formatted_text(ANSI(f"\x1b[33mwarning: {warning}\x1b[0m"))
         if len(warnings) > 5:
-            print_formatted_text(ANSI(f"\x1b[33m… {len(warnings) - 5} more warnings; /mcp\x1b[0m"))
+            print_formatted_text(
+                ANSI(f"\x1b[33m… {len(warnings) - 5} more warnings; /mcp\x1b[0m")
+            )
 
     def turn(self, text: str) -> None:
         images = tuple(self.attachments)
@@ -808,8 +1036,7 @@ class InteractiveApp:
             self.activity.clear()
             print_formatted_text(
                 ANSI(
-                    "\x1b[2mworking · "
-                    "Enter steers · Tab queues · Ctrl+T details\x1b[0m"
+                    "\x1b[2mworking · Enter steers · Tab queues · Ctrl+T details\x1b[0m"
                 )
             )
             try:
@@ -840,7 +1067,9 @@ class InteractiveApp:
                     self.queue_submission = False
                     prompt = asyncio.create_task(
                         self.session.prompt_async(
-                            HTML("<ansicyan>↪</ansicyan> steer <ansigray>(Enter send · Tab queue · Ctrl+T details)</ansigray> ")
+                            HTML(
+                                "<ansicyan>↪</ansicyan> steer <ansigray>(Enter send · Tab queue · Ctrl+T details)</ansigray> "
+                            )
                         )
                     )
                     done, _ = await asyncio.wait(
@@ -1012,7 +1241,9 @@ class InteractiveApp:
 
     def _show_activity(self) -> None:
         state = "full" if self.transcript_expanded else "compact"
-        print_formatted_text(ANSI(f"\x1b[38;5;45m── tool transcript · {state} ──\x1b[0m"))
+        print_formatted_text(
+            ANSI(f"\x1b[38;5;45m── tool transcript · {state} ──\x1b[0m")
+        )
         if not self.activity:
             print("  no tool activity yet")
             return
@@ -1020,7 +1251,11 @@ class InteractiveApp:
             if step.kind == "tool_call":
                 print(f"  {_tool_label(step)}")
             else:
-                body = step.text if self.transcript_expanded else _result_preview(step.text)
+                body = (
+                    step.text
+                    if self.transcript_expanded
+                    else _result_preview(step.text)
+                )
                 print(body or "    (no output)")
 
     def command(self, line: str) -> None:
@@ -1045,22 +1280,36 @@ class InteractiveApp:
         elif command == "/image":
             self._attach(value)
         elif command == "/images":
-            print("\n".join(image.summary() for image in self.attachments) or "no queued images")
+            print(
+                "\n".join(image.summary() for image in self.attachments)
+                or "no queued images"
+            )
         elif command == "/preview":
             self._preview(value)
         elif command == "/login":
-            self._login(value or (self.provider if self.provider != "auto" else "chatgpt"))
+            self._login(
+                value or (self.provider if self.provider != "auto" else "chatgpt")
+            )
         elif command == "/logout":
-            provider = value or (self.provider if self.provider != "auto" else "chatgpt")
+            provider = value or (
+                self.provider if self.provider != "auto" else "chatgpt"
+            )
             if provider == "chatgpt":
                 try:
                     code = auth.logout_chatgpt()
                 except auth.AuthError as exc:
                     print(f"logout: {exc}")
                     return
-                print("ChatGPT signed out" if code == 0 else f"ChatGPT logout failed ({code})")
+                print(
+                    "ChatGPT signed out"
+                    if code == 0
+                    else f"ChatGPT logout failed ({code})"
+                )
             else:
-                print("removed" if auth.remove_provider_key(provider) else "no saved key", provider)
+                print(
+                    "removed" if auth.remove_provider_key(provider) else "no saved key",
+                    provider,
+                )
         elif command == "/auth":
             print(json.dumps(auth.describe(), indent=2))
         elif command == "/usage":
@@ -1120,8 +1369,7 @@ class InteractiveApp:
             self.turn(
                 "Review the current working tree. Find correctness, security, and "
                 "regression risks plus missing tests. Report findings in severity order "
-                "with precise file and line references. Do not modify files."
-                + focus
+                "with precise file and line references. Do not modify files." + focus
             )
         elif command == "/diff":
             self._diff()
@@ -1180,7 +1428,9 @@ class InteractiveApp:
                 return
             print(f"full tool output: {'on' if self.transcript_expanded else 'off'}")
         elif command == "/rollout":
-            print(self.agent.session.path if self.agent.session else "ephemeral session")
+            print(
+                self.agent.session.path if self.agent.session else "ephemeral session"
+            )
         elif command == "/reload":
             from .agent_plugins import resolve_workspace
 
@@ -1212,7 +1462,7 @@ class InteractiveApp:
 
     def _shell(self, line: str) -> None:
         excluded = line.startswith("!!")
-        command = line[2 if excluded else 1:].strip()
+        command = line[2 if excluded else 1 :].strip()
         if not command:
             print("usage: !COMMAND (send output to model) or !!COMMAND (local only)")
             return
@@ -1227,14 +1477,16 @@ class InteractiveApp:
             self.agent.user(
                 "<local_shell>\n"
                 f"<command>{command}</command>\n"
-                f"<output ok=\"{str(result.ok).lower()}\">\n{result.output}\n</output>\n"
+                f'<output ok="{str(result.ok).lower()}">\n{result.output}\n</output>\n'
                 "</local_shell>"
             )
 
     def _status(self) -> None:
         from .tools.shell import describe_jobs
 
-        session = inspect_session(self.agent.session.path) if self.agent.session else None
+        session = (
+            inspect_session(self.agent.session.path) if self.agent.session else None
+        )
         git = self.agent.registry.dispatch(
             "shell",
             json.dumps({"command": ["git", "status", "--short", "--branch"]}),
@@ -1306,13 +1558,16 @@ class InteractiveApp:
             self.turn(
                 "Plan this task without modifying files or external state. Inspect what "
                 "you need, maintain a concise structured plan with update_plan, identify "
-                "risks and validation, then stop for explicit approval.\n\nTask: " + value
+                "risks and validation, then stop for explicit approval.\n\nTask: "
+                + value
             )
             print("plan ready · /plan approve to implement · /plan cancel to discard")
             return
         plan = state.get("plan")
         waiting = " · awaiting approval" if "plan-permission-mode" in state else ""
-        print((json.dumps(plan, indent=2) if plan else "no structured plan yet") + waiting)
+        print(
+            (json.dumps(plan, indent=2) if plan else "no structured plan yet") + waiting
+        )
 
     def _compact(self) -> None:
         previous = self.agent.client.compact_threshold
@@ -1490,9 +1745,7 @@ class InteractiveApp:
             print(exc)
             return
         previous_model = self.agent.client.model
-        known_models = {
-            model for models in MODEL_PRESETS.values() for model in models
-        }
+        known_models = {model for models in MODEL_PRESETS.values() for model in models}
         target_models = MODEL_PRESETS.get(selected, ("auto",))
         if previous_model in known_models and previous_model not in target_models:
             self.agent.client.model = "auto"
@@ -1505,7 +1758,9 @@ class InteractiveApp:
 
     def _show_models(self) -> None:
         models = _model_choices(self.provider)
-        print(f"models for provider {self.provider} · current {self.agent.client.model}:")
+        print(
+            f"models for provider {self.provider} · current {self.agent.client.model}:"
+        )
         for index, model in enumerate(models, 1):
             marker = "*" if model == self.agent.client.model else " "
             print(f" {marker} {index}. {model} — {_model_description(model)}")
@@ -1588,7 +1843,9 @@ class InteractiveApp:
             return
         result = render_terminal_image(path)
         if not result.ok:
-            print_formatted_text(ANSI(f"\x1b[2m    {step.text} · {result.detail}\x1b[0m"))
+            print_formatted_text(
+                ANSI(f"\x1b[2m    {step.text} · {result.detail}\x1b[0m")
+            )
 
     def _login(self, provider: str) -> None:
         if provider in ("chatgpt", "device"):
@@ -1597,10 +1854,16 @@ class InteractiveApp:
             except auth.AuthError as exc:
                 print(f"login: {exc}")
                 return
-            print("ChatGPT sign-in complete" if code == 0 else f"ChatGPT sign-in failed ({code})")
+            print(
+                "ChatGPT sign-in complete"
+                if code == 0
+                else f"ChatGPT sign-in failed ({code})"
+            )
             return
         if provider not in ("deepseek", "openpaths", "openrouter", "openai", "custom"):
-            print("login provider must be chatgpt, device, deepseek, openpaths, openrouter, openai or custom")
+            print(
+                "login provider must be chatgpt, device, deepseek, openpaths, openrouter, openai or custom"
+            )
             return
         try:
             key = secure_prompt(f"{provider} API key: ", is_password=True).strip()
@@ -1853,6 +2116,7 @@ def _compact_result(text: str, limit: int = 160) -> str:
     line = " ".join(text.split())
     return line if len(line) <= limit else line[: limit - 1] + "…"
 
+
 _CHECKPOINT_ID = re.compile(r"checkpoint ([0-9a-f]{8})[0-9a-f\-]+")
 _UNDO_HINT = " · undo with checkpoint action=undo"
 
@@ -1871,14 +2135,10 @@ def _result_preview(text: str, lines: int = 3, width: int = 240) -> str:
         shown = parts
     else:
         hidden = len(parts) - lines - 1
-        shown = (
-            parts[:2]
-            + ([f"… {hidden} more lines"] if hidden else [])
-            + [parts[-1]]
-        )
+        shown = parts[:2] + ([f"… {hidden} more lines"] if hidden else []) + [parts[-1]]
     body = [f"    {part[:width]}" for part in shown]
     if len(parts) > lines:
-        body.append(f"    … full output · Ctrl+T")
+        body.append("    … full output · Ctrl+T")
     return "\n".join(body)
 
 

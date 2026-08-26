@@ -5,6 +5,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from PIL import Image
+from prompt_toolkit.buffer import Buffer, CompletionState
+from prompt_toolkit.completion import Completion
 from prompt_toolkit.document import Document
 from prompt_toolkit.input.defaults import create_pipe_input
 from prompt_toolkit.output import DummyOutput
@@ -17,8 +19,10 @@ from mjj.tools.shell import ShellTool
 from mjj.tui import (
     DistinctFileHistory,
     InteractiveApp,
+    LayeredFileHistory,
     WorkspaceCompleter,
     _edit_summary,
+    _global_history_path,
     _model_choices,
     _pick_model,
     _result_preview,
@@ -126,9 +130,7 @@ def test_plan_mode_is_read_only_until_explicit_approval(
     assert "plan ready" in capsys.readouterr().out
 
 
-def test_manual_compaction_restores_automatic_threshold(
-    tmp_path, monkeypatch
-) -> None:
+def test_manual_compaction_restores_automatic_threshold(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("MJJ_HOME", str(tmp_path / "home"))
     agent = Agent(registry=Registry(), cwd=tmp_path, instructions="test")
     app = InteractiveApp(agent, _args())
@@ -146,7 +148,9 @@ def test_manual_compaction_restores_automatic_threshold(
     assert agent.client.compact_threshold == original
 
 
-def test_raw_command_controls_expanded_tool_output(tmp_path, monkeypatch, capsys) -> None:
+def test_raw_command_controls_expanded_tool_output(
+    tmp_path, monkeypatch, capsys
+) -> None:
     monkeypatch.setenv("MJJ_HOME", str(tmp_path / "home"))
     app = InteractiveApp(
         Agent(registry=Registry(), cwd=tmp_path, instructions="test"), _args()
@@ -202,9 +206,7 @@ def test_prompt_history_is_private_distinct_and_scoped_by_directory(
     assert legacy.read_text(encoding="utf-8") == "old global prompt\n"
 
 
-def test_unavailable_prompt_history_degrades_to_memory(
-    tmp_path, monkeypatch, capsys
-):
+def test_unavailable_prompt_history_degrades_to_memory(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("MJJ_HOME", str(tmp_path / "home"))
 
     def unavailable(cwd):
@@ -241,9 +243,7 @@ def test_prompt_history_skips_large_entries_and_trims_at_entry_boundaries(
     assert "prompt 00 with text" not in loaded
 
 
-def test_prompt_history_append_failure_does_not_end_the_session(
-    tmp_path, monkeypatch
-):
+def test_prompt_history_append_failure_does_not_end_the_session(tmp_path, monkeypatch):
     path = tmp_path / "history"
     path.touch()
     history = DistinctFileHistory(str(path))
@@ -321,9 +321,7 @@ def test_workspace_completer_offers_images_for_preview_commands(tmp_path) -> Non
     (tmp_path / "art" / "notes.txt").write_text("")
     completer = WorkspaceCompleter(tmp_path)
 
-    matches = list(
-        completer.get_completions(Document("/preview water"), None)
-    )
+    matches = list(completer.get_completions(Document("/preview water"), None))
 
     assert [item.text for item in matches] == ['"art/water result.webp"']
 
@@ -336,22 +334,12 @@ def test_workspace_completer_offers_live_command_values(tmp_path) -> None:
 
     model = list(completer.get_completions(Document("/model terra"), None))
     grok = list(openpaths.get_completions(Document("/model grok"), None))
-    routed_grok = list(
-        openrouter.get_completions(Document("/model grok"), None)
-    )
+    routed_grok = list(openrouter.get_completions(Document("/model grok"), None))
     effort = list(completer.get_completions(Document("/reasoning xh"), None))
-    provider = list(
-        completer.get_completions(Document("/provider router"), None)
-    )
-    permissions = list(
-        completer.get_completions(Document("/permissions read"), None)
-    )
-    auto_model = list(
-        auto_completer.get_completions(Document("/model sol"), None)
-    )
-    described = list(
-        completer.get_completions(Document("/sign"), None)
-    )
+    provider = list(completer.get_completions(Document("/provider router"), None))
+    permissions = list(completer.get_completions(Document("/permissions read"), None))
+    auto_model = list(auto_completer.get_completions(Document("/model sol"), None))
+    described = list(completer.get_completions(Document("/sign"), None))
     cache = list(completer.get_completions(Document("/cache exp"), None))
 
     assert [item.text for item in model] == ["gpt-5.6-terra"]
@@ -568,7 +556,9 @@ def test_render_finishes_with_visible_ready_time_and_usage(
         iter(
             [
                 Step(kind="text", text="Done."),
-                Step(kind="usage", text="1 req · in 10 · out 4", meta={"seconds": 1.25}),
+                Step(
+                    kind="usage", text="1 req · in 10 · out 4", meta={"seconds": 1.25}
+                ),
             ]
         )
     )
@@ -600,9 +590,7 @@ def test_plan_and_mcp_commands_show_live_tool_state(tmp_path, monkeypatch, capsy
     assert "plan" not in agent.ctx.state
 
 
-def test_provider_change_resets_incompatible_known_model(
-    tmp_path, monkeypatch
-) -> None:
+def test_provider_change_resets_incompatible_known_model(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("MJJ_HOME", str(tmp_path / "home"))
     agent = Agent(
         registry=Registry(),
@@ -660,7 +648,9 @@ def test_shell_shortcuts_control_whether_output_enters_context(
     assert "included" in rendered and "local-only" in rendered
 
 
-def test_permissions_review_init_and_status_commands(tmp_path, monkeypatch, capsys) -> None:
+def test_permissions_review_init_and_status_commands(
+    tmp_path, monkeypatch, capsys
+) -> None:
     monkeypatch.setenv("MJJ_HOME", str(tmp_path / "home"))
     agent = Agent(
         registry=Registry().add(ShellTool()),
@@ -687,7 +677,9 @@ def test_permissions_review_init_and_status_commands(tmp_path, monkeypatch, caps
     assert '"git":' in output
 
 
-def test_init_does_not_overwrite_existing_agents_file(tmp_path, monkeypatch, capsys) -> None:
+def test_init_does_not_overwrite_existing_agents_file(
+    tmp_path, monkeypatch, capsys
+) -> None:
     monkeypatch.setenv("MJJ_HOME", str(tmp_path / "home"))
     (tmp_path / "AGENTS.md").write_text("keep me", encoding="utf-8")
     agent = Agent(
@@ -707,7 +699,9 @@ def test_init_does_not_overwrite_existing_agents_file(tmp_path, monkeypatch, cap
     assert "already exists" in capsys.readouterr().out
 
 
-def test_undo_slash_command_restores_latest_patch(tmp_path, monkeypatch, capsys) -> None:
+def test_undo_slash_command_restores_latest_patch(
+    tmp_path, monkeypatch, capsys
+) -> None:
     monkeypatch.setenv("MJJ_HOME", str(tmp_path / "home"))
     monkeypatch.setenv("MJJ_CHECKPOINT_ROOT", str(tmp_path / "checkpoints"))
     target = tmp_path / "value.txt"
@@ -828,7 +822,112 @@ def test_edit_summary_drops_checkpoint_boilerplate() -> None:
         "checkpoint 18cf3b337e36d105-d74cfe · undo with checkpoint action=undo"
     )
 
-    assert summary == (
-        "web/src/App.tsx: +20 -8 syntax ✓ 1 file checkpoint 18cf3b33"
-    )
+    assert summary == ("web/src/App.tsx: +20 -8 syntax ✓ 1 file checkpoint 18cf3b33")
     assert "undo with" not in summary
+
+
+def test_prompt_history_layers_directory_then_global(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("MJJ_HOME", str(tmp_path / "home"))
+    local_a = _workspace_history_path(tmp_path / "a")
+    local_b = _workspace_history_path(tmp_path / "b")
+    shared = _global_history_path()
+    dir_a = DistinctFileHistory(str(local_a))
+    dir_b = DistinctFileHistory(str(local_b))
+    everywhere = DistinctFileHistory(str(shared))
+
+    dir_a.append_string("a older")
+    dir_a.append_string("a newer")
+    dir_b.append_string("b only")
+    everywhere.append_string("g older")
+    everywhere.append_string("g newer")
+    everywhere.append_string("a newer")
+
+    layered = LayeredFileHistory(
+        [(dir_a, "this dir"), (everywhere, "global"), (dir_b, "legacy")]
+    )
+
+    assert layered.load_history_strings() == [
+        "a newer",
+        "a older",
+        "g newer",
+        "g older",
+        "b only",
+    ]
+    assert layered.tagged_entries()[0] == ("a newer", "this dir")
+    assert layered.tagged_entries()[-1] == ("b only", "legacy")
+
+    layered.append_string("fresh prompt")
+    assert "fresh prompt" in local_a.read_text(encoding="utf-8")
+    assert "fresh prompt" in shared.read_text(encoding="utf-8")
+    assert layered.load_history_strings()[0] == "fresh prompt"
+
+
+def test_history_search_completer_filters_live_matches(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("MJJ_HOME", str(tmp_path / "home"))
+    local = DistinctFileHistory(str(_workspace_history_path(tmp_path / "a")))
+    local.append_string("old git status")
+    local.append_string("git push origin main")
+    shared = DistinctFileHistory(str(_global_history_path()))
+    shared.append_string("git commit fix")
+    history = LayeredFileHistory([(local, "this dir"), (shared, "global")])
+    state = {"on": True}
+    completer = WorkspaceCompleter(
+        tmp_path, history=history, searching=lambda: state["on"]
+    )
+
+    matches = list(completer.get_completions(Document("git", 3), None))
+    assert [match.text for match in matches] == [
+        "git push origin main",
+        "old git status",
+        "git commit fix",
+    ]
+    assert matches[0].display_meta_text == "this dir"
+    assert matches[-1].display_meta_text == "global"
+    assert all(match.start_position == -3 for match in matches)
+    empty_query = list(completer.get_completions(Document("", 0), None))
+    assert [match.text for match in empty_query][0] == "git push origin main"
+
+    state["on"] = False
+    slash = list(completer.get_completions(Document("/mo", 3), None))
+    assert any(match.text == "/model" for match in slash)
+
+
+def test_ctrl_r_search_mode_restores_draft_and_accepts_selection(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("MJJ_HOME", str(tmp_path / "home"))
+    app = InteractiveApp(
+        Agent(registry=Registry(), cwd=tmp_path, instructions="test"), _args()
+    )
+    registered = {
+        tuple(getattr(key, "value", key) for key in binding.keys)
+        for binding in app.bindings.bindings
+    }
+    assert ("c-r",) in registered
+
+    buffer = Buffer(multiline=False)
+    buffer.text = "draft idea"
+    event = SimpleNamespace(
+        current_buffer=buffer, app=SimpleNamespace(invalidate=lambda: None)
+    )
+
+    app._begin_history_search(event)
+    assert app.searching is True
+    app._cancel_history_search(event)
+    assert app.searching is False and app.saved_search_text is None
+    assert buffer.text == "draft idea"
+
+    app._begin_history_search(event)
+    buffer.complete_state = CompletionState(
+        original_document=Document("gi", 2),
+        completions=[Completion("git status", start_position=-2)],
+        complete_index=0,
+    )
+    app._accept_history_search(event)
+    assert buffer.text == "git status"
+    assert app.searching is False
+
+    app._begin_history_search(event)
+    buffer.complete_state = None
+    app._accept_history_search(event)
+    assert buffer.text == "git status"

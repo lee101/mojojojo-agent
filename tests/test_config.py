@@ -25,6 +25,7 @@ project_doc_max_bytes = 4096
 auto_next_steps = true
 auto_next_idea = false
 auto_max_turns = 7
+max_output_tokens = 2048
 [tools]
 budget = 321
 disabled = ["shell"]
@@ -56,6 +57,7 @@ paths = ["../skills"]
     assert config.auto_next_steps is True
     assert config.auto_next_idea is True
     assert config.auto_max_turns == 3
+    assert config.max_output_tokens == 2048
     assert config.disabled_tools == ("shell",)
     assert config.skill_paths == ((project / "skills").resolve(),)
     assert config.files == ((project / ".mjj" / "config.toml").resolve(),)
@@ -78,6 +80,7 @@ def test_explicit_config_is_last_file_layer(tmp_path: Path):
         ("[skills]\npaths='nope'\n", "skills.paths"),
         ("[agent]\nproject_doc_max_bytes=-1\n", "agent.project_doc_max_bytes"),
         ("[agent]\nauto_max_turns=-1\n", "agent.auto_max_turns"),
+        ("[agent]\nmax_output_tokens=-1\n", "agent.max_output_tokens"),
         ("[agent]\nauto_next_steps='yes'\n", "agent.auto_next_steps"),
     ],
 )
@@ -91,6 +94,14 @@ def test_invalid_config_is_actionable(tmp_path: Path, content: str, message: str
 def test_invalid_autonomy_environment_boolean_is_actionable(tmp_path: Path):
     with pytest.raises(ConfigError, match="MJJ_AUTO_NEXT_STEPS"):
         load(tmp_path, environ={"MJJ_AUTO_NEXT_STEPS": "sometimes"})
+
+
+def test_max_output_tokens_environment_overrides_config(tmp_path: Path):
+    config = load(
+        tmp_path,
+        environ={"MJJ_MAX_OUTPUT_TOKENS": "777"},
+    )
+    assert config.max_output_tokens == 777
 
 
 def test_mcp_config_resolves_paths_forwards_selected_env_and_redacts_values(tmp_path: Path):

@@ -130,6 +130,22 @@ def test_reasoning_items_are_echoed_verbatim(monkeypatch):
     assert agent.items[1] == reasoning  # [0] is the user message
 
 
+def test_completed_reasoning_summary_is_visible_when_no_delta_arrives(monkeypatch):
+    reasoning = {
+        "type": "reasoning",
+        "id": "rs_2",
+        "summary": [{"type": "summary_text", "text": "inspect, then patch"}],
+        "encrypted_content": "OPAQUE",
+    }
+    agent = build(monkeypatch, [reasoning, message("ok")])
+
+    steps = list(agent.run("think"))
+
+    assert [step.text for step in steps if step.kind == "reasoning"] == [
+        "inspect, then patch"
+    ]
+
+
 def test_compaction_prunes_the_live_window(monkeypatch):
     compact = {"type": "compaction", "encrypted_content": "OPAQUE"}
     agent = build(monkeypatch, [compact, message("continued")])

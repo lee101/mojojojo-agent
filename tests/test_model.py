@@ -265,6 +265,25 @@ def test_usage_tracks_cache_reads_and_writes():
     assert "30 cache write" in usage.summary()
 
 
+def test_usage_tracks_reported_cost_and_output_ceiling() -> None:
+    usage = Usage()
+    usage.add({"input_tokens": 100, "output_tokens": 20, "cost": 0.012345})
+    usage.add({"input_tokens": 50, "output_tokens": 10, "cost": {"total": 0}})
+
+    assert usage.total_tokens == 180
+    assert usage.cost_usd == 0.012345
+    assert "$0.0123" in usage.summary(max_output_tokens=321)
+    assert "out 30/321" in usage.summary(max_output_tokens=321)
+
+
+def test_chat_usage_preserves_gateway_cost() -> None:
+    from mjj.model import _chat_usage
+
+    assert _chat_usage({"prompt_tokens": 4, "completion_tokens": 2, "cost": 0.5})[
+        "cost"
+    ] == 0.5
+
+
 def test_openai_56_cache_policy_marks_only_a_reused_stable_prefix():
     instructions = "stable instructions " * 300
     tools = [{"type": "function", "name": "read", "description": "read"}]

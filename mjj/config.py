@@ -68,6 +68,8 @@ class Config:
     auto_next_steps: bool = False
     auto_next_idea: bool = False
     auto_max_turns: int = 0
+    # Zero leaves the provider's default output ceiling in control.
+    max_output_tokens: int = 0
     disabled_tools: tuple[str, ...] = ()
     skill_paths: tuple[Path, ...] = ()
     mcp_servers: tuple[MCPServerConfig, ...] = ()
@@ -133,6 +135,7 @@ def load(
         "MJJ_POST_EDIT": "post_edit",
         "MJJ_PROJECT_DOC_MAX_BYTES": "project_doc_max_bytes",
         "MJJ_AUTO_MAX_TURNS": "auto_max_turns",
+        "MJJ_MAX_OUTPUT_TOKENS": "max_output_tokens",
     }
     for variable, key in env_keys.items():
         if env.get(variable, "").strip():
@@ -206,6 +209,7 @@ def _merge_document(
         "auto_next_steps",
         "auto_next_idea",
         "auto_max_turns",
+        "max_output_tokens",
     ):
         if key in agent:
             values[key] = agent[key]
@@ -312,6 +316,9 @@ def _validated(values: Mapping[str, Any]) -> Config:
     auto_next_steps = values.get("auto_next_steps", Config.auto_next_steps)
     auto_next_idea = values.get("auto_next_idea", Config.auto_next_idea)
     auto_max_turns = values.get("auto_max_turns", Config.auto_max_turns)
+    max_output_tokens = values.get(
+        "max_output_tokens", Config.max_output_tokens
+    )
     disabled = values.get("disabled_tools", ())
     skill_paths = values.get("skill_paths", ())
     raw_mcp_servers = values.get("mcp_servers", {})
@@ -365,6 +372,16 @@ def _validated(values: Mapping[str, Any]) -> Config:
         raise ConfigError("agent.auto_max_turns must be a non-negative integer") from exc
     if auto_max_turns < 0:
         raise ConfigError("agent.auto_max_turns must be a non-negative integer")
+    if isinstance(max_output_tokens, bool):
+        raise ConfigError("agent.max_output_tokens must be a non-negative integer")
+    try:
+        max_output_tokens = int(max_output_tokens)
+    except (TypeError, ValueError) as exc:
+        raise ConfigError(
+            "agent.max_output_tokens must be a non-negative integer"
+        ) from exc
+    if max_output_tokens < 0:
+        raise ConfigError("agent.max_output_tokens must be a non-negative integer")
     if not isinstance(disabled, (list, tuple)) or any(
         not isinstance(item, str) or not item.strip() for item in disabled
     ):
@@ -429,6 +446,7 @@ def _validated(values: Mapping[str, Any]) -> Config:
         auto_next_steps=auto_next_steps,
         auto_next_idea=auto_next_idea,
         auto_max_turns=auto_max_turns,
+        max_output_tokens=max_output_tokens,
         disabled_tools=tuple(dict.fromkeys(item.strip() for item in disabled)),
         skill_paths=tuple(Path(item).expanduser().resolve() for item in skill_paths),
         mcp_servers=tuple(mcp_servers),
@@ -458,6 +476,7 @@ def persist_user_agent_settings(
     effort: str | None = None,
     routing: str | None = None,
     verbosity: str | None = None,
+    max_output_tokens: int | None = None,
     environ: Mapping[str, str] | None = None,
 ) -> Path:
     """Write selected interactive defaults into ``$MJJ_HOME/config.toml``.
@@ -473,6 +492,7 @@ def persist_user_agent_settings(
             ("effort", effort),
             ("routing", routing),
             ("verbosity", verbosity),
+            ("max_output_tokens", max_output_tokens),
         )
         if value is not None
     }

@@ -64,6 +64,9 @@ def _agent(args):
         effort=args.effort,
         routing=getattr(args, "routing", None) or args.resolved_config.routing,
         verbosity=args.verbosity,
+        max_output_tokens=getattr(
+            args, "max_output_tokens", args.resolved_config.max_output_tokens
+        ),
         resolver=auth.CredentialResolver(provider=args.provider, model=args.model),
     )
     goal_store = GoalStore(cwd)
@@ -586,6 +589,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--routing", default=config.routing, choices=ROUTING_MODES)
     parser.add_argument("--verbosity", default=config.verbosity, choices=VERBOSITIES)
     parser.add_argument(
+        "--max-output-tokens",
+        type=int,
+        default=config.max_output_tokens,
+        metavar="N",
+        help="cap each model response (0 uses the provider default)",
+    )
+    parser.add_argument(
         "--permission-mode", default=config.permission_mode, choices=PERMISSION_MODES
     )
     parser.add_argument("--tool-budget", type=int, default=config.tool_budget)
@@ -622,6 +632,9 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--effort", choices=EFFORTS, default=argparse.SUPPRESS)
     run.add_argument("--routing", choices=ROUTING_MODES, default=argparse.SUPPRESS)
     run.add_argument("--verbosity", choices=VERBOSITIES, default=argparse.SUPPRESS)
+    run.add_argument(
+        "--max-output-tokens", type=int, default=argparse.SUPPRESS, metavar="N"
+    )
     run.add_argument(
         "--permission-mode", choices=PERMISSION_MODES, default=argparse.SUPPRESS
     )
@@ -674,6 +687,9 @@ def main(argv: list[str] | None = None) -> int:
     chat.add_argument("--provider", choices=PROVIDERS, default=argparse.SUPPRESS)
     chat.add_argument("--model", default=argparse.SUPPRESS)
     chat.add_argument("--effort", choices=EFFORTS, default=argparse.SUPPRESS)
+    chat.add_argument(
+        "--max-output-tokens", type=int, default=argparse.SUPPRESS, metavar="N"
+    )
     chat.add_argument("--routing", choices=ROUTING_MODES, default=argparse.SUPPRESS)
     chat.add_argument(
         "--permission-mode", choices=PERMISSION_MODES, default=argparse.SUPPRESS
@@ -812,6 +828,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     if args.auto_max_turns < 0:
         parser.error("--auto-max-turns must be non-negative")
+    if args.max_output_tokens < 0:
+        parser.error("--max-output-tokens must be non-negative")
     args.disabled_tools = config.disabled_tools
     args.skill_paths = config.skill_paths
     args.resolved_config = config

@@ -89,6 +89,18 @@ def test_exec_accepts_provider_model_effort_and_images_after_subcommand(monkeypa
     }
 
 
+def test_exec_accepts_output_token_ceiling_after_subcommand(monkeypatch) -> None:
+    seen = {}
+
+    def capture(args) -> int:
+        seen["max_output_tokens"] = args.max_output_tokens
+        return 0
+
+    monkeypatch.setattr(cli, "cmd_exec", capture)
+    assert main(["exec", "--max-output-tokens", "777", "task"]) == 0
+    assert seen == {"max_output_tokens": 777}
+
+
 def test_exec_accepts_autonomy_and_session_controls_after_subcommand(monkeypatch) -> None:
     seen = {}
 

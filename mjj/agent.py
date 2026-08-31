@@ -13,7 +13,7 @@ import json
 import queue
 import re
 import time
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Callable, Iterator
 
@@ -190,6 +190,7 @@ class Agent:
             calls: list[dict] = []
             response_start = len(self.items)
             emitted_text = False
+            emitted_reasoning = False
             started = time.monotonic()
             try:
                 for event in self.client.stream(
@@ -197,17 +198,28 @@ class Agent:
                     self.instructions,
                     self.registry.schemas(),
                 ):
-                    step = self._consume(event, calls)
+                    step = self._consume(
+                        event,
+                        calls,
+                        reasoning_seen=emitted_reasoning,
+                    )
                     if step is not None:
                         emitted_text = emitted_text or step.kind == "text"
+                        emitted_reasoning = emitted_reasoning or step.kind == "reasoning"
                         yield step
             except Exception as exc:
                 yield Step(kind="error", text=f"{type(exc).__name__}: {exc}")
                 return
             yield Step(
                 kind="usage",
-                text=self.client.usage.summary(),
-                meta={"seconds": round(time.monotonic() - started, 2)},
+                text=self.client.usage.summary(
+                    max_output_tokens=self.client.max_output_tokens
+                ),
+                meta={
+                    "seconds": round(time.monotonic() - started, 2),
+                    "usage": asdict(self.client.usage),
+                    "max_output_tokens": self.client.max_output_tokens,
+                },
             )
             if not calls:
                 if not emitted_text:
@@ -288,9 +300,20 @@ class Agent:
             tool_rounds += 1
         yield Step(kind="error", text=f"agent exceeded {self.max_steps} tool rounds")
 
-    def _consume(self, event: Event, calls: list[dict]) -> Step | None:
+    def _consume(
+        self,
+        event: Event,
+        calls: list[dict],
+        *,
+        reasoning_seen: bool = False,
+    ) -> Step | None:
         kind = event.type
-        if kind in {"mjj.retry", "mjj.request_fallback", "mjj.effort_adjusted"}:
+        if kind in {
+            "mjj.retry",
+            "mjj.request_fallback",
+            "mjj.effort_adjusted",
+            "mjj.provider_fallback",
+        }:
             return Step(
                 kind="status",
                 text=event.data.get("message", ""),
@@ -314,7 +337,13 @@ class Agent:
             # Verbatim, including encrypted_content. Rewriting or dropping this
             # makes the model re-think work it already did.
             self.append(item)
-            return None
+            # Most Responses streams expose summary deltas before this final
+            # item. Compatibility/non-streaming responses often expose only
+            # the completed item, so recover its displayable summary here.
+            if reasoning_seen:
+                return None
+            text = _reasoning_text(item)
+            return Step(kind="reasoning", text=text) if text else None
         if item_type == "message":
             self.append(item)
             return None
@@ -612,6 +641,31 @@ def _latest_assistant_text(items: list[dict]) -> str:
             if part.get("type") in ("output_text", "text")
         )
     return ""
+
+
+def _reasoning_text(item: dict) -> str:
+    """Return readable reasoning summary text from a completed model item.
+
+    The encrypted payload is intentionally ignored for display and retained in
+    the transcript by ``_consume``. Providers disagree on whether summaries
+    are strings or typed ``summary_text`` blocks, so accept both wire shapes.
+    """
+    summary = item.get("summary")
+    if isinstance(summary, str):
+        return summary
+    if isinstance(summary, list):
+        parts: list[str] = []
+        for block in summary:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict):
+                text = block.get("text") or block.get("summary_text")
+                if isinstance(text, str):
+                    parts.append(text)
+        if parts:
+            return "".join(parts)
+    fallback = item.get("reasoning_content") or item.get("reasoning")
+    return fallback if isinstance(fallback, str) else ""
 
 
 def _dedupe_images(images: tuple[ImageAttachment, ...]) -> tuple[ImageAttachment, ...]:

@@ -81,15 +81,17 @@ mjj
 Type `/` to search commands and press Tab to complete commands or valid values.
 `/model` opens an arrow-key picker: use Up/Down to highlight a model and Enter
 to select it. The numbered fallback also accepts a number, full name, unique
-fragment, `next`, or `prev`; arbitrary model IDs are accepted. Shift+Up/Down
-changes the reasoning level and the prompt toolbar always shows the active model
-and reasoning. F2 or Alt+M cycles models, F3 or Alt+R cycles reasoning, and F4
-or Alt+V cycles verbosity. Empty-composer left/right also changes reasoning.
-Alt+Enter inserts a newline. Type `@` to attach a fuzzy-matched repository file,
+fragment, `next`, or `prev`; arbitrary model IDs are accepted. The fixed bottom
+toolbar keeps the active model/reasoning visible and reports cumulative input,
+output/reasoning/cache tokens, the configured output ceiling, request count, and
+provider-reported cost when available. Shift+Up/Down changes the reasoning level;
+F2 or Alt+M cycles models, F3 or Alt+R cycles reasoning, and F4 or Alt+V cycles
+verbosity. Empty-composer left/right also changes reasoning. Alt+Enter inserts a newline. Type `@` to attach a fuzzy-matched repository file,
 `!command` to run a shell command and retain its output as model context, or
 `!!command` to run it only locally. Useful first commands are `/status`,
 `/settings`, `/permissions`, `/review`, `/model`, `/reasoning`, `/auth`, and
-`/help`.
+`/help`. While a turn is running, Enter sends steering guidance at the next safe
+boundary; Tab queues a separate follow-up task.
 
 For scripts and CI, use headless mode:
 

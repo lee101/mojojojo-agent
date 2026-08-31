@@ -22,6 +22,8 @@ from mjj.tui import (
     LayeredFileHistory,
     WorkspaceCompleter,
     _edit_summary,
+    _format_cost,
+    _format_count,
     _global_history_path,
     _model_choices,
     _pick_model,
@@ -469,6 +471,107 @@ def test_shift_arrows_change_reasoning_and_toolbar_shows_live_state(
     agent.client.model = "auto"
     app._cycle_model(1)
     assert agent.client.model == "auto-code"
+
+
+def test_bottom_toolbar_keeps_model_controls_and_live_usage_stats(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("MJJ_HOME", str(tmp_path / "home"))
+    agent = Agent(
+        registry=Registry(),
+        client=ModelClient(model="auto-best", provider="auto", effort="high", max_output_tokens=321),
+        cwd=tmp_path,
+        instructions="test",
+    )
+    agent.client.usage.add(
+        {
+            "input_tokens": 1200,
+            "output_tokens": 80,
+            "input_tokens_details": {"cached_tokens": 600},
+            "output_tokens_details": {"reasoning_tokens": 40},
+            "cost": 0.0123,
+        }
+    )
+    app = InteractiveApp(agent, _args())
+
+    toolbar = app._toolbar().value
+
+    assert "stats" in toolbar
+    assert "↑1,200" in toolbar and "↓80/321" in toolbar
+    assert "1,280 tokens" in toolbar and "R40" in toolbar
+    assert "$0.0123" in toolbar and "1 req" in toolbar
+    assert "Enter send" in toolbar
+    app.turn_active = True
+    assert "Enter steer · Tab queue" in app._toolbar().value
+    assert _format_count(12_000) == "12.0k"
+    assert _format_cost(None) == "cost n/a"
+
+
+def test_max_tokens_command_updates_request_limit_and_persists(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    monkeypatch.setenv("MJJ_HOME", str(tmp_path / "home"))
+    agent = Agent(registry=Registry(), cwd=tmp_path, instructions="test")
+    app = InteractiveApp(agent, _args())
+
+    app.command("/max-tokens 512")
+    assert agent.client.max_output_tokens == 512
+    assert 'max_output_tokens = "512"' in (
+        tmp_path / "home" / "config.toml"
+    ).read_text(encoding="utf-8")
+    assert "max output tokens: 512" in capsys.readouterr().out
+
+
+def test_tab_binding_marks_active_input_as_a_follow_up_queue(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("MJJ_HOME", str(tmp_path / "home"))
+    app = InteractiveApp(
+        Agent(registry=Registry(), cwd=tmp_path, instructions="test"), _args()
+    )
+    app.turn_active = True
+    queue_binding = next(
+        binding
+        for binding in app.bindings.bindings
+        if binding.handler.__name__ == "queue_follow_up"
+    )
+    accepted = []
+    event = SimpleNamespace(
+        current_buffer=SimpleNamespace(validate_and_handle=lambda: accepted.append(True)),
+    )
+
+    queue_binding.handler(event)
+
+    assert app.queue_submission is True
+    assert accepted == [True]
+
+
+def test_reasoning_is_rendered_as_a_separate_closed_block(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    monkeypatch.setenv("MJJ_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(
+        "mjj.tui.print_formatted_text",
+        lambda value, end="\n": print(str(value), end=end),
+    )
+    app = InteractiveApp(
+        Agent(registry=Registry(), cwd=tmp_path, instructions="test"), _args()
+    )
+
+    app._render(
+        iter(
+            [
+                Step("reasoning", text="inspect first"),
+                Step("text", text="Done."),
+            ]
+        )
+    )
+
+    output = capsys.readouterr().out
+    assert "┌─ reasoning" in output
+    assert "inspect first" in output
+    assert "└─ end reasoning" in output
+    assert output.index("end reasoning") < output.index("Done.")
 
 
 def test_tool_results_have_compact_preview_and_ctrl_t_full_transcript(

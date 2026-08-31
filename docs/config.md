@@ -11,7 +11,7 @@ Configuration resolves in this order, from lowest to highest precedence:
 `mjj config` prints the resolved non-secret values and the files that supplied
 them. An explicit `--config PATH` is an additional file layer after the normal
 user and project files. Interactive `/model`, `/provider`, `/reasoning`,
-`/routing`, and `/verbosity` (plus the matching hotkeys) write those defaults back into
+`/routing`, `/verbosity`, and `/max-tokens` (plus the matching hotkeys) write those defaults back into
 `$MJJ_HOME/config.toml` so the next launch keeps them. Choosing a model that
 belongs to exactly one concrete provider while `provider = "auto"` also locks
 the provider onto that backend.
@@ -28,6 +28,7 @@ project_doc_max_bytes = 32768
 auto_next_steps = false
 auto_next_idea = false
 auto_max_turns = 0
+max_output_tokens = 0 # 0 uses the provider default; live control: /max-tokens
 
 [tools]
 budget = 1600
@@ -51,6 +52,7 @@ Supported environment equivalents are `MJJ_PROVIDER`, `MJJ_MODEL`, `MJJ_EFFORT`,
 `MJJ_ROUTING`, `MJJ_VERBOSITY`, `MJJ_PERMISSION_MODE`, `MJJ_TOOL_BUDGET`, `MJJ_POST_EDIT`,
 `MJJ_PROJECT_DOC_MAX_BYTES`,
 `MJJ_AUTO_NEXT_STEPS`, `MJJ_AUTO_NEXT_IDEA`, `MJJ_AUTO_MAX_TURNS`,
+`MJJ_MAX_OUTPUT_TOKENS`,
 comma-separated `MJJ_DISABLE_TOOLS`, and path-separator-delimited
 `MJJ_SKILL_PATHS`. `MJJ_CACHE_MODE` accepts `auto`, `off`, `implicit`, or
 `explicit`; the live interactive control is `/cache`. `MJJ_PLUGINS` is a

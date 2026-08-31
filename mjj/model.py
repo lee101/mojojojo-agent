@@ -14,6 +14,7 @@ POST is not a token-efficient harness, it is a slow one.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import time
@@ -124,6 +125,10 @@ class Usage:
     output_tokens: int = 0
     reasoning_tokens: int = 0
     requests: int = 0
+    # Providers such as OpenRouter include an authoritative USD total in the
+    # usage envelope.  ``None`` means the provider did not report billing
+    # data; zero is a real, useful value for subscription/free routes.
+    cost_usd: float | None = None
 
     def add(self, doc: dict) -> None:
         self.requests += 1
@@ -134,6 +139,9 @@ class Usage:
         self.cache_write_tokens += int(details.get("cache_write_tokens") or 0)
         out_details = doc.get("output_tokens_details") or {}
         self.reasoning_tokens += int(out_details.get("reasoning_tokens") or 0)
+        cost = _reported_cost(doc)
+        if cost is not None:
+            self.cost_usd = (self.cost_usd or 0.0) + cost
 
     def merge(self, other: "Usage") -> None:
         self.input_tokens += other.input_tokens
@@ -142,12 +150,18 @@ class Usage:
         self.output_tokens += other.output_tokens
         self.reasoning_tokens += other.reasoning_tokens
         self.requests += other.requests
+        if other.cost_usd is not None:
+            self.cost_usd = (self.cost_usd or 0.0) + other.cost_usd
 
     @property
     def billable_input(self) -> int:
         return max(0, self.input_tokens - self.cached_input_tokens)
 
-    def summary(self) -> str:
+    @property
+    def total_tokens(self) -> int:
+        return self.input_tokens + self.output_tokens
+
+    def summary(self, *, max_output_tokens: int = 0) -> str:
         cache_parts = []
         if self.input_tokens and self.cached_input_tokens:
             cache_parts.append(
@@ -156,10 +170,47 @@ class Usage:
         if self.cache_write_tokens:
             cache_parts.append(f"{self.cache_write_tokens} cache write")
         cache = f" ({', '.join(cache_parts)})" if cache_parts else ""
-        return (
+        output = f"out {self.output_tokens}"
+        if max_output_tokens > 0:
+            output += f"/{max_output_tokens}"
+        summary = (
             f"{self.requests} req · in {self.input_tokens}{cache} · "
-            f"out {self.output_tokens} (reasoning {self.reasoning_tokens})"
+            f"{output} (reasoning {self.reasoning_tokens})"
         )
+        if self.cost_usd is not None:
+            summary += f" · ${self.cost_usd:.4f}"
+        return summary
+
+
+def _reported_cost(document: dict) -> float | None:
+    """Extract a provider-reported USD total without inventing a price.
+
+    OpenRouter and a few OpenAI-compatible gateways put ``cost`` directly in
+    the usage object; other gateways wrap it as ``{"total": ...}`` or
+    ``{"usd": ...}``.  Unknown or non-finite values stay unknown so the UI
+    never presents a made-up bill.
+    """
+    candidates: list[object] = [document]
+    nested = document.get("usage")
+    if isinstance(nested, dict):
+        candidates.insert(0, nested)
+    for source in candidates:
+        if not isinstance(source, dict):
+            continue
+        for key in ("cost_usd", "cost", "total_cost"):
+            value = source.get(key)
+            if isinstance(value, dict):
+                value = next(
+                    (value.get(name) for name in ("total", "usd", "amount") if name in value),
+                    None,
+                )
+            try:
+                number = float(value)
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(number) and number >= 0:
+                return number
+    return None
 
 
 @dataclass
@@ -548,7 +599,9 @@ class ModelClient:
             return
         for item in document.get("output") or []:
             yield Event("response.output_item.done", {"item": item})
-        usage = document.get("usage") or {}
+        usage = dict(document.get("usage") or {})
+        if "cost" not in usage and "cost" in document:
+            usage["cost"] = document["cost"]
         self.usage.add(usage)
         self._record_cache_usage(usage)
         yield Event("response.completed", {"response": {"usage": usage}})
@@ -588,7 +641,10 @@ class ModelClient:
                 item["reasoning_content"] = reasoning
             yield Event("response.output_text.delta", {"delta": content})
             yield Event("response.output_item.done", {"item": item})
-        usage = _chat_usage(document.get("usage") or {})
+        raw_usage = dict(document.get("usage") or {})
+        if "cost" not in raw_usage and "cost" in document:
+            raw_usage["cost"] = document["cost"]
+        usage = _chat_usage(raw_usage)
         self.usage.add(usage)
         self._record_cache_usage(usage)
         yield Event("response.completed", {"response": {"usage": usage}})
@@ -614,7 +670,10 @@ class ModelClient:
         with resp:
             for event in _decode_sse(resp):
                 if event.type in ("response.completed", "response.incomplete"):
-                    usage = (event.data.get("response") or {}).get("usage") or {}
+                    response = event.data.get("response") or {}
+                    usage = dict(response.get("usage") or {})
+                    if "cost" not in usage and "cost" in response:
+                        usage["cost"] = response["cost"]
                     self.usage.add(usage)
                     self._record_cache_usage(usage)
                 if event.type in ("response.failed", "error"):
@@ -672,7 +731,14 @@ class ModelClient:
                         f"stream failed: {message}",
                         retryable=_retryable_message(str(message)),
                     )
-                usage = chunk.get("usage") or usage
+                chunk_usage = chunk.get("usage")
+                if isinstance(chunk_usage, dict):
+                    previous_cost = usage.get("cost")
+                    usage = dict(chunk_usage)
+                    if "cost" not in usage and previous_cost is not None:
+                        usage["cost"] = previous_cost
+                if "cost" in chunk and "cost" not in usage:
+                    usage = {**usage, "cost": chunk["cost"]}
                 choices = chunk.get("choices") or []
                 if not choices:
                     continue
@@ -683,18 +749,24 @@ class ModelClient:
                 if not isinstance(payload, dict):
                     continue
                 reasoning = payload.get("reasoning_content") or payload.get("reasoning")
-                if isinstance(reasoning, str) and reasoning:
-                    if is_delta or not reasoning_parts:
-                        reasoning_parts.append(reasoning)
-                        yield Event(
-                            "response.reasoning_summary_text.delta",
-                            {"delta": reasoning},
-                        )
+                if (
+                    isinstance(reasoning, str)
+                    and reasoning
+                    and (is_delta or not reasoning_parts)
+                ):
+                    reasoning_parts.append(reasoning)
+                    yield Event(
+                        "response.reasoning_summary_text.delta",
+                        {"delta": reasoning},
+                    )
                 content = payload.get("content")
-                if isinstance(content, str) and content:
-                    if is_delta or not text_parts:
-                        text_parts.append(content)
-                        yield Event("response.output_text.delta", {"delta": content})
+                if (
+                    isinstance(content, str)
+                    and content
+                    and (is_delta or not text_parts)
+                ):
+                    text_parts.append(content)
+                    yield Event("response.output_text.delta", {"delta": content})
                 for piece in payload.get("tool_calls") or []:
                     index = int(piece.get("index") or 0)
                     call = calls.setdefault(
@@ -770,9 +842,10 @@ def _append_tool_argument(parts: list[str], fragment: str) -> None:
     an exact replay once the accumulated argument is already valid JSON.
     """
     current = "".join(parts)
-    if current and _is_json_document(current):
-        if fragment == current or fragment.startswith(current):
-            return
+    if current and _is_json_document(current) and (
+        fragment == current or fragment.startswith(current)
+    ):
+        return
     parts.append(fragment)
 
 
@@ -825,6 +898,10 @@ def _chat_usage(usage: dict) -> dict:
         "output_tokens_details": {
             "reasoning_tokens": completion_details.get("reasoning_tokens", 0),
         },
+        # Preserve authoritative gateway billing when an OpenAI-compatible
+        # stream includes it.  ``Usage.add`` handles both scalar and object
+        # forms and leaves absent costs unknown.
+        "cost": usage.get("cost", usage.get("cost_usd")),
     }
 
 

@@ -161,6 +161,7 @@ COMMANDS = {
     "/reasoning": "alias for /effort",
     "/routing": "show or set gateway cost routing (floor is cheapest)",
     "/verbosity": "show or set response verbosity",
+    "/max-tokens": "show or set the per-response output token ceiling",
     "/image": "attach an image to the next prompt",
     "/images": "show queued image attachments",
     "/preview": "show an image in the terminal without attaching it",
@@ -170,7 +171,7 @@ COMMANDS = {
     "/usage": "show model and tool token usage",
     "/cache": "show or set automatic prompt caching",
     "/models": "show models available for the active provider",
-    "/settings": "show current provider, model, reasoning, and autonomy",
+    "/settings": "show current provider, model, reasoning, limits, and autonomy",
     "/status": "show model, permissions, session, tools, and Git status",
     "/permissions": "set auto, ask, or read-only tool permissions",
     "/init": "generate a repository-specific AGENTS.md",
@@ -949,17 +950,37 @@ class InteractiveApp:
             if isinstance(item, dict)
         )
         plan_label = f" · plan {completed}/{len(plan_items)}" if plan_items else ""
-        queued = (
-            f" · queued {len(self.pending_prompts)}" if self.pending_prompts else ""
+        usage = self.agent.client.usage
+        max_output = self.agent.client.max_output_tokens
+        max_label = _format_count(max_output) if max_output > 0 else "provider"
+        cache = (
+            f" · cache {_format_count(usage.cached_input_tokens)}"
+            if usage.cached_input_tokens
+            else ""
+        )
+        cost = _format_cost(usage.cost_usd)
+        queue_labels = []
+        if self.agent.steering.qsize():
+            queue_labels.append(f"steer {self.agent.steering.qsize()}")
+        if self.pending_prompts:
+            queue_labels.append(f"queued {len(self.pending_prompts)}")
+        queue = " · " + " · ".join(queue_labels) if queue_labels else ""
+        active_hint = (
+            "Enter steer · Tab queue · Ctrl+T details"
+            if self._turn_active
+            else "Enter send · / commands · Ctrl+R history"
         )
         return HTML(
-            " <b>mjj</b> · model <b>"
-            f"{html.escape(self.agent.client.model)}</b>"
+            " <b>mjj</b> · "
+            f"{html.escape(cwd)} · model <b>{html.escape(self.agent.client.model)}</b>"
             f" · reasoning <b>{html.escape(self.agent.client.effort)}</b>"
-            f" · provider {html.escape(self.provider)}"
-            f"{auto}{goal_label}{plan_label}{images}{queued} · "
-            f"{html.escape(cwd)}   Enter send · / commands · "
-            "Ctrl+R history · Shift+↑/↓ reasoning · Ctrl+T details "
+            f" · provider {html.escape(self.provider)}{auto}{goal_label}{plan_label}{images}{queue}\n"
+            f" <b>stats</b> · ↑{_format_count(usage.input_tokens)}"
+            f" ↓{_format_count(usage.output_tokens)}/{html.escape(max_label)}"
+            f" · {_format_count(usage.total_tokens)} tokens"
+            f" · R{_format_count(usage.reasoning_tokens)}{cache}"
+            f" · {html.escape(cost)} · {usage.requests} req\n"
+            f" {active_hint} · Shift+↑/↓ reasoning · F2 model · F4 verbosity "
         )
 
     def run(self) -> int:
@@ -1107,44 +1128,82 @@ class InteractiveApp:
 
     def _render(self, steps) -> None:
         text_open = False
+        text_buffer = ""
+        text_needs_newline = False
+        code_block = False
         reasoning_open = False
         last_usage: Step | None = None
         failed = False
+
+        def emit_text(chunk: str, *, flush: bool = False) -> None:
+            nonlocal text_buffer, text_needs_newline, code_block
+            text_buffer += chunk
+            while "\n" in text_buffer:
+                line, text_buffer = text_buffer.split("\n", 1)
+                rendered, code_block = _format_markdown_line(line, code_block)
+                print_formatted_text(ANSI(rendered), end="\n")
+                text_needs_newline = False
+            if flush and text_buffer:
+                rendered, code_block = _format_markdown_line(text_buffer, code_block)
+                print_formatted_text(ANSI(rendered), end="")
+                text_buffer = ""
+                text_needs_newline = True
+
+        def close_text() -> None:
+            nonlocal text_open, text_needs_newline, code_block
+            if not text_open:
+                return
+            emit_text("", flush=True)
+            if text_needs_newline:
+                print()
+            if code_block:
+                print_formatted_text(ANSI("\x1b[2m  └─ code\x1b[0m"))
+                code_block = False
+            text_open = False
+            text_needs_newline = False
+
+        def close_reasoning() -> None:
+            nonlocal reasoning_open
+            if not reasoning_open:
+                return
+            # Reasoning deltas do not reliably end with a newline. Close the
+            # block explicitly so the final answer can never run into it.
+            print()
+            print_formatted_text(ANSI("\x1b[0m\x1b[2m  └─ end reasoning\x1b[0m"))
+            reasoning_open = False
+
+        def refresh_toolbar() -> None:
+            # Usage and queue counts are owned by the worker thread while the
+            # prompt-toolkit application owns the bottom toolbar. invalidate()
+            # is the supported cross-thread refresh hook.
+            app = get_app_or_none()
+            if app is not None:
+                app.invalidate()
+
         for step in steps:
             if step.kind in {"tool_call", "tool_result"}:
                 self.activity.append(step)
             if step.kind == "reasoning":
                 if text_open:
-                    print()
-                    text_open = False
+                    close_text()
                 if not reasoning_open:
-                    print_formatted_text(ANSI("\x1b[2m  ◌ thinking · "), end="")
+                    print_formatted_text(ANSI("\x1b[2m  ┌─ reasoning\x1b[0m"))
                     reasoning_open = True
                 print(step.text, end="", flush=True)
             elif step.kind == "text":
-                if reasoning_open:
-                    print_formatted_text(ANSI("\x1b[0m"))
-                    reasoning_open = False
+                close_reasoning()
                 if not text_open:
                     text_open = True
-                print(step.text, end="", flush=True)
+                emit_text(step.text)
             elif step.kind == "tool_call":
-                if reasoning_open:
-                    print_formatted_text(ANSI("\x1b[0m"))
-                    reasoning_open = False
-                if text_open:
-                    print()
-                    text_open = False
+                close_reasoning()
+                close_text()
                 if step.name != "skill" or self.transcript_expanded:
                     label = _tool_label(step)
                     print_formatted_text(ANSI(f"\x1b[2m  {label}\x1b[0m"))
             elif step.kind == "tool_result":
-                if reasoning_open:
-                    print_formatted_text(ANSI("\x1b[0m"))
-                    reasoning_open = False
-                if text_open:
-                    print()
-                    text_open = False
+                close_reasoning()
+                close_text()
                 if step.name == "skill" and not self.transcript_expanded:
                     continue
                 if not step.meta.get("ok", True):
@@ -1167,12 +1226,8 @@ class InteractiveApp:
                     if preview:
                         print_formatted_text(ANSI(f"\x1b[2m{preview}\x1b[0m"))
             elif step.kind == "autonomous":
-                if reasoning_open:
-                    print_formatted_text(ANSI("\x1b[0m"))
-                    reasoning_open = False
-                if text_open:
-                    print()
-                    text_open = False
+                close_reasoning()
+                close_text()
                 print_formatted_text(
                     ANSI(
                         f"\x1b[38;5;45m  ↻ autonomous continuation "
@@ -1180,12 +1235,8 @@ class InteractiveApp:
                     )
                 )
             elif step.kind == "status":
-                if reasoning_open:
-                    print_formatted_text(ANSI("\x1b[0m"))
-                    reasoning_open = False
-                if text_open:
-                    print()
-                    text_open = False
+                close_reasoning()
+                close_text()
                 if step.meta.get("attempt"):
                     detail = (
                         f"retry {step.meta['attempt']}/{step.meta.get('max_retries', '?')} "
@@ -1196,13 +1247,10 @@ class InteractiveApp:
                 print_formatted_text(ANSI(f"\x1b[33m  ↻ {detail}\x1b[0m"))
             elif step.kind == "usage":
                 last_usage = step
+                refresh_toolbar()
             elif step.kind == "goal":
-                if reasoning_open:
-                    print_formatted_text(ANSI("\x1b[0m"))
-                    reasoning_open = False
-                if text_open:
-                    print()
-                    text_open = False
+                close_reasoning()
+                close_text()
                 status = step.meta.get("status", "active")
                 self._goal_status = str(status)
                 turn = step.meta.get("turn", 0)
@@ -1211,26 +1259,17 @@ class InteractiveApp:
                     ANSI(f"\x1b[38;5;45m  ◎ goal {status}{suffix}\x1b[0m")
                 )
             elif step.kind == "steering":
-                if reasoning_open:
-                    print_formatted_text(ANSI("\x1b[0m"))
-                    reasoning_open = False
-                if text_open:
-                    print()
-                    text_open = False
+                close_reasoning()
+                close_text()
                 print_formatted_text(ANSI("\x1b[38;5;45m  ↪ steering applied\x1b[0m"))
             elif step.kind == "error":
                 failed = True
-                if reasoning_open:
-                    print_formatted_text(ANSI("\x1b[0m"))
-                    reasoning_open = False
-                if text_open:
-                    print()
-                    text_open = False
+                close_reasoning()
+                close_text()
                 print_formatted_text(ANSI(f"\x1b[31merror: {step.text}\x1b[0m"))
-        if reasoning_open:
-            print_formatted_text(ANSI("\x1b[0m"))
-        if text_open:
-            print()
+            refresh_toolbar()
+        close_reasoning()
+        close_text()
         if not failed:
             detail = ""
             if last_usage is not None:
@@ -1273,6 +1312,8 @@ class InteractiveApp:
             self._set_choice("routing", value, ROUTING_MODES)
         elif command == "/verbosity":
             self._set_choice("verbosity", value, VERBOSITIES)
+        elif command in {"/max-tokens", "/max_output_tokens", "/max"}:
+            self._set_max_tokens(value)
         elif command == "/model":
             self._set_model(value)
         elif command == "/provider":
@@ -1313,7 +1354,13 @@ class InteractiveApp:
         elif command == "/auth":
             print(json.dumps(auth.describe(), indent=2))
         elif command == "/usage":
-            print(self.agent.client.usage.summary(), "·", self.agent.ledger.summary())
+            print(
+                self.agent.client.usage.summary(
+                    max_output_tokens=self.agent.client.max_output_tokens
+                ),
+                "·",
+                self.agent.ledger.summary(),
+            )
         elif command == "/cache":
             if value:
                 try:
@@ -1337,6 +1384,7 @@ class InteractiveApp:
                         ),
                         "routing": self.agent.client.routing,
                         "verbosity": self.agent.client.verbosity,
+                        "max_output_tokens": self.agent.client.max_output_tokens,
                         "cache": self.agent.client.cache_status(),
                         "permission_mode": self.permission_policy.mode,
                         "autonomy": self._autonomy_label(),
@@ -1498,6 +1546,7 @@ class InteractiveApp:
             "model": self.agent.client.model,
             "effort": self.agent.client.effort,
             "verbosity": self.agent.client.verbosity,
+            "max_output_tokens": self.agent.client.max_output_tokens,
             "cache": self.agent.client.cache_status(),
             "permissions": self.permission_policy.mode,
             "autonomy": self._autonomy_label(),
@@ -1514,7 +1563,9 @@ class InteractiveApp:
             "project_docs": [
                 str(path) for path in self.agent.project_instructions.sources
             ],
-            "usage": self.agent.client.usage.summary(),
+            "usage": self.agent.client.usage.summary(
+                max_output_tokens=self.agent.client.max_output_tokens
+            ),
             "tool_usage": self.agent.ledger.summary(),
             "background_jobs": describe_jobs(self.agent.ctx),
             "git": git.output,
@@ -1714,8 +1765,32 @@ class InteractiveApp:
             provider=selected, model=model
         )
 
+    def _set_max_tokens(self, value: str) -> None:
+        """Set the live response ceiling; zero restores the provider default."""
+        if not value:
+            current = self.agent.client.max_output_tokens
+            label = _format_count(current) if current > 0 else "provider default"
+            print(f"max output tokens: {label}")
+            return
+        normalized = value.strip().lower()
+        if normalized in {"auto", "default", "0"}:
+            selected = 0
+        else:
+            try:
+                selected = int(normalized)
+            except ValueError:
+                print("max output tokens must be a non-negative integer (0 = provider default)")
+                return
+            if selected < 0:
+                print("max output tokens must be a non-negative integer (0 = provider default)")
+                return
+        self.agent.client.max_output_tokens = selected
+        self._remember_defaults()
+        label = _format_count(selected) if selected else "provider default"
+        print(f"max output tokens: {label}")
+
     def _remember_defaults(self, *, announce: bool = True) -> None:
-        """Persist interactive model/provider/effort/verbosity for the next launch."""
+        """Persist interactive model/provider/effort/verbosity/limits for next launch."""
         try:
             path = persist_user_agent_settings(
                 model=self.agent.client.model,
@@ -1723,6 +1798,7 @@ class InteractiveApp:
                 effort=self.agent.client.effort,
                 routing=self.agent.client.routing,
                 verbosity=self.agent.client.verbosity,
+                max_output_tokens=self.agent.client.max_output_tokens,
             )
         except Exception as exc:  # noqa: BLE001 - never block the session on prefs
             print(f"warning: could not save defaults ({exc})")
@@ -1786,7 +1862,7 @@ class InteractiveApp:
             "/model: arrow-key model picker · F2 or Alt+M: next model\n"
             "Shift+↑/↓: reasoning higher/lower · F3 or Alt+R: next reasoning\n"
             "empty ←/→: reasoning lower/higher\n"
-            "F4 or Alt+V: next verbosity · Alt+Enter: newline · Ctrl+C: interrupt\n"
+            "F4 or Alt+V: next verbosity · /max-tokens N: output ceiling · Alt+Enter: newline · Ctrl+C: interrupt\n"
             "while working: Enter sends steering · Tab queues it · Ctrl+T toggles full tool output\n"
             "↑/↓: prompts from this directory · Ctrl+R: search prompt history\n"
             "@file: attach context · !command: include output · !!command: local only"
@@ -2107,6 +2183,22 @@ class InteractiveApp:
         print(f"\x1b]52;c;{encoded}\x07", end="")
         print("copied last assistant response")
 
+def _format_count(value: int) -> str:
+    """Compact large token counts while keeping small counts exact."""
+    value = max(0, int(value))
+    if value >= 1_000_000:
+        return f"{value / 1_000_000:.1f}m"
+    if value >= 10_000:
+        return f"{value / 1_000:.1f}k"
+    return f"{value:,}"
+
+
+def _format_cost(value: float | None) -> str:
+    """Format known provider billing; make unavailable pricing explicit."""
+    if value is None:
+        return "cost n/a"
+    return f"${value:.4f}"
+
 
 def _tool_label(step: Step) -> str:
     return tool_progress(step)
@@ -2119,6 +2211,9 @@ def _compact_result(text: str, limit: int = 160) -> str:
 
 _CHECKPOINT_ID = re.compile(r"checkpoint ([0-9a-f]{8})[0-9a-f\-]+")
 _UNDO_HINT = " · undo with checkpoint action=undo"
+_MARKDOWN_FENCE = re.compile(r"^\s*(`{3,}|~{3,})(.*)$")
+_INLINE_CODE = re.compile(r"`([^`\n]+)`")
+_BOLD = re.compile(r"\*\*([^*\n]+)\*\*")
 
 
 def _edit_summary(text: str, limit: int = 200) -> str:
@@ -2126,6 +2221,44 @@ def _edit_summary(text: str, limit: int = 200) -> str:
     flat = " ".join(text.replace(_UNDO_HINT, "").split())
     flat = _CHECKPOINT_ID.sub(r"checkpoint \1", flat)
     return flat if len(flat) <= limit else flat[: limit - 1] + "…"
+
+
+def _format_markdown_line(line: str, in_code: bool) -> tuple[str, bool]:
+    """Apply small, streaming-safe terminal styling to assistant Markdown.
+
+    This is intentionally line based: a model can split a token anywhere, so
+    styling only complete lines avoids flicker and malformed escape sequences.
+    Fences become a clear code-block header/footer while the source text stays
+    untouched in the session and copy/export paths.
+    """
+    fence = _MARKDOWN_FENCE.match(line)
+    if fence:
+        _marker, language = fence.groups()
+        if in_code:
+            return "\x1b[2m  └─ code\x1b[0m", False
+        label = language.strip() or "text"
+        return f"\x1b[2m  ┌─ code · {label}\x1b[0m", True
+    if in_code:
+        return f"\x1b[38;5;252m{line}\x1b[0m", True
+    styled = _INLINE_CODE.sub(
+        lambda match: f"\x1b[38;5;214m{match.group(1)}\x1b[0m", line
+    )
+    styled = _BOLD.sub(
+        lambda match: f"\x1b[1;38;5;255m{match.group(1)}\x1b[0m", styled
+    )
+    heading = re.match(r"^(\s{0,3}#{1,6})\s+(.+)$", styled)
+    if heading:
+        return f"\x1b[1;38;5;45m{heading.group(1)} {heading.group(2)}\x1b[0m", False
+    bullet = re.match(r"^(\s*)([-*]|\d+[.)])(\s+)(.*)$", styled)
+    if bullet:
+        return (
+            (
+                f"{bullet.group(1)}\x1b[38;5;45m{bullet.group(2)}\x1b[0m"
+                f"{bullet.group(3)}{bullet.group(4)}"
+            ),
+            False,
+        )
+    return styled, False
 
 
 def _result_preview(text: str, lines: int = 3, width: int = 240) -> str:

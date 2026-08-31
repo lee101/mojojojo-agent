@@ -512,9 +512,38 @@ def test_bottom_toolbar_keeps_model_controls_and_live_usage_stats(
     assert "$0.0123" in toolbar and "1 req" in toolbar
     assert "Enter send" in toolbar
     app.turn_active = True
-    assert "Enter steer · Tab queue" in app._toolbar().value
+    assert app._toolbar().value == ""
+    live_prompt = app._live_prompt().value
+    assert "steer · Enter send · Tab queue" in live_prompt
+    assert live_prompt.endswith("\n<ansicyan>›</ansicyan> ")
     assert _format_count(12_000) == "12.0k"
     assert _format_cost(None) == "cost n/a"
+
+
+def test_ctrl_t_uses_prompt_toolkit_terminal_runner(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("MJJ_HOME", str(tmp_path / "home"))
+    app = InteractiveApp(
+        Agent(registry=Registry(), cwd=tmp_path, instructions="test"), _args()
+    )
+    scheduled = []
+    invalidations = []
+    monkeypatch.setattr(
+        "mjj.tui.run_in_terminal", lambda callback: scheduled.append(callback)
+    )
+    bindings = {
+        tuple(getattr(key, "value", key) for key in binding.keys): binding.handler
+        for binding in app.bindings.bindings
+    }
+
+    bindings[("c-t",)](
+        SimpleNamespace(app=SimpleNamespace(invalidate=lambda: invalidations.append(1)))
+    )
+
+    assert app.transcript_expanded is True
+    assert scheduled == [app._show_activity]
+    assert invalidations == [1]
 
 
 def test_max_tokens_command_updates_request_limit_and_persists(

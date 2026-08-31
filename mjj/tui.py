@@ -27,7 +27,11 @@ try:
         raise ImportError("basic TUI requested")
     from prompt_toolkit import PromptSession
     from prompt_toolkit import print_formatted_text as _pt_print_formatted_text
-    from prompt_toolkit.application import Application, get_app_or_none
+    from prompt_toolkit.application import (
+        Application,
+        get_app_or_none,
+        run_in_terminal,
+    )
     from prompt_toolkit.completion import Completer, Completion
     from prompt_toolkit.formatted_text import ANSI, HTML, FormattedText
     from prompt_toolkit.filters import Condition
@@ -127,6 +131,9 @@ except ImportError:
 
     def secure_prompt(message: str, *, is_password: bool = False) -> str:
         return getpass.getpass(message) if is_password else input(message)
+
+    def run_in_terminal(function):
+        return function()
 
 
 from . import auth
@@ -855,7 +862,10 @@ class InteractiveApp:
         @bindings.add("c-t")
         def transcript(event) -> None:
             self.transcript_expanded = not self.transcript_expanded
-            event.app.run_in_terminal(self._show_activity)
+            # ``run_in_terminal`` is a prompt_toolkit module function.  It
+            # schedules the print above the active composer and repaints the
+            # prompt afterward; Application has no method by this name.
+            run_in_terminal(self._show_activity)
             event.app.invalidate()
 
         @bindings.add("tab", filter=Condition(lambda: self._turn_active))
@@ -948,6 +958,11 @@ class InteractiveApp:
         self._remember_defaults(announce=False)
 
     def _toolbar(self):
+        # During a turn the live prompt owns the anchored status line.  Leaving
+        # the normal three-line toolbar below it makes the composer move as
+        # streamed output arrives and means typed text is not the bottom row.
+        if self._turn_active:
+            return HTML("")
         images = f" · {len(self.attachments)} image" if self.attachments else ""
         cwd = Path(self.agent.cwd).name or str(self.agent.cwd)
         autonomy = self._autonomy_label()
@@ -994,6 +1009,16 @@ class InteractiveApp:
             f" · R{_format_count(usage.reasoning_tokens)}{cache}"
             f" · {html.escape(cost)} · {usage.requests} req\n"
             f" {active_hint} · Shift+↑/↓ reasoning · F2 model · F4 verbosity "
+        )
+
+    def _live_prompt(self):
+        """Keep live-turn controls above an input row anchored at the bottom."""
+        queued = len(self.pending_prompts)
+        queue = f" · {queued} queued" if queued else ""
+        return HTML(
+            "<ansicyan>↪</ansicyan> <ansigray>steer · Enter send · Tab queue"
+            f" · Ctrl+T details{queue}</ansigray>\n"
+            "<ansicyan>›</ansicyan> "
         )
 
     def run(self) -> int:
@@ -1100,11 +1125,7 @@ class InteractiveApp:
                 while not worker.done():
                     self.queue_submission = False
                     prompt = asyncio.create_task(
-                        self.session.prompt_async(
-                            HTML(
-                                "<ansicyan>↪</ansicyan> steer <ansigray>(Enter send · Tab queue · Ctrl+T details)</ansigray> "
-                            )
-                        )
+                        self.session.prompt_async(self._live_prompt)
                     )
                     done, _ = await asyncio.wait(
                         {worker, prompt}, return_when=asyncio.FIRST_COMPLETED

@@ -220,7 +220,11 @@ MODEL_PRESETS = {
         "gpt-5.3-codex",
         *AUTO_MODEL_IDS,
     ),
-    "deepseek": ("deepseek-v4-flash", "deepseek-v4-pro"),
+    "deepseek": (
+        "deepseek-v4-flash",
+        "deepseek-v4-pro",
+        "deepseek-v4-flash-vision-exp",
+    ),
     "openpaths": (
         "auto",
         "grok-4.5",
@@ -230,7 +234,9 @@ MODEL_PRESETS = {
         *AUTO_MODEL_IDS,
     ),
     "openrouter": (
-        "stealth/ox-alpha",
+        "z-ai/glm-5.3-flash",
+        "z-ai/glm-5.3",
+        "deepseek/deepseek-v4-flash-vision-exp",
         "auto",
         "x-ai/grok-4.5",
         "openrouter/auto",
@@ -466,13 +472,20 @@ _MODEL_DESCRIPTIONS = {
     "gpt-5.6-terra": "balanced OpenAI coding",
     "gpt-5.6-luna": "fast, lower-cost OpenAI coding",
     "gpt-5.3-codex": "previous-generation Codex",
+    "deepseek-v4-flash": "DeepSeek V4 Flash",
+    "deepseek-v4-pro": "DeepSeek V4 Pro",
+    "deepseek-v4-flash-vision-exp": "experimental vision-enabled DeepSeek V4 Flash",
+    "deepseek/deepseek-v4-flash-vision-exp": (
+        "experimental vision-enabled DeepSeek V4 Flash via OpenRouter"
+    ),
+    "z-ai/glm-5.3-flash": "GLM 5.3 Flash via OpenRouter",
+    "z-ai/glm-5.3": "GLM 5.3 via OpenRouter",
     "grok-4.5": "Grok coding through OpenPaths",
     "x-ai/grok-4.5": "Grok coding through OpenRouter",
     "openpaths/auto": "OpenPaths automatic routing",
     "openpaths/auto-code": "OpenPaths coding router",
     "openpaths/auto-hard": "OpenPaths hard-task router",
     "openrouter/auto": "OpenRouter automatic routing",
-    "stealth/ox-alpha": "ox-alpha coding via OpenRouter",
 }
 
 

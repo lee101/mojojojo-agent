@@ -19,7 +19,7 @@ the provider onto that backend.
 ```toml
 [agent]
 provider = "openrouter"
-model = "stealth/ox-alpha"
+model = "z-ai/glm-5.3-flash"
 effort = "high"
 routing = "floor" # floor, cheap, config, fast, or auto — see models-and-cache.md
 verbosity = "low"
@@ -112,14 +112,17 @@ Loop and goal modes never change this policy.
 Providers are `auto`, `deepseek`, `openpaths`, `openrouter`, `openai`, and `custom`.
 DeepSeek uses its OpenAI-compatible API with `DEEPSEEK_API_KEY` (or
 `MJJ_DEEPSEEK_API_KEY`) and defaults to `deepseek-v4-flash`; select
-`deepseek-v4-pro` for capability-first work.
+`deepseek-v4-pro` for capability-first work or
+`deepseek-v4-flash-vision-exp` for the experimental vision-enabled variant.
 `custom` reads `MJJ_BASE_URL`, `MJJ_API_KEY`, `MJJ_API_STYLE` (`responses` or
 `chat_completions`), and an optional `MJJ_DEFAULT_MODEL`.
 
 Model IDs remain open-ended. Stable coding intents include `auto-code`,
 `auto-fast`, `auto-cheap`, `auto-best`, and provider-constrained
 `auto-openai*` aliases. The built-in picker also includes `grok-4.5` for
-OpenPaths, `x-ai/grok-4.5` for OpenRouter, and current Codex choices for OpenAI.
+OpenPaths; `z-ai/glm-5.3-flash`, `z-ai/glm-5.3`,
+`deepseek/deepseek-v4-flash-vision-exp`, and `x-ai/grok-4.5` for OpenRouter;
+and current Codex choices for OpenAI.
 Concrete Codex and Grok IDs receive one short request-time prompt hint; unknown
 and auto-routed IDs receive no extra prompt text. See [models and prompt
 caching](models-and-cache.md) for the current route map and cache policy.

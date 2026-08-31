@@ -222,7 +222,7 @@ def test_saved_provider_key_is_private_and_resolvable(tmp_path, monkeypatch):
     assert credential.token == "sk-secret"
     assert (credential.provider, credential.default_model) == (
         "openrouter",
-        "stealth/ox-alpha",
+        "z-ai/glm-5.3-flash",
     )
     assert "sk-secret" not in json.dumps(auth.describe())
     assert auth.remove_provider_key("openrouter") is True

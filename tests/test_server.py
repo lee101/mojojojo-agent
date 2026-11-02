@@ -511,6 +511,11 @@ def test_trusted_proxy_identity_runs_and_settles_without_shared_database(
             "Authorization": "Bearer internal-secret",
             "X-Mojojojo-User": "user_abcdefgh",
         }
+        status, _, body = request(
+            env, "POST", "/v1/agent/runs", {"prompt": "hello"}, headers
+        )
+        assert status == 402
+        headers["X-Mojojojo-Budget-Tokens"] = "100000"
         status, response_headers, body = request(
             env, "POST", "/v1/agent/runs", {"prompt": "hello"}, headers
         )
@@ -531,3 +536,59 @@ def test_health_is_available_on_both_conventional_paths(server_env):
         status, _, body = request(server_env, "GET", path)
         assert status == 200
         assert json.loads(body)["service"] == "mojojojo-agent"
+
+
+def test_run_stops_once_its_reserved_budget_is_spent(tmp_path, monkeypatch):
+    calls = []
+
+    class Billing:
+        def charge(self, user, model, tokens, run_id):
+            return RemoteCharge({"tokens": tokens})
+
+    def looping_stream(self, input_items, instructions, tools=None):
+        calls.append(1)
+        self.usage.add({"input_tokens": 80, "output_tokens": 20})
+        yield Event(
+            type="response.output_item.done",
+            data={
+                "item": {
+                    "type": "function_call",
+                    "call_id": f"call-{len(calls)}",
+                    "name": "read",
+                    "arguments": json.dumps({"path": "missing.txt"}),
+                }
+            },
+        )
+
+    monkeypatch.setattr(ModelClient, "stream", looping_stream)
+    config = ServerConfig(
+        host="127.0.0.1",
+        port=0,
+        workspace_root=tmp_path / "workspaces",
+        service_token="internal-secret",
+    )
+    service = AgentService(config, billing=Billing())
+    server = AgentHTTPServer(("127.0.0.1", 0), service)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    env = {"port": server.server_address[1]}
+    try:
+        status, _, body = request(
+            env,
+            "POST",
+            "/v1/agent/runs",
+            {"prompt": "loop"},
+            {
+                "Authorization": "Bearer internal-secret",
+                "X-Mojojojo-User": "user_abcdefgh",
+                "X-Mojojojo-Budget-Tokens": "250",
+            },
+        )
+        assert status == 200
+        events = sse_events(body)
+        assert any("budget exhausted" in str(data) for _, data in events)
+        assert len(calls) <= 3
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)

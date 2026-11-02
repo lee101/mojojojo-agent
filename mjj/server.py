@@ -178,9 +178,19 @@ class InterruptibleModelClient(ModelClient):
     the next model event.  Closing the response also wakes a blocked SSE read.
     """
 
-    def __init__(self, *args, cancel: threading.Event, **kwargs):
+    def __init__(self, *args, cancel: threading.Event, budget: int | None = None, **kwargs):
         super().__init__(*args, **kwargs)
         self.cancel = cancel
+        self.budget = budget
+
+    def exhausted(self) -> bool:
+        used = self.usage.input_tokens + self.usage.output_tokens
+        return self.budget is not None and used >= self.budget
+
+    def stream(self, *args, **kwargs) -> Iterator:
+        if self.exhausted():
+            raise ModelError("credit budget exhausted; top up to continue")
+        yield from super().stream(*args, **kwargs)
 
     def _stream_once(self, credential, body) -> Iterator:
         if self.cancel.is_set():
@@ -416,6 +426,7 @@ class RunState:
         default_factory=lambda: queue.Queue(maxsize=32)
     )
     status: str = "running"
+    budget_tokens: int | None = None
 
     def __post_init__(self) -> None:
         self.events = queue.Queue(maxsize=self.queue_size)
@@ -500,6 +511,7 @@ class RunManager:
                 session=session,
                 items=items,
                 queue_size=self.service.config.stream_queue_size,
+                budget_tokens=payload.get("budget_tokens"),
             )
         except Exception:
             if session is not None:
@@ -621,6 +633,7 @@ class AgentService:
             raise RequestError(400, "invalid session")
         if user is not None and user.credits < 1:
             raise RequestError(402, "out of credits")
+        budget = self.budget_for(handler, user)
 
         workspace = self.workspace_for(user_key)
         cwd = self.resolve_cwd(workspace, cwd_value)
@@ -628,6 +641,7 @@ class AgentService:
             "prompt": prompt,
             "model": model,
             "effort": effort,
+            "budget_tokens": budget,
         }
         return self.runs.create(
             user_key,
@@ -638,6 +652,19 @@ class AgentService:
                 workspace, session_id, cwd, user_key
             ),
         )
+
+    def budget_for(self, handler: BaseHTTPRequestHandler, user: User | None) -> int | None:
+        # The control plane reserves the caller's balance, in tokens, for this
+        # run. No reservation means no run: an old or misconfigured proxy must
+        # not be able to start unmetered work.
+        if self.config.service_token:
+            raw = (handler.headers.get("X-Mojojojo-Budget-Tokens") or "").strip()
+            if not raw.isdigit() or int(raw) <= 0:
+                raise RequestError(402, "out of credits")
+            return int(raw)
+        if user is None:
+            return None
+        return int(user.credits * self.config.tokens_per_credit)
 
     def workspace_for(self, user_key: str) -> Path:
         root = self.config.workspace_root.resolve()
@@ -705,6 +732,7 @@ class AgentService:
             model=state.model,
             effort=state.effort,
             cancel=state.cancel,
+            budget=state.budget_tokens,
             cache_optimizer=self.cache_optimizer,
         )
         agent = Agent(
@@ -731,6 +759,10 @@ class AgentService:
                     failed = failed or step.kind == "error"
                     if not state.emit(step):
                         state.status = "interrupted"
+                        break
+                    if client.exhausted():
+                        failed = True
+                        state.emit(Step(kind="error", text="credit budget exhausted; top up to continue"))
                         break
             finally:
                 close = getattr(steps, "close", None)

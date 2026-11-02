@@ -253,6 +253,12 @@ class _WorkspaceTool:
         self.name = tool.name
         self.description = tool.description
         self.parameters = tool.parameters
+        self.requires_approval = getattr(tool, "requires_approval", False) is not False
+
+    def __getattr__(self, attr: str):
+        if attr.startswith("__") or attr == "_tool":
+            raise AttributeError(attr)
+        return getattr(self._tool, attr)
 
     def run(self, args: dict, ctx: ToolContext) -> ToolResult:
         error = self._validate(args, ctx)
@@ -373,12 +379,17 @@ class _WorkspaceTool:
             return False
 
 
+_HOSTED_DISABLED_TOOLS = ("delegate",)
+
+
 def _server_registry(workspace: Path) -> Registry:
     # Hosted users may load skills from their own workspace, never from the
     # service account's ~/.codex or ~/.claude directories.
-    source = build_registry(include_user_skills=False)
+    source = build_registry(include_user_skills=False, disabled=_HOSTED_DISABLED_TOOLS)
     registry = Registry()
     for tool in source.tools.values():
+        if tool.name in _HOSTED_DISABLED_TOOLS:
+            continue
         registry.add(_WorkspaceTool(tool, workspace))
     return registry
 
@@ -706,6 +717,7 @@ class AgentService:
             include_user_instructions=False,
             post_edit="off",
         )
+        agent.ctx.state["hosted"] = True
         agent.items = state.items
         agent.steering = state.steering
         failed = False
@@ -1032,6 +1044,7 @@ def _short_hash(value: str) -> str:
 
 
 def serve(config: ServerConfig | None = None) -> None:
+    os.environ["MJJ_HOSTED"] = "1"
     config = config or ServerConfig.from_env()
     service = AgentService(config)
     server = AgentHTTPServer((config.host, config.port), service)

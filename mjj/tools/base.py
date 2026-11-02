@@ -75,6 +75,14 @@ class Tool(Protocol):
     def run(self, args: dict, ctx: ToolContext) -> ToolResult: ...
 
 
+def _needs_approval(tool: Any) -> bool:
+    """Fail closed: an unreadable or non-boolean flag requires approval."""
+    try:
+        return getattr(tool, "requires_approval", False) is not False
+    except Exception:
+        return True
+
+
 @dataclass
 class Registry:
     tools: dict[str, Tool] = field(default_factory=dict)
@@ -114,7 +122,7 @@ class Registry:
             return ToolResult.error(
                 ctx.ledger.clip(name, "arguments must be a JSON object")
             )
-        if getattr(tool, "requires_approval", False) and ctx.approve is not None:
+        if ctx.approve is not None and _needs_approval(tool):
             try:
                 approved = ctx.approve(name, args)
             except Exception as exc:

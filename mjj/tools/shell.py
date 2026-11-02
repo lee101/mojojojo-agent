@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import threading
 import time
@@ -337,6 +338,21 @@ class ShellTool:
         )
 
 
+_SECRET_ENV = re.compile(
+    r"(?i)(^|_)(api_?keys?|tokens?|secrets?|passwords?|passwd|credentials?|auth|"
+    r"private_?key|cookie)(_|$)"
+    r"|^(MJJ_SERVICE_TOKEN|MJJ_AGENT_TOKEN|SSH_AUTH_SOCK|DATABASE_URL|PGPASSWORD)$"
+    r"|^(OPENAI|ANTHROPIC|OPENROUTER|DEEPSEEK|GEMINI|GOOGLE|AWS|AZURE|GITHUB|GH|HF|"
+    r"HUGGINGFACE|STRIPE|CODEX|CLOUDFLARE|CF)_"
+    r"|^MJJ_.*(KEY|TOKEN|SECRET|PASSWORD)"
+)
+
+
+def _scrubbed_env() -> dict[str, str]:
+    return {k: v for k, v in os.environ.items() if not _SECRET_ENV.search(k)}
+
+
+
 def _execute(
     argv: str | list[str],
     *,
@@ -356,7 +372,7 @@ def _execute(
             text=True,
             errors="replace",
             timeout=timeout,
-            env=os.environ.copy(),
+            env=_scrubbed_env(),
         )
     except subprocess.TimeoutExpired as exc:
         elapsed = time.monotonic() - started
@@ -444,7 +460,7 @@ def _execute_job(
             stderr=subprocess.STDOUT,
             text=True,
             errors="replace",
-            env=os.environ.copy(),
+            env=_scrubbed_env(),
         )
         job.process = process
         if job.stopped and process.poll() is None:

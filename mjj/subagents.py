@@ -18,6 +18,7 @@ from .model import ModelClient, Usage
 from .permissions import PermissionPolicy
 from .session import Session
 from .tools import build_registry
+from .tools.base import Registry
 
 
 MAX_TASKS = 4
@@ -76,6 +77,8 @@ class SubagentRunner:
         max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
         tool_budget: int = 1_200,
         agent_factory: Callable[..., Agent] = Agent,
+        hosted: bool | None = None,
+        registry_factory: Callable[[Path], Registry] | None = None,
     ) -> None:
         if not 1 <= max_steps <= 200:
             raise ValueError("subagent max_steps must be between 1 and 200")
@@ -90,6 +93,10 @@ class SubagentRunner:
         self.max_output_tokens = max_output_tokens
         self.tool_budget = tool_budget
         self.agent_factory = agent_factory
+        self.hosted = (
+            os.environ.get("MJJ_HOSTED", "") == "1" if hosted is None else hosted
+        )
+        self.registry_factory = registry_factory
 
     def run(self, tasks: Iterable[SubagentTask], cwd: Path) -> list[SubagentResult]:
         ordered = list(tasks)
@@ -150,8 +157,17 @@ class SubagentRunner:
         try:
             workspace = _Worktree.create(cwd, identifier)
             child_client = self._client(identifier)
-            registry = build_registry(disabled=("delegate",))
-            policy = PermissionPolicy("read-only" if task.role == "reviewer" else "auto")
+            if self.hosted:
+                if self.registry_factory is None:
+                    raise RuntimeError("hosted subagents require a jailed registry")
+                registry = self.registry_factory(workspace.cwd)
+                registry.tools.pop("delegate", None)
+                policy = PermissionPolicy("read-only")
+            else:
+                registry = build_registry(disabled=("delegate",))
+                policy = PermissionPolicy(
+                    "read-only" if task.role == "reviewer" else "auto"
+                )
             child = self.agent_factory(
                 registry=registry,
                 client=child_client,

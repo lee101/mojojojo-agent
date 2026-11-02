@@ -43,6 +43,8 @@ class DelegateTool:
         except ValueError as exc:
             return self._result(ctx, str(exc), ok=False)
         runner = ctx.state.get("subagent-runner")
+        if runner is None and ctx.state.get("hosted"):
+            return self._result(ctx, "delegate is unavailable on the hosted agent", ok=False)
         if runner is None:
             client = ctx.state.get("model-client")
             if not isinstance(client, ModelClient):

@@ -244,6 +244,7 @@ MODEL_PRESETS = {
         "z-ai/glm-5.3-flash",
         "z-ai/glm-5.3",
         "deepseek/deepseek-v4-flash-vision-exp",
+        "secret/ox-alpha",
         "auto",
         "x-ai/grok-4.5",
         "openrouter/auto",

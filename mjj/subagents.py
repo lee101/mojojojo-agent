@@ -147,6 +147,10 @@ class SubagentRunner:
                 "task": task.prompt[:500],
             }
         )
+        # Reviewers are strictly read-only, so cloning the checkout into a
+        # detached worktree only adds process and filesystem latency. Workers
+        # still receive an isolated worktree because they may edit and return
+        # a commit.
         workspace: _Worktree | None = None
         result = SubagentResult(
             identifier=identifier,
@@ -155,7 +159,8 @@ class SubagentRunner:
             session_id=session.id,
         )
         try:
-            workspace = _Worktree.create(cwd, identifier)
+            if task.role == "worker":
+                workspace = _Worktree.create(cwd, identifier)
             child_client = self._client(identifier)
             if self.hosted:
                 if self.registry_factory is None:
@@ -171,7 +176,7 @@ class SubagentRunner:
             child = self.agent_factory(
                 registry=registry,
                 client=child_client,
-                cwd=workspace.cwd,
+                cwd=workspace.cwd if workspace is not None else cwd,
                 ledger=Ledger(Budget(default=self.tool_budget)),
                 session=session,
                 max_steps=self.max_steps,
@@ -185,7 +190,7 @@ class SubagentRunner:
             result.error = "\n".join(errors)
             result.usage = child_client.usage
             result.ok = not errors
-            if task.role == "worker" and result.ok:
+            if task.role == "worker" and result.ok and workspace is not None:
                 result.commit, result.ref = workspace.capture(task.prompt)
         except Exception as exc:
             result.error = f"{type(exc).__name__}: {exc}"

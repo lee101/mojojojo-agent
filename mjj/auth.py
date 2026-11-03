@@ -126,7 +126,7 @@ PROVIDER_DEFAULTS = {
     "deepseek": (DEEPSEEK_BASE_URL, "chat_completions", "deepseek-v4-flash"),
     "openai": (API_BASE_URL, "responses", "gpt-5.6-sol"),
     "openpaths": (OPENPATHS_BASE_URL, "chat_completions", "openpaths/auto-code"),
-    "openrouter": (OPENROUTER_BASE_URL, "chat_completions", "z-ai/glm-5.3-flash"),
+    "openrouter": (OPENROUTER_BASE_URL, "chat_completions", "deepseek/deepseek-v4.1-flash"),
 }
 
 

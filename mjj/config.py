@@ -57,7 +57,7 @@ class ConfigError(ValueError):
 @dataclass(frozen=True)
 class Config:
     provider: str = "openrouter"
-    model: str = "z-ai/glm-5.3-flash"
+    model: str = "deepseek/deepseek-v4.1-flash"
     effort: str = "high"
     routing: str = DEFAULT_ROUTING
     verbosity: str = "low"

@@ -430,9 +430,9 @@ def test_auto_model_picker_prioritizes_stable_task_aliases() -> None:
 def test_provider_model_pickers_include_current_deepseek_and_glm_models() -> None:
     assert "deepseek-v4-flash-vision-exp" in _model_choices("deepseek")
     assert _model_choices("openrouter")[:3] == (
+        "deepseek/deepseek-v4.1-flash",
         "z-ai/glm-5.3-flash",
         "z-ai/glm-5.3",
-        "deepseek/deepseek-v4-flash-vision-exp",
     )
     assert "z-ai/glm-5.3-flash" in _model_choices("auto")
 

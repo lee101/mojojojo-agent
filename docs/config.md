@@ -19,7 +19,7 @@ the provider onto that backend.
 ```toml
 [agent]
 provider = "openrouter"
-model = "z-ai/glm-5.3-flash"
+model = "deepseek/deepseek-v4.1-flash"
 effort = "high"
 routing = "floor" # floor, cheap, config, fast, or auto — see models-and-cache.md
 verbosity = "low"
@@ -120,7 +120,7 @@ DeepSeek uses its OpenAI-compatible API with `DEEPSEEK_API_KEY` (or
 Model IDs remain open-ended. Stable coding intents include `auto-code`,
 `auto-fast`, `auto-cheap`, `auto-best`, and provider-constrained
 `auto-openai*` aliases. The built-in picker also includes `grok-4.5` for
-OpenPaths; `z-ai/glm-5.3-flash`, `z-ai/glm-5.3`,
+OpenPaths; `deepseek/deepseek-v4.1-flash`, `z-ai/glm-5.3-flash`, `z-ai/glm-5.3`,
 `deepseek/deepseek-v4-flash-vision-exp`, and `x-ai/grok-4.5` for OpenRouter;
 and current Codex choices for OpenAI.
 Concrete Codex and Grok IDs receive one short request-time prompt hint; unknown

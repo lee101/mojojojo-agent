@@ -241,6 +241,7 @@ MODEL_PRESETS = {
         *AUTO_MODEL_IDS,
     ),
     "openrouter": (
+        "deepseek/deepseek-v4.1-flash",
         "z-ai/glm-5.3-flash",
         "z-ai/glm-5.3",
         "deepseek/deepseek-v4-flash-vision-exp",
@@ -486,6 +487,7 @@ _MODEL_DESCRIPTIONS = {
     "deepseek/deepseek-v4-flash-vision-exp": (
         "experimental vision-enabled DeepSeek V4 Flash via OpenRouter"
     ),
+    "deepseek/deepseek-v4.1-flash": "DeepSeek V4.1 Flash via OpenRouter",
     "z-ai/glm-5.3-flash": "GLM 5.3 Flash via OpenRouter",
     "z-ai/glm-5.3": "GLM 5.3 via OpenRouter",
     "grok-4.5": "Grok coding through OpenPaths",

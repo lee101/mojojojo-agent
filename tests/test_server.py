@@ -247,6 +247,16 @@ def test_hosted_registry_blocks_absolute_tool_access(server_env, monkeypatch):
     )
     assert not read.ok and "workspace" in read.output
     assert not shell.ok and "workspace" in shell.output
+    for command in (
+        ["file", "-f/etc/passwd"],
+        ["grep", "-rf/etc/passwd", "."],
+        ["git", "log", "-O/etc/passwd"],
+        ["file", "-f~/.ssh/id_rsa"],
+    ):
+        attached = registry.dispatch(
+            "shell", json.dumps({"command": command}), context
+        )
+        assert not attached.ok and "workspace" in attached.output
 
     def unavailable(code, timeout):
         raise local.BackendUnavailable("test jail missing")

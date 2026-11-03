@@ -358,6 +358,12 @@ class _WorkspaceTool:
                 return "command paths must stay inside the user workspace"
             if value.startswith("/") and not self._inside(ctx, value):
                 return "command paths must stay inside the user workspace"
+            if value.startswith("-") and (
+                "~" in value
+                or "\\" in value
+                or ("/" in value and not self._inside(ctx, value[value.index("/"):]))
+            ):
+                return "command paths must stay inside the user workspace"
             candidate = (ctx.cwd / value).resolve() if value and not value.startswith("-") else None
             if candidate is not None and candidate.exists():
                 try:
